@@ -84,7 +84,7 @@ If brickslot exits on its own three times in a row within a minute of starting, 
 powers the device off instead of looping. Check `slot.log` and `slot-session.log` on the card.
 
 If you have one of the untested devices, or have tried brickslot on a device not listed,
-please [open an issue on GitHub](https://github.com/davidtpb/Project/issues) and say how it went.
+please [open an issue on GitHub](https://github.com/davidtpb/brickslot/issues) and say how it went.
 
 ---
 

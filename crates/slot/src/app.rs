@@ -1511,7 +1511,7 @@ impl App {
                 Action::GbaDown(Btn::R1) => self.switch_shelf(1),
                 Action::GbaDown(Btn::Y) => self.open_search(),
                 Action::GbaDown(Btn::X) => self.open_customize(),
-                Action::GbaDown(Btn::Home) => self.open_home(),
+                Action::GbaDown(Btn::Home) | Action::HomePanel => self.open_home(),
                 _ => {}
             },
             Phase::Search => self.search_input(action),
@@ -1529,7 +1529,7 @@ impl App {
                 Action::SaveState => self.save_state(),
                 Action::LoadState => self.load_newest(),
                 Action::Screenshot => self.screenshot(),
-                Action::GbaDown(Btn::Home) => self.open_home(),
+                Action::GbaDown(Btn::Home) | Action::HomePanel => self.open_home(),
                 Action::RewindStart if !self.may_rewind() => self.refuse(),
                 Action::FfStart if !self.may_fast_forward() => self.refuse(),
                 _ => {}
@@ -2039,7 +2039,9 @@ impl App {
                 slot_ui::HomeFocus::Volume => self.mute_toggle(),
                 slot_ui::HomeFocus::Brightness => {}
             },
-            Action::GbaDown(Btn::B) | Action::GbaDown(Btn::Home) => return self.close_home(),
+            Action::GbaDown(Btn::B) | Action::GbaDown(Btn::Home) | Action::HomePanel => {
+                return self.close_home()
+            }
             Action::QuickMenu if self.on_shelf() => {
                 self.close_home();
                 return self.open_quick_menu();

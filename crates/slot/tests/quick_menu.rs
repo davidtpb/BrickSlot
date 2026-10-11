@@ -246,12 +246,12 @@ fn screen_opens_a_page_of_its_own_and_b_comes_back_to_it() {
     assert_eq!(a.quick_menu(), Some(QuickRow::Brightness));
     for want in [
         QuickRow::Warmth,
+        QuickRow::Look,
+        QuickRow::ClockFormat,
         QuickRow::GbaShader,
         QuickRow::GbShader,
         QuickRow::ColourCorrection,
         QuickRow::GbPalettes,
-        QuickRow::Look,
-        QuickRow::ClockFormat,
         QuickRow::Brightness,
     ] {
         press(&mut a, Btn::Down);

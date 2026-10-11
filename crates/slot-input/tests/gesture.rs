@@ -547,3 +547,18 @@ fn menu_held_with_volume_steps_brightness_and_neither_ejects_nor_opens_the_menu(
     assert!(g.feed(Up(Menu), MENU_HOLD_MS + 600).is_empty());
     assert_eq!(g.feed(Down(VolUp), MENU_HOLD_MS + 700), vec![VolumeUp]);
 }
+
+#[test]
+fn menu_and_y_raise_the_home_panel_and_keep_y_and_menu_to_themselves() {
+    let mut g = Gestures::new();
+    assert!(g.feed(Down(Menu), 0).is_empty());
+    assert_eq!(g.feed(Down(Y), 80), vec![HomePanel]);
+    assert!(
+        g.feed(Up(Y), 150).is_empty(),
+        "Y's release reached the game"
+    );
+    assert!(
+        g.feed(Up(Menu), 200).is_empty(),
+        "the menu's release also opened the quick menu"
+    );
+}

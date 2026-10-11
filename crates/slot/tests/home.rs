@@ -155,3 +155,13 @@ fn home_in_a_game_opens_the_panel_over_it() {
     assert!(!a.home_open());
     assert!(matches!(a.phase(), Phase::Playing { .. }));
 }
+
+#[test]
+fn menu_and_y_open_the_panel_where_there_is_no_home_button() {
+    let (_d, mut a) = shelf_of(&["Fusion", "Mother 3"]);
+    a.apply(Action::HomePanel);
+    assert!(a.home_open());
+    assert!(matches!(a.phase(), Phase::Shelf), "Y's search opened too");
+    a.apply(Action::HomePanel);
+    assert!(!a.home_open());
+}

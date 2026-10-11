@@ -104,7 +104,7 @@ These live in the quick menu (tap MENU on the shelf).
 - **Customize** (**X** on the shelf): pick the selected game's cart material (Default, Opaque, Clear, Glitter) and colour from a grid, seen on the cart as you go. B closes and keeps it in `Config/cart_shell.txt`.
 - **Clock** (Settings > Screen > Clock): 24-hour or 12-hour time with AM/PM.
 - **Socket style** (Settings > Screen > Style): a light, dotted carousel after the Socket frontend, with the selected cart swaying in 3D between greyed neighbours, the game's name on a pill and the controls along the bottom. Set in Inter (SIL Open Font License, `crates/slot-ui/assets/Inter-SemiBold.ttf.OFL.txt`).
-- **Home panel** (**Home** on the Brick Pro, on the shelf or in a game): quick toggles for screenshot, sound, rumble, Wi-Fi, lights and power, brightness and volume sliders, and live temperature, CPU clock, memory and battery. The game pauses while it is up; **B** or **Home** resumes, **MENU** on the shelf opens settings.
+- **Home panel** (**Home** on the Brick Pro, **MENU+Y** on devices without a Home button, on the shelf or in a game): quick toggles for screenshot, sound, rumble, Wi-Fi, lights and power, brightness and volume sliders, and live temperature, CPU clock, memory and battery. The game pauses while it is up; **B** or **Home** resumes, **MENU** on the shelf opens settings.
 - **Search Games** (or **Y** on the shelf): type part of a name on the on-screen keyboard
   (D-pad to move, A to type, B to delete). Matching games from every shelf are listed as
   you type, ignoring accents and capitals. L/R picks one and START takes you to its cart.

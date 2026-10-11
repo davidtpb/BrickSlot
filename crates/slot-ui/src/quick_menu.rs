@@ -91,12 +91,12 @@ impl QuickRow {
     pub const SCREEN: [QuickRow; 8] = [
         QuickRow::Brightness,
         QuickRow::Warmth,
+        QuickRow::Look,
+        QuickRow::ClockFormat,
         QuickRow::GbaShader,
         QuickRow::GbShader,
         QuickRow::ColourCorrection,
         QuickRow::GbPalettes,
-        QuickRow::Look,
-        QuickRow::ClockFormat,
     ];
 
     pub const GAME: [QuickRow; 8] = [

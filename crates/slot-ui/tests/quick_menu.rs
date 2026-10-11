@@ -94,12 +94,12 @@ fn the_rows_run_in_the_order_the_user_chose() {
         [
             "Brightness",
             "Warmth",
+            "Style",
+            "Clock",
             "GBA Shader",
             "GB / GBC Shader",
             "Color Correction",
-            "GB Palettes",
-            "Style",
-            "Clock"
+            "GB Palettes"
         ]
     );
     assert_eq!(

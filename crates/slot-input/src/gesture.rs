@@ -43,6 +43,8 @@ pub enum Action {
     ShaderNext,
     ShaderPrev,
     Screenshot,
+    /// MENU+Y: the Home panel, for devices with no Home button.
+    HomePanel,
     PowerPress,
     PowerTap,
     PowerHold,
@@ -72,6 +74,7 @@ pub struct Gestures {
     menu_eject_fired: bool,
     menu_held: bool,
     menu_swallow_a: bool,
+    menu_swallow_y: bool,
     power_down_at: Option<Millis>,
     power_hold_fired: bool,
     vol_up_at: Option<Millis>,
@@ -175,6 +178,12 @@ impl Gestures {
             self.menu_swallow_a = true;
             return vec![Action::Screenshot];
         }
+        if b == Btn::Y && self.menu_held {
+            self.menu_down_at = None;
+            self.menu_last_tap = None;
+            self.menu_swallow_y = true;
+            return vec![Action::HomePanel];
+        }
         match b {
             Btn::Select => self.select_down(now),
             Btn::Menu => self.menu_down(now),
@@ -203,6 +212,9 @@ impl Gestures {
             }
         }
         if b == Btn::A && std::mem::take(&mut self.menu_swallow_a) {
+            return Vec::new();
+        }
+        if b == Btn::Y && std::mem::take(&mut self.menu_swallow_y) {
             return Vec::new();
         }
         match b {

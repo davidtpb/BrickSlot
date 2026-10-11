@@ -2324,6 +2324,9 @@ impl App {
     }
 
     pub fn led_state(&self) -> LedState {
+        if matches!(self.phase, Phase::Doze { .. }) {
+            return LedState::Off;
+        }
         let Some(b) = self.battery else {
             return LedState::Running;
         };
@@ -3079,6 +3082,7 @@ impl App {
         eprintln!("slot: doze at {:.1} ms", crate::boot_time::ms());
         self.phase = Phase::Doze { cart };
         self.dozed_at = self.now();
+        self.set_led(LedState::Off);
         self.radio.ask(RadioJob::Cool);
         if let Some(power) = &mut self.power {
             power.on_close();
@@ -3094,6 +3098,8 @@ impl App {
             Some(cart) => Phase::Playing { cart },
             None => Phase::Shelf,
         };
+        let lit = self.led_state();
+        self.set_led(lit);
         if let Some(power) = &mut self.power {
             power.on_open();
         }

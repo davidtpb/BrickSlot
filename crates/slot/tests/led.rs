@@ -183,3 +183,27 @@ fn the_fast_tick_does_not_relight_the_case_through_a_shutdown() {
         "the fast tick re-lit the case light on a device that is shutting down"
     );
 }
+
+#[test]
+fn the_lights_go_out_while_asleep_and_come_back_on_waking() {
+    let d = tmp_root_with_carts(&["Emerald"]);
+    let (mut a, charge, percent, led, _writes) = app_playing_with_led(d.path(), "Emerald");
+    charge.store(1, Ordering::Relaxed);
+    percent.store(50, Ordering::Relaxed);
+    a.tick_ms(5_000);
+    assert_eq!(led.load(Ordering::Relaxed), led_code(LedState::Running));
+    a.apply(Action::PowerTap);
+    assert_eq!(
+        led.load(Ordering::Relaxed),
+        led_code(LedState::Off),
+        "lit while asleep"
+    );
+    a.tick_ms(10_000);
+    assert_eq!(
+        led.load(Ordering::Relaxed),
+        led_code(LedState::Off),
+        "the battery poll lit it again while asleep"
+    );
+    a.apply(Action::PowerTap);
+    assert_eq!(led.load(Ordering::Relaxed), led_code(LedState::Running));
+}

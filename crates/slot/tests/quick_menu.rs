@@ -119,6 +119,7 @@ fn up_and_down_move_the_bar_and_wrap_at_the_ends() {
         QuickRow::Screen,
         QuickRow::Game,
         QuickRow::Lights,
+        QuickRow::Network,
         QuickRow::DateTime,
         QuickRow::About,
         QuickRow::Screen,
@@ -670,4 +671,32 @@ fn brightness_and_warmth_rows_step_the_same_levels_as_the_shortcuts() {
     press(&mut a, Btn::Right);
     assert_eq!(a.blue_light(), 1);
     assert_eq!(read_slot_state(d.path()).blue_light, 1);
+}
+
+#[test]
+fn syncthing_brings_wifi_with_it_and_wifi_off_takes_syncthing_down() {
+    use slot::net::NetJob;
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Syncthing);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::On));
+    assert_eq!(a.quick_value(QuickRow::Syncthing), Some(QuickValue::On));
+    press(&mut a, Btn::Up);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::Off));
+    assert_eq!(a.quick_value(QuickRow::Syncthing), Some(QuickValue::Off));
+    assert_eq!(a.net_jobs(), [NetJob::SyncthingStart, NetJob::WifiDown]);
+    let saved = read_slot_state(d.path());
+    assert!(!saved.wifi && !saved.syncthing);
+}
+
+#[test]
+fn syncthing_left_on_starts_again_at_boot() {
+    use slot::net::NetJob;
+    let (_d, a, _) = on_carousel_with(SlotState {
+        wifi: true,
+        syncthing: true,
+        ..SlotState::default()
+    });
+    assert_eq!(a.net_jobs(), [NetJob::SyncthingStart]);
 }

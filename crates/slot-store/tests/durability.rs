@@ -205,6 +205,8 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             light_colour: LightColour::White,
             light_effect: LightEffect::Static,
             light_level: LightLevel::Medium,
+            wifi: false,
+            syncthing: false,
         }
     );
 }
@@ -416,6 +418,8 @@ fn the_light_settings_round_trip() {
         light_colour: LightColour::Purple,
         light_effect: LightEffect::Breathe,
         light_level: LightLevel::High,
+        wifi: true,
+        syncthing: true,
         ..SlotState::default()
     };
     write_slot_state(d.path(), &s).unwrap();

@@ -27,10 +27,13 @@ pub enum QuickRow {
     LightLevel,
     Brightness,
     Warmth,
+    Network,
+    Wifi,
+    Syncthing,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 21] = [
+    pub const ALL: [QuickRow; 24] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -52,12 +55,16 @@ impl QuickRow {
         QuickRow::LightLevel,
         QuickRow::Brightness,
         QuickRow::Warmth,
+        QuickRow::Network,
+        QuickRow::Wifi,
+        QuickRow::Syncthing,
     ];
 
-    pub const MAIN: [QuickRow; 5] = [
+    pub const MAIN: [QuickRow; 6] = [
         QuickRow::Screen,
         QuickRow::Game,
         QuickRow::Lights,
+        QuickRow::Network,
         QuickRow::DateTime,
         QuickRow::About,
     ];
@@ -87,6 +94,8 @@ impl QuickRow {
         QuickRow::LightLevel,
     ];
 
+    pub const NETWORK: [QuickRow; 2] = [QuickRow::Wifi, QuickRow::Syncthing];
+
     pub fn index(self) -> usize {
         self as usize
     }
@@ -103,6 +112,7 @@ impl QuickRow {
             | QuickRow::LightColour
             | QuickRow::LightEffect
             | QuickRow::LightLevel => &QuickRow::LIGHTS,
+            QuickRow::Wifi | QuickRow::Syncthing => &QuickRow::NETWORK,
             QuickRow::FastForward
             | QuickRow::FastForwardSound
             | QuickRow::Rewind
@@ -118,6 +128,7 @@ impl QuickRow {
             QuickRow::Brightness => Some(QuickRow::Screen),
             QuickRow::FastForward => Some(QuickRow::Game),
             QuickRow::LightMode => Some(QuickRow::Lights),
+            QuickRow::Wifi => Some(QuickRow::Network),
             _ => None,
         }
     }
@@ -127,6 +138,7 @@ impl QuickRow {
             QuickRow::Screen => Some(QuickRow::SCREEN[0]),
             QuickRow::Game => Some(QuickRow::GAME[0]),
             QuickRow::Lights => Some(QuickRow::LIGHTS[0]),
+            QuickRow::Network => Some(QuickRow::NETWORK[0]),
             _ => None,
         }
     }
@@ -158,6 +170,9 @@ impl QuickRow {
             QuickRow::LightLevel => "Light Brightness",
             QuickRow::Brightness => "Brightness",
             QuickRow::Warmth => "Warmth",
+            QuickRow::Network => "Network",
+            QuickRow::Wifi => "Wi-Fi",
+            QuickRow::Syncthing => "Syncthing",
         }
     }
 
@@ -169,6 +184,7 @@ impl QuickRow {
                 | QuickRow::Screen
                 | QuickRow::Game
                 | QuickRow::Lights
+                | QuickRow::Network
         )
     }
 

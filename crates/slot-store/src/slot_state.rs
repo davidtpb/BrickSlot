@@ -43,6 +43,8 @@ pub struct SlotState {
     pub light_colour: LightColour,
     pub light_effect: LightEffect,
     pub light_level: LightLevel,
+    pub wifi: bool,
+    pub syncthing: bool,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -119,6 +121,8 @@ impl Default for SlotState {
             light_colour: LightColour::White,
             light_effect: LightEffect::Static,
             light_level: LightLevel::Medium,
+            wifi: false,
+            syncthing: false,
         }
     }
 }
@@ -137,7 +141,7 @@ pub fn read_slot_state(root: &Path) -> SlotState {
 
 pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     let text = format!(
-        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\n",
+        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\n",
         s.cart.as_deref().unwrap_or(""),
         s.cart_platform.map_or(String::new(), platform_key),
         s.brightness,
@@ -162,7 +166,9 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.light_mode.name(),
         s.light_colour.name(),
         s.light_effect.name(),
-        s.light_level.name()
+        s.light_level.name(),
+        s.wifi as u8,
+        s.syncthing as u8
     );
     atomic_write(&state_path(root), text.as_bytes())
 }
@@ -193,6 +199,8 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut light_colour = None;
     let mut light_effect = None;
     let mut light_level = None;
+    let mut wifi = None;
+    let mut syncthing = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let Some((key, value)) = line.split_once('=') else {
             continue;
@@ -222,6 +230,8 @@ fn parse(text: &str) -> Option<SlotState> {
             "light_colour" => light_colour = LightColour::parse(value),
             "light_effect" => light_effect = LightEffect::parse(value),
             "light_level" => light_level = LightLevel::parse(value),
+            "wifi" => wifi = flag(value),
+            "syncthing" => syncthing = flag(value),
             "shader_gb" => shader_gb = Shader::parse(value).filter(|s| Shader::GB.contains(s)),
             _ => {}
         }
@@ -254,6 +264,8 @@ fn parse(text: &str) -> Option<SlotState> {
         light_colour: light_colour.unwrap_or(fallback.light_colour),
         light_effect: light_effect.unwrap_or(fallback.light_effect),
         light_level: light_level.unwrap_or(fallback.light_level),
+        wifi: wifi.unwrap_or(fallback.wifi),
+        syncthing: syncthing.unwrap_or(fallback.syncthing),
     })
 }
 

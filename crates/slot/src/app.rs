@@ -27,6 +27,7 @@ use crate::link_kind::{link_carried, link_kind, serial_option, LinkKind};
 use crate::link_radio::{radio_jobs, LinkRole, RadioJob, RadioJobs};
 use crate::link_screen::LinkSprites;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
+use crate::net::NetJob;
 use crate::persist::{self, Snapshot};
 use crate::video_mode::{self, VideoMode};
 
@@ -300,6 +301,7 @@ pub struct App {
     link_transport: Option<(u16, Box<dyn LinkChannel>)>,
     restarting: bool,
     messages: std::collections::VecDeque<(String, String)>,
+    net: crate::net::Net,
     play_key: Option<String>,
     play_ms: Millis,
     play_tick: Option<Millis>,
@@ -429,6 +431,7 @@ impl App {
             link_transport: None,
             restarting: false,
             messages: std::collections::VecDeque::new(),
+            net: crate::net::Net::idle(),
             play_key: None,
             play_ms: 0,
             play_tick: None,
@@ -495,6 +498,12 @@ impl App {
         let mut app = App::new(carts);
         app.root = Some(root.to_path_buf());
         app.state = read_slot_state(root);
+        app.net = crate::net::Net::spawn(root);
+        if app.state.syncthing {
+            app.net.send(NetJob::SyncthingStart);
+        } else if app.state.wifi {
+            app.net.send(NetJob::WifiUp);
+        }
         if app.state.clock_set {
             app.start();
         } else {
@@ -674,6 +683,8 @@ impl App {
             QuickRow::Rewind => Some(QuickValue::flag(self.state.rewind)),
             QuickRow::Brightness => Some(QuickValue::level(self.state.brightness)),
             QuickRow::Warmth => Some(QuickValue::level(self.state.blue_light)),
+            QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
+            QuickRow::Syncthing => Some(QuickValue::flag(self.state.syncthing)),
             QuickRow::LightMode => Some(match self.state.light_mode {
                 LightMode::Battery => QuickValue::Battery,
                 LightMode::Colour => QuickValue::Colour,
@@ -705,7 +716,8 @@ impl App {
             | QuickRow::About
             | QuickRow::Screen
             | QuickRow::Game
-            | QuickRow::Lights => None,
+            | QuickRow::Lights
+            | QuickRow::Network => None,
         }
     }
 
@@ -1403,7 +1415,7 @@ impl App {
                 self.phase = clock_screen(self.utc_secs(), self.state.utc_offset_min, true);
             }
             QuickRow::About => self.phase = Phase::About,
-            QuickRow::Screen | QuickRow::Game | QuickRow::Lights => {
+            QuickRow::Screen | QuickRow::Game | QuickRow::Lights | QuickRow::Network => {
                 if let Some(row) = row.child() {
                     self.phase = Phase::QuickMenu { row };
                 }
@@ -1423,6 +1435,8 @@ impl App {
             | QuickRow::LightColour
             | QuickRow::LightEffect
             | QuickRow::LightLevel
+            | QuickRow::Wifi
+            | QuickRow::Syncthing
             | QuickRow::Rumble => {}
         }
     }
@@ -1488,11 +1502,30 @@ impl App {
             QuickRow::LightColour => s.light_colour = s.light_colour.step(right),
             QuickRow::LightEffect => s.light_effect = s.light_effect.step(right),
             QuickRow::LightLevel => s.light_level = s.light_level.step(right),
+            QuickRow::Wifi => {
+                s.wifi = !s.wifi;
+                if s.wifi {
+                    self.net.send(NetJob::WifiUp);
+                } else {
+                    s.syncthing = false;
+                    self.net.send(NetJob::WifiDown);
+                }
+            }
+            QuickRow::Syncthing => {
+                s.syncthing = !s.syncthing;
+                if s.syncthing {
+                    s.wifi = true;
+                    self.net.send(NetJob::SyncthingStart);
+                } else {
+                    self.net.send(NetJob::SyncthingStop);
+                }
+            }
             QuickRow::DateTime
             | QuickRow::About
             | QuickRow::Screen
             | QuickRow::Game
-            | QuickRow::Lights => return,
+            | QuickRow::Lights
+            | QuickRow::Network => return,
         }
         if QuickRow::LIGHTS.contains(&row) {
             let lights = self.lights();
@@ -1918,9 +1951,16 @@ impl App {
             });
     }
 
+    pub fn net_jobs(&self) -> &[NetJob] {
+        self.net.sent()
+    }
+
     fn timers(&mut self) {
         self.play_hold();
         self.track_play();
+        while let Some((title, detail)) = self.net.heard() {
+            self.say(title, detail);
+        }
         let offer = self.undo_label();
         if let Some(p) = &mut self.polaroids {
             p.set_undo(offer);

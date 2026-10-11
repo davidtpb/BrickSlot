@@ -79,7 +79,14 @@ fn the_fast_forward_row_offers_the_four_ceilings_the_card_can_hold() {
 fn the_rows_run_in_the_order_the_user_chose() {
     assert_eq!(
         QuickRow::MAIN.map(QuickRow::label),
-        ["Screen", "Gameplay", "Lights", "Date & Time", "About"]
+        [
+            "Screen",
+            "Gameplay",
+            "Lights",
+            "Network",
+            "Date & Time",
+            "About"
+        ]
     );
     assert_eq!(
         QuickRow::SCREEN.map(QuickRow::label),
@@ -111,7 +118,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::DateTime,
             QuickRow::About,
             QuickRow::Game,
-            QuickRow::Lights
+            QuickRow::Lights,
+            QuickRow::Network
         ]
     );
     assert_eq!(
@@ -123,6 +131,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
         &QuickRow::SCREEN[..],
         &QuickRow::GAME[..],
         &QuickRow::LIGHTS[..],
+        &QuickRow::NETWORK[..],
     ] {
         for &row in page {
             assert_eq!(row.page(), page, "{row:?}");

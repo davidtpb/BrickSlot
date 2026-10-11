@@ -207,6 +207,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             light_level: LightLevel::Medium,
             wifi: false,
             syncthing: false,
+            achievements: false,
         }
     );
 }
@@ -420,6 +421,7 @@ fn the_light_settings_round_trip() {
         light_level: LightLevel::High,
         wifi: true,
         syncthing: true,
+        achievements: true,
         ..SlotState::default()
     };
     write_slot_state(d.path(), &s).unwrap();

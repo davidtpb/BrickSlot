@@ -228,6 +228,13 @@ pub const UNPLUG_HOLD_MS: Millis = 420;
 
 pub const PLAY_GAP_MS: Millis = 1000;
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum CheevosLogin {
+    Waiting,
+    Sent,
+    NoAccount,
+}
+
 pub const PLAY_FLUSH_MS: Millis = 60_000;
 
 #[derive(Debug)]
@@ -302,6 +309,7 @@ pub struct App {
     restarting: bool,
     messages: std::collections::VecDeque<(String, String)>,
     net: crate::net::Net,
+    cheevos_login: CheevosLogin,
     play_key: Option<String>,
     play_ms: Millis,
     play_tick: Option<Millis>,
@@ -432,6 +440,7 @@ impl App {
             restarting: false,
             messages: std::collections::VecDeque::new(),
             net: crate::net::Net::idle(),
+            cheevos_login: CheevosLogin::Waiting,
             play_key: None,
             play_ms: 0,
             play_tick: None,
@@ -504,6 +513,7 @@ impl App {
         } else if app.state.wifi {
             app.net.send(NetJob::WifiUp);
         }
+        crate::cheevos::enable(app.state.achievements);
         if app.state.clock_set {
             app.start();
         } else {
@@ -685,6 +695,7 @@ impl App {
             QuickRow::Warmth => Some(QuickValue::level(self.state.blue_light)),
             QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
             QuickRow::Syncthing => Some(QuickValue::flag(self.state.syncthing)),
+            QuickRow::Achievements => Some(QuickValue::flag(self.state.achievements)),
             QuickRow::LightMode => Some(match self.state.light_mode {
                 LightMode::Battery => QuickValue::Battery,
                 LightMode::Colour => QuickValue::Colour,
@@ -1437,6 +1448,7 @@ impl App {
             | QuickRow::LightLevel
             | QuickRow::Wifi
             | QuickRow::Syncthing
+            | QuickRow::Achievements
             | QuickRow::Rumble => {}
         }
     }
@@ -1508,7 +1520,19 @@ impl App {
                     self.net.send(NetJob::WifiUp);
                 } else {
                     s.syncthing = false;
+                    s.achievements = false;
+                    crate::cheevos::enable(false);
+                    self.cheevos_login = CheevosLogin::Waiting;
                     self.net.send(NetJob::WifiDown);
+                }
+            }
+            QuickRow::Achievements => {
+                s.achievements = !s.achievements;
+                crate::cheevos::enable(s.achievements);
+                self.cheevos_login = CheevosLogin::Waiting;
+                if s.achievements && !s.wifi {
+                    s.wifi = true;
+                    self.net.send(NetJob::WifiUp);
                 }
             }
             QuickRow::Syncthing => {
@@ -1951,6 +1975,38 @@ impl App {
             });
     }
 
+    fn cheevos_tick(&mut self) {
+        if !self.state.achievements {
+            return;
+        }
+        if self.cheevos_login == CheevosLogin::Waiting && self.net.online() {
+            if let Some(root) = self.root.clone() {
+                self.cheevos_login = match crate::cheevos::login(&root) {
+                    crate::cheevos::Login::Started => CheevosLogin::Sent,
+                    crate::cheevos::Login::NoAccount => {
+                        self.say(
+                            "RetroAchievements needs an account",
+                            "Put username= and password= in Config/retroachievements.txt",
+                        );
+                        CheevosLogin::NoAccount
+                    }
+                };
+            }
+        }
+        for event in crate::cheevos::take() {
+            if let slot_cheevos::Event::LoggedIn { user, token } = &event {
+                if let Some(root) = &self.root {
+                    if let Err(e) = crate::cheevos::remember(root, user, token) {
+                        eprintln!("slot: cheevos: {e}");
+                    }
+                }
+            }
+            if let Some((title, detail)) = crate::cheevos::words(&event) {
+                self.say(title, detail);
+            }
+        }
+    }
+
     pub fn net_jobs(&self) -> &[NetJob] {
         self.net.sent()
     }
@@ -1961,6 +2017,7 @@ impl App {
         while let Some((title, detail)) = self.net.heard() {
             self.say(title, detail);
         }
+        self.cheevos_tick();
         let offer = self.undo_label();
         if let Some(p) = &mut self.polaroids {
             p.set_undo(offer);

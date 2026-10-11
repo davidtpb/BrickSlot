@@ -30,10 +30,11 @@ pub enum QuickRow {
     Network,
     Wifi,
     Syncthing,
+    Achievements,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 24] = [
+    pub const ALL: [QuickRow; 25] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -58,6 +59,7 @@ impl QuickRow {
         QuickRow::Network,
         QuickRow::Wifi,
         QuickRow::Syncthing,
+        QuickRow::Achievements,
     ];
 
     pub const MAIN: [QuickRow; 6] = [
@@ -94,7 +96,8 @@ impl QuickRow {
         QuickRow::LightLevel,
     ];
 
-    pub const NETWORK: [QuickRow; 2] = [QuickRow::Wifi, QuickRow::Syncthing];
+    pub const NETWORK: [QuickRow; 3] =
+        [QuickRow::Wifi, QuickRow::Syncthing, QuickRow::Achievements];
 
     pub fn index(self) -> usize {
         self as usize
@@ -112,7 +115,7 @@ impl QuickRow {
             | QuickRow::LightColour
             | QuickRow::LightEffect
             | QuickRow::LightLevel => &QuickRow::LIGHTS,
-            QuickRow::Wifi | QuickRow::Syncthing => &QuickRow::NETWORK,
+            QuickRow::Wifi | QuickRow::Syncthing | QuickRow::Achievements => &QuickRow::NETWORK,
             QuickRow::FastForward
             | QuickRow::FastForwardSound
             | QuickRow::Rewind
@@ -173,6 +176,7 @@ impl QuickRow {
             QuickRow::Network => "Network",
             QuickRow::Wifi => "Wi-Fi",
             QuickRow::Syncthing => "Syncthing",
+            QuickRow::Achievements => "RetroAchievements",
         }
     }
 

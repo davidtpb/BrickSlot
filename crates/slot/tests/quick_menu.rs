@@ -700,3 +700,20 @@ fn syncthing_left_on_starts_again_at_boot() {
     });
     assert_eq!(a.net_jobs(), [NetJob::SyncthingStart]);
 }
+
+#[test]
+fn retroachievements_needs_wifi_and_goes_when_wifi_does() {
+    use slot::net::NetJob;
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Achievements);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::Achievements), Some(QuickValue::On));
+    assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::On));
+    assert_eq!(a.net_jobs(), [NetJob::WifiUp]);
+    assert!(read_slot_state(d.path()).achievements);
+    press(&mut a, Btn::Up);
+    press(&mut a, Btn::Up);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::Off));
+    assert_eq!(a.quick_value(QuickRow::Achievements), Some(QuickValue::Off));
+}

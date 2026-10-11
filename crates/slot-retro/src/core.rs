@@ -42,6 +42,35 @@ impl ButtonMask {
     }
 }
 
+/// A block of the emulated console's memory, by its address on the
+/// console's own bus. `ptr` points into the core and is only good while the
+/// game it came from is loaded.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct MemoryRegion {
+    pub start: u32,
+    pub len: usize,
+    pub ptr: usize,
+}
+
+impl MemoryRegion {
+    /// Copies from `address` on, as far as this block goes. Returns how many
+    /// bytes were copied, 0 if the address is not in this block.
+    ///
+    /// # Safety
+    /// `ptr` must still point at `len` live bytes.
+    pub unsafe fn read(&self, address: u32, buf: &mut [u8]) -> usize {
+        let Some(at) = address.checked_sub(self.start).map(|a| a as usize) else {
+            return 0;
+        };
+        if at >= self.len || self.ptr == 0 {
+            return 0;
+        }
+        let n = buf.len().min(self.len - at);
+        std::ptr::copy_nonoverlapping((self.ptr as *const u8).add(at), buf.as_mut_ptr(), n);
+        n
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct AvInfo {
     pub fps: f64,
@@ -95,6 +124,9 @@ pub trait RetroCore: Send {
     }
     fn net(&self) -> Link {
         Link::default()
+    }
+    fn memory_regions(&self) -> Vec<MemoryRegion> {
+        Vec::new()
     }
     fn start_link(&mut self, _client_id: u16) {}
     fn pump_link(&mut self) {}

@@ -519,6 +519,7 @@ impl Worker {
                 self.shared.resume_refused.store(true, Ordering::Release);
             }
         }
+        let _cheevos = crate::cheevos::begin(&rom, core.memory_regions());
         let av = core.av_info();
         let device_hz = match ring.sample_rate() {
             0 => av.sample_rate,
@@ -646,6 +647,7 @@ impl Worker {
                     .rewind_fill
                     .store(rewind.fill(), Ordering::Relaxed);
                 let _ = core.take_audio();
+                crate::cheevos::idle();
             } else if ceiling > 0 {
                 let one = FAST_TARGET.saturating_sub(post_cost);
                 if speed == Speed::Fast {
@@ -706,6 +708,7 @@ impl Worker {
                         }
                         None => core.run_frame(input),
                     }
+                    crate::cheevos::frame();
                     let took = frame_began.elapsed();
                     if last {
                         drawn = took;

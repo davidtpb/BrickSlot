@@ -301,6 +301,7 @@ tasks:
       - cp vendor/mgba_libretro.so {{.OUT}}/System/
       - cp vendor/gpsp_libretro.so {{.OUT}}/System/
       - cp -r licenses {{.OUT}}/System/licenses
+      - cp crates/slot-cheevos/rcheevos/LICENSE {{.OUT}}/System/licenses/rcheevos-LICENSE.txt
       - |
         set -euo pipefail
         sha="$(cat vendor/gpsp-src.sha)"

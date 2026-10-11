@@ -17,6 +17,26 @@ pub const GET_LOG_INTERFACE: c_uint = 27;
 pub const GET_SAVE_DIRECTORY: c_uint = 31;
 pub const SET_AUDIO_BUFFER_STATUS_CALLBACK: c_uint = 62;
 pub const SET_NETPACKET_INTERFACE: c_uint = 78;
+pub const SET_MEMORY_MAPS: c_uint = 36;
+pub const EXPERIMENTAL: c_uint = 0x10000;
+
+#[repr(C)]
+pub struct MemoryDescriptor {
+    pub flags: u64,
+    pub ptr: *mut c_void,
+    pub offset: usize,
+    pub start: usize,
+    pub select: usize,
+    pub disconnect: usize,
+    pub len: usize,
+    pub addrspace: *const std::ffi::c_char,
+}
+
+#[repr(C)]
+pub struct MemoryMap {
+    pub descriptors: *const MemoryDescriptor,
+    pub num_descriptors: c_uint,
+}
 
 pub const RUMBLE_STRONG: c_uint = 0;
 pub const RUMBLE_WEAK: c_uint = 1;

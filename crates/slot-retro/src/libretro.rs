@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use libloading::Library;
 
-use crate::core::{AvInfo, ButtonMask, CoreError, RetroCore, GBA_H, GBA_W};
+use crate::core::{AvInfo, ButtonMask, CoreError, MemoryRegion, RetroCore, GBA_H, GBA_W};
 use crate::ffi::*;
 use crate::link::Link;
 use crate::rumble::Rumble;
@@ -38,6 +38,7 @@ struct Host {
     options: std::collections::HashMap<String, std::ffi::CString>,
     options_dirty: bool,
     declared: std::collections::HashMap<String, Vec<String>>,
+    memory_maps: Vec<MemoryRegion>,
 }
 
 thread_local! {
@@ -200,6 +201,27 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             }
             let cb = std::ptr::read(data as *const AudioBufferStatusCallback);
             with_host(|h| h.audio_status = cb.callback).is_some()
+        }
+        c if c & !EXPERIMENTAL == SET_MEMORY_MAPS => {
+            if data.is_null() {
+                return false;
+            }
+            let map = &*(data as *const MemoryMap);
+            if map.descriptors.is_null() {
+                return false;
+            }
+            let descriptors =
+                std::slice::from_raw_parts(map.descriptors, map.num_descriptors as usize);
+            let regions = descriptors
+                .iter()
+                .filter(|d| !d.ptr.is_null() && d.len > 0 && d.start <= u32::MAX as usize)
+                .map(|d| MemoryRegion {
+                    start: d.start as u32,
+                    len: d.len,
+                    ptr: (d.ptr as usize) + d.offset,
+                })
+                .collect();
+            with_host(|h| h.memory_maps = regions).is_some()
         }
         SET_NETPACKET_INTERFACE => {
             if data.is_null() {
@@ -484,6 +506,7 @@ impl LibretroCore {
             options: std::collections::HashMap::new(),
             options_dirty: false,
             declared: std::collections::HashMap::new(),
+            memory_maps: Vec::new(),
         });
         unsafe {
             let _a = Active::bind(&mut host);
@@ -551,6 +574,13 @@ impl Drop for LibretroCore {
 impl RetroCore for LibretroCore {
     fn set_option(&mut self, key: &str, value: &str) {
         LibretroCore::set_option(self, key, value);
+    }
+
+    fn memory_regions(&self) -> Vec<MemoryRegion> {
+        if !self.loaded {
+            return Vec::new();
+        }
+        self.host.memory_maps.clone()
     }
 
     fn load(&mut self, rom: &Path) -> Result<(), CoreError> {
@@ -715,6 +745,7 @@ mod tests {
             options,
             options_dirty,
             declared: HashMap::new(),
+            memory_maps: Vec::new(),
         })
     }
 

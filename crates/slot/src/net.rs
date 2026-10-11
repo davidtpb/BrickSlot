@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Arc;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum NetJob {
@@ -15,6 +17,7 @@ pub struct Net {
     jobs: Option<Sender<NetJob>>,
     said: Option<Receiver<(String, String)>>,
     sent: Vec<NetJob>,
+    online: Arc<AtomicBool>,
 }
 
 impl Net {
@@ -23,6 +26,7 @@ impl Net {
             jobs: None,
             said: None,
             sent: Vec::new(),
+            online: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -33,9 +37,11 @@ impl Net {
         let (jobs, rx) = std::sync::mpsc::channel();
         let (tell, said) = std::sync::mpsc::channel();
         let root = root.to_path_buf();
+        let online = Arc::new(AtomicBool::new(false));
+        let up = online.clone();
         let spawned = std::thread::Builder::new()
             .name("slot-net".into())
-            .spawn(move || work(&root, &rx, &tell));
+            .spawn(move || work(&root, &rx, &tell, &up));
         if let Err(e) = spawned {
             eprintln!("slot: net: {e}");
             return Net::idle();
@@ -44,6 +50,7 @@ impl Net {
             jobs: Some(jobs),
             said: Some(said),
             sent: Vec::new(),
+            online,
         }
     }
 
@@ -56,6 +63,10 @@ impl Net {
 
     pub fn sent(&self) -> &[NetJob] {
         &self.sent
+    }
+
+    pub fn online(&self) -> bool {
+        self.online.load(Ordering::Relaxed)
     }
 
     pub fn heard(&self) -> Option<(String, String)> {
@@ -109,7 +120,12 @@ fn wait_address(root: &Path) -> Option<String> {
     None
 }
 
-fn work(root: &Path, jobs: &Receiver<NetJob>, tell: &Sender<(String, String)>) {
+fn work(
+    root: &Path,
+    jobs: &Receiver<NetJob>,
+    tell: &Sender<(String, String)>,
+    online: &AtomicBool,
+) {
     let say = |title: &str, detail: String| {
         let _ = tell.send((title.to_string(), detail));
     };
@@ -118,11 +134,15 @@ fn work(root: &Path, jobs: &Receiver<NetJob>, tell: &Sender<(String, String)>) {
             NetJob::WifiUp => {
                 run(root, "net.sh", "up");
                 match wait_address(root) {
-                    Some(ip) => say("Wi-Fi connected", ip),
+                    Some(ip) => {
+                        online.store(true, Ordering::Relaxed);
+                        say("Wi-Fi connected", ip);
+                    }
                     None => say("Wi-Fi did not connect", "Check Config/wifi.txt".into()),
                 }
             }
             NetJob::WifiDown => {
+                online.store(false, Ordering::Relaxed);
                 run(root, "syncthing.sh", "stop");
                 run(root, "net.sh", "down");
             }
@@ -132,7 +152,10 @@ fn work(root: &Path, jobs: &Receiver<NetJob>, tell: &Sender<(String, String)>) {
                     continue;
                 }
                 match wait_address(root) {
-                    Some(ip) => say("Syncthing on", format!("http://{ip}:{SYNCTHING_PORT}")),
+                    Some(ip) => {
+                        online.store(true, Ordering::Relaxed);
+                        say("Syncthing on", format!("http://{ip}:{SYNCTHING_PORT}"));
+                    }
                     None => say("Syncthing on, no Wi-Fi", "Check Config/wifi.txt".into()),
                 }
             }

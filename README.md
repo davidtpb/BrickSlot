@@ -80,6 +80,36 @@ What changes on TrimUI hardware:
 - The card is `/mnt/SDCARD`, and brickslot leaves the boot logo alone.
 - The 1024x768 panel is 4:3, so the same 640x480 bezel art fits it.
 
+## Extras borrowed from NextUI and NX Redux
+
+These live in the quick menu (tap MENU on the shelf).
+
+- **Lights** (TrimUI): show the battery state on the top bar, light every zone in one
+  colour, or turn them all off. Color, effect (Static, Breathe, Blink, Rainbow) and
+  brightness each have a row. On Anbernics with an RGB LED, Color sets it too.
+- **Screen > Brightness / Warmth**: the same levels as SELECT + D-pad. MENU held with
+  VOL+ / VOL- also steps brightness, as on NextUI.
+- **Play time**: every game counts how long it has been played, in `Config/playtime.txt`,
+  and says so as it starts ("Played 3h 05m").
+- **Network > Wi-Fi**: joins the networks you saved in TrimUI's own Wi-Fi menu. To add
+  one by hand, put `ssid = ...` and `password = ...` lines in `Config/wifi.txt`. Link play
+  borrows the radio and gives it back afterwards.
+- **Network > Syncthing**: runs Syncthing so saves and states sync with your computer or
+  another handheld. Once Wi-Fi is up a banner shows the address of its web page
+  (`http://<ip>:8384`); share `Saves/` and `States/` from there. Its settings live in
+  `Config/syncthing`. Set a GUI password on that page, since it is open to your network.
+- **Network > RetroAchievements**: put your account in `Config/retroachievements.txt`:
+
+  ```
+  username = yourname
+  password = yourpassword
+  ```
+
+  After the first login brickslot swaps the password for the token the server hands back,
+  so the password does not stay on the card. Games are matched by the MD5 of the ROM,
+  as RetroAchievements does for Game Boy and GBA. Achievements run in softcore, so save
+  states, rewind and fast forward keep working, and each unlock pops up in a banner.
+
 If brickslot exits on its own three times in a row within a minute of starting, the updater
 powers the device off instead of looping. Check `slot.log` and `slot-session.log` on the card.
 

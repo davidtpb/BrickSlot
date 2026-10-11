@@ -9,6 +9,7 @@ fn bottom_edge(d: &Draw) -> Option<f32> {
         | Draw::Tex { y, h, .. }
         | Draw::Turned { y, h, .. }
         | Draw::Part { y, h, .. } => Some(y + h),
+        Draw::Warp { .. } => d.bounds().map(|(_, y, _, h)| y + h),
         Draw::Game | Draw::Shot { .. } => None,
     }
 }

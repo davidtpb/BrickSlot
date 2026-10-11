@@ -23,6 +23,7 @@ mod shelf;
 mod shell;
 mod silhouette;
 mod slot_chrome;
+mod socket;
 mod sticker;
 pub mod text;
 mod toast;
@@ -90,6 +91,11 @@ pub use silhouette::{gb_silhouette, silhouette, GbShell};
 pub use slot_chrome::{
     draw_empty_slot, draw_slot_name, ease, edge, housing, opening, recess, set_theme, SlotChrome,
     ALERT_PX, LIP_H, MOUTH_H, MOUTH_W,
+};
+pub use socket::{
+    inter_font, run_width, socket_backdrop, socket_bottom_slot, socket_pill_face, socket_tab_slot,
+    sway, tilt, SocketScreen, Status as SocketStatus, KEY_SEP, SOCKET_BOTTOM, SOCKET_CLOCK,
+    SOCKET_L, SOCKET_NAME, SOCKET_R, SOCKET_SLOTS, SOCKET_SPLIT, SOCKET_STATUS, SOCKET_TABS,
 };
 pub use sticker::{
     draw_sticker, head_rows, sticker_face, sticker_lines, StickerFields, COPYRIGHT, CREDITS, DC,

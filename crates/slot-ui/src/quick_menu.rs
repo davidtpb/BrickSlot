@@ -37,10 +37,11 @@ pub enum QuickRow {
     Performance,
     Labels,
     FileTransfer,
+    Look,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 31] = [
+    pub const ALL: [QuickRow; 32] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -72,6 +73,7 @@ impl QuickRow {
         QuickRow::Performance,
         QuickRow::Labels,
         QuickRow::FileTransfer,
+        QuickRow::Look,
     ];
 
     pub const MAIN: [QuickRow; 7] = [
@@ -84,13 +86,14 @@ impl QuickRow {
         QuickRow::About,
     ];
 
-    pub const SCREEN: [QuickRow; 6] = [
+    pub const SCREEN: [QuickRow; 7] = [
         QuickRow::Brightness,
         QuickRow::Warmth,
         QuickRow::GbaShader,
         QuickRow::GbShader,
         QuickRow::ColourCorrection,
         QuickRow::GbPalettes,
+        QuickRow::Look,
     ];
 
     pub const GAME: [QuickRow; 8] = [
@@ -131,7 +134,8 @@ impl QuickRow {
             | QuickRow::GbaShader
             | QuickRow::GbShader
             | QuickRow::ColourCorrection
-            | QuickRow::GbPalettes => &QuickRow::SCREEN,
+            | QuickRow::GbPalettes
+            | QuickRow::Look => &QuickRow::SCREEN,
             QuickRow::LightMode
             | QuickRow::LightColour
             | QuickRow::LightEffect
@@ -209,6 +213,7 @@ impl QuickRow {
             QuickRow::AutoTime => "Set Time Automatically",
             QuickRow::Search => "Search Games",
             QuickRow::Performance => "Performance",
+            QuickRow::Look => "Style",
             QuickRow::Labels => "Download Labels",
             QuickRow::FileTransfer => "File Transfer",
         }
@@ -292,6 +297,8 @@ pub enum QuickValue {
     CpuStock,
     CpuSaver,
     CpuPerformance,
+    LookClassic,
+    LookSocket,
 }
 
 impl QuickValue {
@@ -308,7 +315,7 @@ impl QuickValue {
         QuickValue::Level9,
     ];
 
-    pub const ALL: [QuickValue; 51] = [
+    pub const ALL: [QuickValue; 53] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -360,6 +367,8 @@ impl QuickValue {
         QuickValue::CpuStock,
         QuickValue::CpuSaver,
         QuickValue::CpuPerformance,
+        QuickValue::LookClassic,
+        QuickValue::LookSocket,
     ];
 
     pub fn index(self) -> usize {
@@ -419,6 +428,8 @@ impl QuickValue {
             QuickValue::CpuStock => "Default",
             QuickValue::CpuSaver => "Battery Saver",
             QuickValue::CpuPerformance => "Performance",
+            QuickValue::LookClassic => "Slot",
+            QuickValue::LookSocket => "Socket",
         }
     }
 

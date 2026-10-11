@@ -57,6 +57,7 @@ pub struct Frontend {
     quick_clock: QuickClock,
     search_texes: Vec<SearchLine>,
     home_texes: Vec<SearchLine>,
+    socket_texes: Vec<SearchLine>,
 }
 
 #[derive(Clone, Default)]
@@ -148,6 +149,7 @@ impl Frontend {
             quick_clock: QuickClock::default(),
             search_texes: Vec::new(),
             home_texes: Vec::new(),
+            socket_texes: Vec::new(),
         }
     }
 
@@ -315,6 +317,27 @@ impl Frontend {
         }
     }
 
+    /// The same for the Socket shelf's pills, and its backdrop once.
+    fn sync_socket(&mut self, compositor: &mut Compositor) {
+        if self.session.app().wants_socket_backdrop() {
+            let b = slot_ui::socket_backdrop();
+            let tex = compositor.create_texture(b.w, b.h, &b.rgba);
+            self.session.app_mut().set_socket_backdrop(tex);
+        }
+        let Some(lines) = self.session.app().socket_lines() else {
+            return;
+        };
+        if sync_lines(
+            &mut self.socket_texes,
+            lines,
+            slot_ui::socket_pill_face,
+            compositor,
+        ) {
+            let faces = self.socket_texes.iter().map(|l| l.face).collect();
+            self.session.app_mut().set_socket_faces(faces);
+        }
+    }
+
     /// The same for the Home panel.
     fn sync_home(&mut self, compositor: &mut Compositor) {
         let Some(lines) = self.session.app().home_lines() else {
@@ -405,6 +428,7 @@ impl Frontend {
         self.show_message(compositor);
         self.sync_search(compositor);
         self.sync_home(compositor);
+        self.sync_socket(compositor);
         sync_clock(self.session.app_mut(), compositor, &mut self.clocks);
         sync_about(self.session.app_mut(), compositor, &mut self.about);
         sync_quick_clock(self.session.app_mut(), compositor, &mut self.quick_clock);

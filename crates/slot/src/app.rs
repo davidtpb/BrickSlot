@@ -9,7 +9,7 @@ use slot_power::{Battery, Charge, LedState, LidPolicy, Lights, LightsEffect, Lig
 use slot_retro::LinkChannel;
 use slot_store::{
     format_stamp, read_slot_state, scan, write_slot_state, Cart, Core, CpuMode, GbPalette,
-    LightColour, LightEffect, LightLevel, LightMode, Platform, SaveFormat, Shader, SlotState,
+    LightColour, LightEffect, LightLevel, LightMode, Look, Platform, SaveFormat, Shader, SlotState,
     StateEntry, StateRing, Theme, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX, VOLUME_MAX,
 };
 use slot_ui::{
@@ -331,6 +331,8 @@ pub struct App {
     search_faces: Vec<Option<(TexId, u32, u32)>>,
     search_picked_at: Millis,
     home: Option<slot_ui::HomePanel>,
+    socket_backdrop: Option<TexId>,
+    socket_faces: Vec<Option<(TexId, u32, u32)>>,
     home_faces: Vec<Option<(TexId, u32, u32)>>,
     home_stats: crate::sysinfo::Stats,
     home_stats_at: Millis,
@@ -472,6 +474,8 @@ impl App {
             search_faces: Vec::new(),
             search_picked_at: 0,
             home: None,
+            socket_backdrop: None,
+            socket_faces: Vec::new(),
             home_faces: Vec::new(),
             home_stats: crate::sysinfo::Stats::default(),
             home_stats_at: 0,
@@ -741,6 +745,10 @@ impl App {
                 CpuMode::Stock => QuickValue::CpuStock,
                 CpuMode::Saver => QuickValue::CpuSaver,
                 CpuMode::Performance => QuickValue::CpuPerformance,
+            }),
+            QuickRow::Look => Some(match self.state.look {
+                Look::Classic => QuickValue::LookClassic,
+                Look::Socket => QuickValue::LookSocket,
             }),
             QuickRow::SaveFormat => Some(match self.state.save_format {
                 SaveFormat::RetroArch => QuickValue::RetroArch,
@@ -1552,6 +1560,68 @@ impl App {
         self.net.send(NetJob::Labels(wanted));
     }
 
+    pub fn socket_look(&self) -> bool {
+        self.state.look == Look::Socket
+    }
+
+    fn socket_screen(&self, fade: f32) -> slot_ui::SocketScreen<'_> {
+        slot_ui::SocketScreen {
+            backdrop: self.socket_backdrop,
+            faces: &self.socket_faces,
+            fade,
+        }
+    }
+
+    pub fn wants_socket_backdrop(&self) -> bool {
+        self.socket_look() && self.socket_backdrop.is_none()
+    }
+
+    pub fn set_socket_backdrop(&mut self, tex: TexId) {
+        self.socket_backdrop = Some(tex);
+    }
+
+    pub fn set_socket_faces(&mut self, faces: Vec<Option<(TexId, u32, u32)>>) {
+        self.socket_faces = faces;
+    }
+
+    /// The text for every pill of the Socket shelf, while it shows.
+    pub fn socket_lines(&self) -> Option<Vec<(String, bool)>> {
+        if !self.socket_look()
+            || !matches!(
+                self.phase,
+                Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }
+            )
+        {
+            return None;
+        }
+        let key = |k: &str, label: &str| format!("{k}{}{label}", slot_ui::KEY_SEP);
+        let mut lines = vec![(String::new(), false); slot_ui::SOCKET_SLOTS];
+        lines[slot_ui::SOCKET_CLOCK] = (slot_ui::hhmm(self.wall_secs()), true);
+        if self.shelves.len() > 1 {
+            lines[slot_ui::SOCKET_L] = ("L".into(), true);
+            lines[slot_ui::SOCKET_R] = ("R".into(), true);
+        }
+        for (i, (platform, _)) in self.shelves.iter().take(slot_ui::SOCKET_TABS).enumerate() {
+            lines[slot_ui::socket_tab_slot(i)] =
+                (platform.dir_name().to_string(), i == self.shelf_at);
+        }
+        let status = slot_ui::SocketStatus {
+            percent: self.battery.map(|b| b.percent),
+            charging: self
+                .battery
+                .is_some_and(|b| matches!(b.charge, Charge::Charging)),
+            wifi: self.state.wifi,
+        };
+        lines[slot_ui::SOCKET_STATUS] = (status.text(), true);
+        if let Some(cart) = self.shelf().carts.get(self.shelf().index) {
+            lines[slot_ui::SOCKET_NAME] = (key("A", &slot_ui::label_text(cart)), true);
+        }
+        lines[slot_ui::socket_bottom_slot(0)] = (key("MENU", "Settings"), true);
+        lines[slot_ui::socket_bottom_slot(1)] = (key("Y", "Search"), true);
+        lines[slot_ui::socket_bottom_slot(2)] = (key("START", "Core"), true);
+        Some(lines)
+    }
+
     pub fn home_open(&self) -> bool {
         self.home.is_some()
     }
@@ -1890,6 +1960,7 @@ impl App {
                 }
             }
             QuickRow::EjectSave
+            | QuickRow::Look
             | QuickRow::Turbo
             | QuickRow::Rewind
             | QuickRow::FastForward
@@ -1990,6 +2061,7 @@ impl App {
                 }
             }
             QuickRow::SaveFormat => s.save_format = s.save_format.other(),
+            QuickRow::Look => s.look = s.look.other(),
             QuickRow::FileTransfer => return self.toggle_file_transfer(),
             QuickRow::AutoTime => {
                 s.auto_time = !s.auto_time;
@@ -2331,6 +2403,7 @@ impl App {
         };
         self.screen = (self.screen + step).clamp(0.0, 1.0);
         let docked = self.power_menu.is_none()
+            && !self.socket_look()
             && matches!(
                 self.phase,
                 Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }
@@ -2353,6 +2426,11 @@ impl App {
     pub fn frame_split(&self) -> Option<f32> {
         match (&self.phase, self.power_menu) {
             (Phase::QuickMenu { .. }, None) => Some(slot_ui::QUICK_SPLIT),
+            (Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }, None)
+                if self.socket_look() =>
+            {
+                Some(slot_ui::SOCKET_SPLIT)
+            }
             _ => None,
         }
     }
@@ -2802,6 +2880,36 @@ impl App {
                 faces: self.quick_menu_faces.as_ref(),
             }
             .draw(out),
+            Phase::Shelf if self.socket_look() => {
+                let screen = self.socket_screen(0.0);
+                screen.draw_backdrop(out);
+                self.shelf().draw_socket(self.now(), 0.0, out);
+                screen.draw_pills(out);
+            }
+            Phase::Inserting { .. } | Phase::Ejecting { .. } if self.socket_look() => {
+                let seat = self.seat();
+                let screen = self.socket_screen(seat);
+                screen.draw_backdrop(out);
+                self.shelf().draw_socket(self.now(), seat, out);
+                screen.draw_pills(out);
+                out.push(Draw::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: OUT_W as f32,
+                    h: OUT_H as f32,
+                    colour: [0.0, 0.0, 0.0, ease(seat)],
+                });
+            }
+            Phase::Playing { .. } if self.screen < 1.0 && self.socket_look() => {
+                self.push_game(out);
+                out.push(Draw::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: OUT_W as f32,
+                    h: OUT_H as f32,
+                    colour: [0.0, 0.0, 0.0, 1.0 - self.screen],
+                });
+            }
             Phase::Shelf => {
                 draw_backdrop(self.wallpaper, out);
                 match (self.core_picker_shown(), self.selected_stem()) {

@@ -49,6 +49,7 @@ pub struct SlotState {
     pub save_format: SaveFormat,
     pub auto_time: bool,
     pub cpu: CpuMode,
+    pub look: Look,
 }
 
 /// How battery saves are written: RetroArch's `.srm` with the clock in a
@@ -78,6 +79,37 @@ impl SaveFormat {
         match self {
             SaveFormat::RetroArch => SaveFormat::Slot,
             SaveFormat::Slot => SaveFormat::RetroArch,
+        }
+    }
+}
+
+/// How the shelf is drawn.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Look {
+    /// slot's own shelf above the console's cartridge slot.
+    Classic,
+    /// A light carousel of tilting carts, after the Socket frontend.
+    Socket,
+}
+
+impl Look {
+    pub fn name(self) -> &'static str {
+        match self {
+            Look::Classic => "classic",
+            Look::Socket => "socket",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Look> {
+        [Look::Classic, Look::Socket]
+            .into_iter()
+            .find(|l| l.name() == name)
+    }
+
+    pub fn other(self) -> Look {
+        match self {
+            Look::Classic => Look::Socket,
+            Look::Socket => Look::Classic,
         }
     }
 }
@@ -198,6 +230,7 @@ impl Default for SlotState {
             save_format: SaveFormat::RetroArch,
             auto_time: true,
             cpu: CpuMode::Stock,
+            look: Look::Classic,
         }
     }
 }
@@ -216,7 +249,7 @@ pub fn read_slot_state(root: &Path) -> SlotState {
 
 pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     let text = format!(
-        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\nsave_format={}\nauto_time={}\ncpu={}\n",
+        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\nsave_format={}\nauto_time={}\ncpu={}\nlook={}\n",
         s.cart.as_deref().unwrap_or(""),
         s.cart_platform.map_or(String::new(), platform_key),
         s.brightness,
@@ -247,7 +280,8 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.achievements as u8,
         s.save_format.name(),
         s.auto_time as u8,
-        s.cpu.name()
+        s.cpu.name(),
+        s.look.name()
     );
     atomic_write(&state_path(root), text.as_bytes())
 }
@@ -284,6 +318,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut save_format = None;
     let mut auto_time = None;
     let mut cpu = None;
+    let mut look = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let Some((key, value)) = line.split_once('=') else {
             continue;
@@ -319,6 +354,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "save_format" => save_format = SaveFormat::parse(value),
             "auto_time" => auto_time = flag(value),
             "cpu" => cpu = CpuMode::parse(value),
+            "look" => look = Look::parse(value),
             "shader_gb" => shader_gb = Shader::parse(value).filter(|s| Shader::GB.contains(s)),
             _ => {}
         }
@@ -357,6 +393,7 @@ fn parse(text: &str) -> Option<SlotState> {
         save_format: save_format.unwrap_or(fallback.save_format),
         auto_time: auto_time.unwrap_or(fallback.auto_time),
         cpu: cpu.unwrap_or(fallback.cpu),
+        look: look.unwrap_or(fallback.look),
     })
 }
 

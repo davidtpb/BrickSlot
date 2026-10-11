@@ -124,6 +124,39 @@ void main() {
 }
 "#;
 
+/// A texture over any four corners, mapped with perspective: each corner's
+/// `q` is one over its depth, so a card turned in 3D reads true.
+pub const WARP_VERT: &str = r#"
+attribute vec2 a_pos;
+uniform vec4 u_p01;
+uniform vec4 u_p23;
+uniform vec4 u_q;
+uniform vec2 u_target;
+varying vec3 v_uvq;
+void main() {
+    vec2 top = mix(u_p01.xy, u_p01.zw, a_pos.x);
+    vec2 bot = mix(u_p23.xy, u_p23.zw, a_pos.x);
+    vec2 p = mix(top, bot, a_pos.y) / u_target;
+    float q = mix(mix(u_q.x, u_q.y, a_pos.x), mix(u_q.z, u_q.w, a_pos.x), a_pos.y);
+    v_uvq = vec3(a_pos * q, q);
+    gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
+}
+"#;
+
+pub const WARP_FRAG: &str = r#"
+precision mediump float;
+uniform sampler2D u_tex;
+uniform vec4 u_colour;
+uniform float u_grey;
+varying vec3 v_uvq;
+void main() {
+    vec4 c = texture2D(u_tex, v_uvq.xy / v_uvq.z);
+    float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+    c.rgb = mix(c.rgb, vec3(l), u_grey);
+    FRAG_COLOR = c * u_colour;
+}
+"#;
+
 pub const BLIT_VERT: &str = r#"
 attribute vec2 a_pos;
 uniform vec4 u_uv;

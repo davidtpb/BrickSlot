@@ -29,6 +29,7 @@ fn placed(s: &Shelf) -> Vec<(f32, f32)> {
             Draw::Rect { x, w, .. } => (x, w),
             Draw::Tex { x, w, .. } => (x, w),
             Draw::Turned { x, w, .. } | Draw::Part { x, w, .. } => (x, w),
+            Draw::Warp { .. } => d.bounds().map_or((0.0, 0.0), |(x, _, w, _)| (x, w)),
             Draw::Game | Draw::Shot { .. } => (0.0, OUT_W as f32),
         })
         .collect()
@@ -40,6 +41,7 @@ fn xw(d: &Draw) -> (f32, f32) {
         | Draw::Tex { x, w, .. }
         | Draw::Turned { x, w, .. }
         | Draw::Part { x, w, .. } => (x, w),
+        Draw::Warp { .. } => d.bounds().map_or((0.0, 0.0), |(x, _, w, _)| (x, w)),
         Draw::Game | Draw::Shot { .. } => (0.0, OUT_W as f32),
     }
 }
@@ -670,6 +672,9 @@ fn cart_spans(out: &[Draw]) -> Vec<(f32, f32)> {
             | Draw::Tex { x, w, h, .. }
             | Draw::Turned { x, w, h, .. }
             | Draw::Part { x, w, h, .. } => (h > 60.0).then_some((x, x + w)),
+            Draw::Warp { .. } => d
+                .bounds()
+                .and_then(|(x, _, w, h)| (h > 60.0).then_some((x, x + w))),
             Draw::Game | Draw::Shot { .. } => None,
         })
         .filter(|(x0, x1)| *x1 > 0.0 && *x0 < OUT_W as f32)

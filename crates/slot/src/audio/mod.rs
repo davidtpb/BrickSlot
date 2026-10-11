@@ -23,6 +23,15 @@ pub fn opened_sink() -> Box<dyn AudioSink> {
     let mut sink = open_sink();
     if let Err(e) = sink.open(GBA_HZ) {
         eprintln!("slot: audio: {e}");
+        if cfg!(feature = "host") {
+            // A computer with no sound card still plays: to nowhere, at the
+            // pace a card would, so the game keeps time and sounds are
+            // queued as they would be.
+            eprintln!("slot: audio: playing to nowhere");
+            let mut stub = StubSink::realtime();
+            let _ = stub.open(GBA_HZ);
+            return Box::new(stub);
+        }
     }
     sink
 }

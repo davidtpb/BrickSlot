@@ -22,6 +22,7 @@ echo "wpa_cli \$*" >> "$LOG"
 case "\$*" in
 *status*)
 	[ -f "$UP" ] || exit 1
+	printf 'wpa_state=COMPLETED\nssid=Home Net\n'
 	;;
 *terminate*)
 	rm -f "$UP"
@@ -84,6 +85,11 @@ net down
 net resume
 [ ! -s "$LOG" ] || fail "resume brought Wi-Fi back after it was turned off"
 
+[ "$(net status)" = "Radio off" ] || fail "Wi-Fi turned off did not read as off: $(net status)"
+mv "$TMP/sys/wlan0" "$TMP/sys/gone"
+[ "$(net status)" = "No Wi-Fi chip found" ] || fail "a missing chip was not reported: $(net status)"
+mv "$TMP/sys/gone" "$TMP/sys/wlan0"
+
 out="$(net scan)"
 first="$(echo "$out" | head -n 1)"
 [ "$(echo "$first" | cut -f3)" = "Home Net" ] || fail "the strongest network is not first: $out"
@@ -117,6 +123,8 @@ net up
 grep -q '^wpa_supplicant' "$LOG" && fail "a second wpa_supplicant was started beside the running one"
 grep -q '^udhcpc -i wlan0' "$LOG" || fail "no address was asked for through the running one"
 grep -q 'using the wpa_supplicant already' "$TMP/card/slot-net.log" || fail "the running one was not noted"
+[ "$(net status)" = "Joined Home Net, waiting for an address" ] ||
+	fail "a joined network read wrong: $(net status)"
 
 # A system where NetworkManager looks after Wi-Fi.
 cat > "$TMP/bin/nmcli" <<STUB
@@ -141,5 +149,7 @@ NMCLI_STUB="$TMP/bin/nmcli" NET_SSID="Home Net" NET_PSK="hunter22" net join
 grep -q 'nmcli dev wifi connect Home Net password hunter22 ifname wlan0' "$LOG" || fail "NetworkManager was not asked to join"
 NMCLI_STUB="$TMP/bin/nmcli" net pause
 grep -q 'nmcli dev set wlan0 managed no' "$LOG" || fail "link play would fight NetworkManager for wlan0"
+[ "$(NMCLI_STUB="$TMP/bin/nmcli" net status)" = "On, not connected" ] ||
+	fail "NetworkManager's state read wrong: $(NMCLI_STUB="$TMP/bin/nmcli" net status)"
 
 echo "net: all passed"

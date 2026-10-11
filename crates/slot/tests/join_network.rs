@@ -117,3 +117,18 @@ fn b_on_an_empty_password_goes_back_to_the_list() {
     let lines = a.settings_lines().unwrap();
     assert!(lines[slot_ui::option_slot(0)].0.starts_with("Home Net"));
 }
+
+#[test]
+fn wifi_status_asks_what_wifi_is_doing() {
+    let (_d, mut a) = at_join();
+    while a.quick_menu() != Some(QuickRow::WifiStatus) {
+        press(&mut a, Btn::Up);
+    }
+    press(&mut a, Btn::A);
+    assert!(a.net_jobs().contains(&NetJob::Status));
+    assert_eq!(
+        a.quick_menu(),
+        Some(QuickRow::WifiStatus),
+        "the menu was left"
+    );
+}

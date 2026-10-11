@@ -11,6 +11,7 @@
 #   net.sh join             join NET_SSID with NET_PSK (empty for an open
 #                           network), remembered for next time
 #   net.sh ssid             print the network wlan0 is on, if any
+#   net.sh status           print in a few words what Wi-Fi is doing
 # Networks come from the stock firmware's wpa_supplicant.conf where there is
 # one (TrimUI's own Wi-Fi menu), from networks joined here, and from an
 # optional Config/wifi.txt with ssid=... and password=... lines.
@@ -363,6 +364,51 @@ join() {
 	return 0
 }
 
+# What Wi-Fi is doing, in a few words for the screen.
+status() {
+	load_driver > /dev/null 2>&1
+	if [ ! -d "$NET/$IFACE" ]; then
+		echo "No Wi-Fi chip found"
+		return 0
+	fi
+	a="$(address)"
+	if nm; then
+		if $NMCLI -t -f WIFI radio 2>/dev/null | grep -q disabled; then
+			echo "Radio off"
+			return 0
+		fi
+		on="$($NMCLI -t -f ACTIVE,SSID dev wifi 2>/dev/null | sed -n 's/^yes://p' | head -n 1)"
+		if [ -n "$on" ]; then
+			echo "Connected to $on${a:+ ($a)}"
+		else
+			echo "On, not connected"
+		fi
+		return 0
+	fi
+	pick_conf
+	if ! find_running; then
+		if [ -f "$WANT" ]; then echo "On, but Wi-Fi did not start"; else echo "Radio off"; fi
+		return 0
+	fi
+	st="$(cli status 2>/dev/null)"
+	state="$(echo "$st" | sed -n 's/^wpa_state=//p')"
+	on="$(echo "$st" | sed -n 's/^ssid=//p' | head -n 1)"
+	case "$state" in
+	COMPLETED)
+		if [ -n "$a" ]; then echo "Connected to $on ($a)"; else echo "Joined $on, waiting for an address"; fi
+		;;
+	ASSOCIATING | ASSOCIATED | AUTHENTICATING | *HANDSHAKE)
+		echo "Joining ${on:-a network}"
+		;;
+	INTERFACE_DISABLED)
+		echo "Radio off"
+		;;
+	*)
+		echo "On, not connected"
+		;;
+	esac
+}
+
 case "${1:-}" in
 up)
 	touch "$WANT"
@@ -389,12 +435,15 @@ scan)
 join)
 	join
 	;;
+status)
+	status
+	;;
 ssid)
 	pick_conf
 	cli status 2>/dev/null | sed -n 's/^ssid=//p' | head -n 1
 	;;
 *)
-	echo "usage: net.sh up|down|pause|resume|ip|scan|join|ssid" >&2
+	echo "usage: net.sh up|down|pause|resume|ip|scan|join|ssid|status" >&2
 	exit 2
 	;;
 esac

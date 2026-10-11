@@ -853,7 +853,8 @@ impl App {
             | QuickRow::Network
             | QuickRow::Search
             | QuickRow::Labels
-            | QuickRow::JoinNetwork => None,
+            | QuickRow::JoinNetwork
+            | QuickRow::WifiStatus => None,
         }
     }
 
@@ -2551,6 +2552,10 @@ impl App {
             QuickRow::Search => self.open_search(),
             QuickRow::Labels => self.download_labels(),
             QuickRow::JoinNetwork => self.open_networks(),
+            QuickRow::WifiStatus => {
+                self.say("Checking Wi-Fi\u{2026}", "");
+                self.net.send(NetJob::Status);
+            }
             QuickRow::Screen | QuickRow::Game | QuickRow::Lights | QuickRow::Network => {
                 if let Some(row) = row.child() {
                     self.phase = Phase::QuickMenu { row };
@@ -2704,7 +2709,8 @@ impl App {
             | QuickRow::Network
             | QuickRow::Search
             | QuickRow::Labels
-            | QuickRow::JoinNetwork => return,
+            | QuickRow::JoinNetwork
+            | QuickRow::WifiStatus => return,
         }
         if QuickRow::LIGHTS.contains(&row) {
             let lights = self.lights();

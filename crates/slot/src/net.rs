@@ -18,6 +18,8 @@ pub enum NetJob {
     },
     /// Looks for networks in range.
     Scan,
+    /// Says in a few words what Wi-Fi is doing.
+    Status,
     /// Joins a network, remembering it for next time. An empty password
     /// joins an open network.
     Join {
@@ -310,6 +312,23 @@ fn work(
                         tally.found, tally.missing
                     ),
                 );
+            }
+            NetJob::Status => {
+                let out = std::process::Command::new("/bin/sh")
+                    .arg(script(root, "net.sh"))
+                    .arg("status")
+                    .env("SLOT_ROOT", root)
+                    .output();
+                let said = match out {
+                    Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+                    Err(e) => format!("Could not check: {e}"),
+                };
+                let said = if said.is_empty() {
+                    "Could not tell, see slot-net.log".to_string()
+                } else {
+                    said
+                };
+                say("Wi-Fi status", said);
             }
             NetJob::Scan => {
                 let out = std::process::Command::new("/bin/sh")

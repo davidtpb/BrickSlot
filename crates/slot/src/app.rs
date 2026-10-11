@@ -369,6 +369,8 @@ pub struct App {
     inspect: bool,
     recent_popup: Option<(Vec<slot_store::library::Played>, usize)>,
     picker: Option<(QuickRow, Vec<QuickValue>, usize)>,
+    /// The tint the Socket backdrop and chrome were painted in.
+    painted_tint: slot_store::Tint,
     favorites: std::collections::HashSet<String>,
     core_popup: Option<usize>,
     resume_popup: Option<usize>,
@@ -525,6 +527,7 @@ impl App {
             inspect: false,
             recent_popup: None,
             picker: None,
+            painted_tint: slot_store::Tint::Default,
             favorites: std::collections::HashSet::new(),
             core_popup: None,
             resume_popup: None,
@@ -607,6 +610,8 @@ impl App {
         let mut app = App::new(carts);
         app.root = Some(root.to_path_buf());
         app.state = read_slot_state(root);
+        slot_ui::set_socket_tint(app.state.tint);
+        app.painted_tint = app.state.tint;
         app.favorites = slot_store::library::read_favorites(root);
         app.rebuild_favorites();
         app.net = crate::net::Net::spawn(root);
@@ -885,6 +890,7 @@ impl App {
                 .collect::<Vec<_>>()
         };
         let list = match row {
+            QuickRow::Tint => each(&mut |s, i| s.tint = slot_store::Tint::ALL[i], 3),
             QuickRow::FastForward => each(&mut |s, i| s.ff_speed = FF_SPEEDS[i], FF_SPEEDS.len()),
             QuickRow::GbaShader => {
                 each(&mut |s, i| s.shader_gba = Shader::GBA[i], Shader::GBA.len())
@@ -2870,6 +2876,7 @@ impl App {
             }
             QuickRow::EjectSave
             | QuickRow::Look
+            | QuickRow::Tint
             | QuickRow::ClockFormat
             | QuickRow::StartFresh
             | QuickRow::Turbo
@@ -2974,6 +2981,7 @@ impl App {
             }
             QuickRow::SaveFormat => s.save_format = s.save_format.other(),
             QuickRow::Look => s.look = s.look.other(),
+            QuickRow::Tint => s.tint = s.tint.step(right),
             QuickRow::ClockFormat => {
                 s.clock_12h = !s.clock_12h;
                 slot_ui::set_twelve_hour(s.clock_12h);
@@ -3254,6 +3262,13 @@ impl App {
         }
         if slot_ui::twelve_hour() != self.state.clock_12h {
             slot_ui::set_twelve_hour(self.state.clock_12h);
+        }
+        slot_ui::set_socket_tint(self.state.tint);
+        if self.painted_tint != self.state.tint {
+            self.painted_tint = self.state.tint;
+            self.dropped_faces.extend(self.socket_backdrop.take());
+            self.dropped_faces
+                .extend(self.socket_chrome.drain(..).map(|(t, _, _)| t));
         }
         let now = self.now();
         let ready = self.core_faces_ready();
@@ -5710,6 +5725,11 @@ fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue>
         QuickRow::ClockFormat => Some(match s.clock_12h {
             true => QuickValue::Hour12,
             false => QuickValue::Hour24,
+        }),
+        QuickRow::Tint => Some(match s.tint {
+            slot_store::Tint::Default => QuickValue::TintDefault,
+            slot_store::Tint::Pastel => QuickValue::TintPastel,
+            slot_store::Tint::Sepia => QuickValue::TintSepia,
         }),
         QuickRow::Look => Some(match s.look {
             Look::Classic => QuickValue::LookClassic,

@@ -50,6 +50,7 @@ pub struct SlotState {
     pub auto_time: bool,
     pub cpu: CpuMode,
     pub look: Look,
+    pub tint: Tint,
     pub clock_12h: bool,
     pub start_fresh: bool,
 }
@@ -113,6 +114,43 @@ impl Look {
             Look::Classic => Look::Socket,
             Look::Socket => Look::Classic,
         }
+    }
+}
+
+/// The colours of the Socket look.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Tint {
+    /// Neutral greys.
+    Default,
+    /// Soft lilac and pink.
+    Pastel,
+    /// Warm browns, like an old photograph.
+    Sepia,
+}
+
+impl Tint {
+    pub const ALL: [Tint; 3] = [Tint::Default, Tint::Pastel, Tint::Sepia];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Tint::Default => "default",
+            Tint::Pastel => "pastel",
+            Tint::Sepia => "sepia",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Tint> {
+        Tint::ALL.into_iter().find(|t| t.name() == name)
+    }
+
+    pub fn step(self, right: bool) -> Tint {
+        let n = Tint::ALL.len();
+        let at = Tint::ALL.iter().position(|&t| t == self).unwrap_or(0);
+        Tint::ALL[if right {
+            (at + 1) % n
+        } else {
+            (at + n - 1) % n
+        }]
     }
 }
 
@@ -233,6 +271,7 @@ impl Default for SlotState {
             auto_time: true,
             cpu: CpuMode::Stock,
             look: Look::Classic,
+            tint: Tint::Default,
             clock_12h: false,
             start_fresh: true,
         }
@@ -253,7 +292,7 @@ pub fn read_slot_state(root: &Path) -> SlotState {
 
 pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     let text = format!(
-        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\nsave_format={}\nauto_time={}\ncpu={}\nlook={}\nclock_12h={}\nstart_fresh={}\n",
+        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\nsave_format={}\nauto_time={}\ncpu={}\nlook={}\nclock_12h={}\nstart_fresh={}\ntint={}\n",
         s.cart.as_deref().unwrap_or(""),
         s.cart_platform.map_or(String::new(), platform_key),
         s.brightness,
@@ -287,7 +326,8 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.cpu.name(),
         s.look.name(),
         s.clock_12h,
-        s.start_fresh
+        s.start_fresh,
+        s.tint.name()
     );
     atomic_write(&state_path(root), text.as_bytes())
 }
@@ -325,6 +365,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut auto_time = None;
     let mut cpu = None;
     let mut look = None;
+    let mut tint = None;
     let mut clock_12h = None;
     let mut start_fresh = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
@@ -363,6 +404,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "auto_time" => auto_time = flag(value),
             "cpu" => cpu = CpuMode::parse(value),
             "look" => look = Look::parse(value),
+            "tint" => tint = Tint::parse(value),
             "clock_12h" => clock_12h = value.parse().ok(),
             "start_fresh" => start_fresh = value.parse().ok(),
             "shader_gb" => shader_gb = Shader::parse(value).filter(|s| Shader::GB.contains(s)),
@@ -404,6 +446,7 @@ fn parse(text: &str) -> Option<SlotState> {
         auto_time: auto_time.unwrap_or(fallback.auto_time),
         cpu: cpu.unwrap_or(fallback.cpu),
         look: look.unwrap_or(fallback.look),
+        tint: tint.unwrap_or(fallback.tint),
         clock_12h: clock_12h.unwrap_or(fallback.clock_12h),
         start_fresh: start_fresh.unwrap_or(fallback.start_fresh),
     })

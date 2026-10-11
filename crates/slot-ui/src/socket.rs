@@ -501,11 +501,51 @@ pub(crate) fn rounded_rect(
     }
 }
 
+static TINT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Colours the Socket look's greys: neutral, pastel or sepia.
+pub fn set_socket_tint(tint: slot_store::Tint) {
+    let i = slot_store::Tint::ALL
+        .iter()
+        .position(|&t| t == tint)
+        .unwrap_or(0);
+    TINT.store(i as u8, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn socket_tint() -> slot_store::Tint {
+    let i = TINT.load(std::sync::atomic::Ordering::Relaxed) as usize;
+    slot_store::Tint::ALL
+        .get(i)
+        .copied()
+        .unwrap_or(slot_store::Tint::Default)
+}
+
+/// The colour a grey of the Socket look takes under the chosen tint: light
+/// greys turn to the tint's paper, dark ones stay dark, and colours (the red
+/// close pill) stay as they are.
+pub fn tinted(grey: [u8; 3]) -> [u8; 3] {
+    let paper: [f32; 3] = match socket_tint() {
+        slot_store::Tint::Default => return grey,
+        slot_store::Tint::Pastel => [252.0, 226.0, 255.0],
+        slot_store::Tint::Sepia => [255.0, 233.0, 196.0],
+    };
+    if grey[0] != grey[1] || grey[1] != grey[2] {
+        return grey;
+    }
+    let g = grey[0] as f32;
+    paper.map(|p| (g / 255.0 * p).round().clamp(0.0, 255.0) as u8)
+}
+
 /// The backdrop: mid grey, lighter behind the carts and darker toward the
 /// bottom, under a fine grid of pale dots.
 pub fn socket_backdrop() -> UndoFace {
     let (w, h) = (OUT_W, OUT_H);
     let mut rgba = vec![0u8; (w * h * 4) as usize];
+    let mut shades = [[0u8; 3]; 256];
+    for (i, shade) in shades.iter_mut().enumerate() {
+        *shade = tinted([i as u8; 3]);
+    }
+    let paint = |c: [u8; 3]| shades[c[0] as usize];
     const PITCH: f32 = 10.0;
     for y in 0..h {
         for x in 0..w {
@@ -522,8 +562,9 @@ pub fn socket_backdrop() -> UndoFace {
             let dot = (1.4 - d).clamp(0.0, 1.0);
             g += 26.0 * dot * (1.0 - 0.5 * v);
             let c = g.round().clamp(0.0, 255.0) as u8;
+            let [r, g, b] = paint([c, c, c]);
             let at = ((y * w + x) * 4) as usize;
-            rgba[at..at + 4].copy_from_slice(&[c, c, c, 255]);
+            rgba[at..at + 4].copy_from_slice(&[r, g, b, 255]);
         }
     }
     UndoFace { rgba, w, h }
@@ -776,6 +817,18 @@ impl SocketScreen<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tint_colours_the_greys_and_leaves_the_red_alone() {
+        let red = [223, 77, 83];
+        set_socket_tint(slot_store::Tint::Sepia);
+        let paper = tinted([220, 220, 220]);
+        let kept = tinted(red);
+        set_socket_tint(slot_store::Tint::Default);
+        assert!(paper[0] > paper[2], "sepia is not warm: {paper:?}");
+        assert_eq!(kept, red);
+        assert_eq!(tinted([220, 220, 220]), [220, 220, 220]);
+    }
 
     #[test]
     fn a_flat_card_keeps_its_box() {

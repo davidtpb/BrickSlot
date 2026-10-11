@@ -38,6 +38,7 @@ pub enum QuickRow {
     Labels,
     FileTransfer,
     Look,
+    Tint,
     ClockFormat,
     JoinNetwork,
     StartFresh,
@@ -45,7 +46,7 @@ pub enum QuickRow {
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 36] = [
+    pub const ALL: [QuickRow; 37] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -78,6 +79,7 @@ impl QuickRow {
         QuickRow::Labels,
         QuickRow::FileTransfer,
         QuickRow::Look,
+        QuickRow::Tint,
         QuickRow::ClockFormat,
         QuickRow::JoinNetwork,
         QuickRow::StartFresh,
@@ -94,10 +96,11 @@ impl QuickRow {
         QuickRow::About,
     ];
 
-    pub const SCREEN: [QuickRow; 8] = [
+    pub const SCREEN: [QuickRow; 9] = [
         QuickRow::Brightness,
         QuickRow::Warmth,
         QuickRow::Look,
+        QuickRow::Tint,
         QuickRow::ClockFormat,
         QuickRow::GbaShader,
         QuickRow::GbShader,
@@ -148,6 +151,7 @@ impl QuickRow {
             | QuickRow::ColourCorrection
             | QuickRow::GbPalettes
             | QuickRow::Look
+            | QuickRow::Tint
             | QuickRow::ClockFormat => &QuickRow::SCREEN,
             QuickRow::LightMode
             | QuickRow::LightColour
@@ -230,6 +234,7 @@ impl QuickRow {
             QuickRow::Search => "Search Games",
             QuickRow::Performance => "Performance",
             QuickRow::Look => "Style",
+            QuickRow::Tint => "Theme",
             QuickRow::ClockFormat => "Clock",
             QuickRow::Labels => "Download Labels",
             QuickRow::JoinNetwork => "Join Network",
@@ -321,6 +326,9 @@ pub enum QuickValue {
     CpuPerformance,
     LookClassic,
     LookSocket,
+    TintDefault,
+    TintPastel,
+    TintSepia,
     Hour12,
     Hour24,
 }
@@ -339,7 +347,7 @@ impl QuickValue {
         QuickValue::Level9,
     ];
 
-    pub const ALL: [QuickValue; 55] = [
+    pub const ALL: [QuickValue; 58] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -393,6 +401,9 @@ impl QuickValue {
         QuickValue::CpuPerformance,
         QuickValue::LookClassic,
         QuickValue::LookSocket,
+        QuickValue::TintDefault,
+        QuickValue::TintPastel,
+        QuickValue::TintSepia,
         QuickValue::Hour12,
         QuickValue::Hour24,
     ];
@@ -456,6 +467,9 @@ impl QuickValue {
             QuickValue::CpuPerformance => "Performance",
             QuickValue::LookClassic => "Slot",
             QuickValue::LookSocket => "Socket",
+            QuickValue::TintDefault => "Default",
+            QuickValue::TintPastel => "Pastel",
+            QuickValue::TintSepia => "Sepia",
             QuickValue::Hour12 => "12-hour",
             QuickValue::Hour24 => "24-hour",
         }

@@ -269,3 +269,23 @@ fn a_flips_an_on_off_setting_in_the_socket_look() {
         Some(QuickValue::On | QuickValue::Off)
     ));
 }
+
+#[test]
+fn the_theme_picker_repaints_the_socket_backdrop_and_keeps_the_choice() {
+    use slot_ui::{QuickRow, QuickValue};
+    let (d, mut a) = shelf_with(Look::Socket);
+    a.set_socket_backdrop(slot_ui::TexId::from_raw(77));
+    open_row(&mut a, QuickRow::Tint);
+    assert_eq!(a.quick_value(QuickRow::Tint), Some(QuickValue::TintDefault));
+    press(&mut a, Btn::A);
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::A);
+    assert_eq!(a.quick_value(QuickRow::Tint), Some(QuickValue::TintSepia));
+    a.update(0.016);
+    assert!(a.wants_socket_backdrop(), "the old backdrop is kept");
+    assert_eq!(
+        slot_store::read_slot_state(d.path()).tint,
+        slot_store::Tint::Sepia
+    );
+}

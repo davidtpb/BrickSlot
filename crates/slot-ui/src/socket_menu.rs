@@ -121,6 +121,7 @@ fn chrome_size(c: Chrome) -> (u32, u32) {
 }
 
 fn block(w: u32, h: u32, r: f32, fill: [u8; 3], outline: bool) -> UndoFace {
+    let fill = crate::socket::tinted(fill);
     let mut rgba = vec![0u8; (w * h * 4) as usize];
     let (wf, hf) = (w as f32, h as f32);
     if outline {

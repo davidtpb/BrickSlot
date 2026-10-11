@@ -103,10 +103,10 @@ pub use slot_chrome::{
     ALERT_PX, LIP_H, MOUTH_H, MOUTH_W,
 };
 pub use socket::{
-    inter_font, inter_text_face, run_width, socket_backdrop, socket_bar_face, socket_bottom_slot,
-    socket_pill_face, socket_tab_slot, sway, tilt, SocketScreen, Status as SocketStatus, KEY_SEP,
-    SOCKET_BOTTOM, SOCKET_CLOCK, SOCKET_L, SOCKET_NAME, SOCKET_R, SOCKET_SLOTS, SOCKET_SPLIT,
-    SOCKET_STATUS, SOCKET_TABS,
+    inter_font, inter_text_face, run_width, set_socket_tint, socket_backdrop, socket_bar_face,
+    socket_bottom_slot, socket_pill_face, socket_tab_slot, socket_tint, sway, tilt, tinted,
+    SocketScreen, Status as SocketStatus, KEY_SEP, SOCKET_BOTTOM, SOCKET_CLOCK, SOCKET_L,
+    SOCKET_NAME, SOCKET_R, SOCKET_SLOTS, SOCKET_SPLIT, SOCKET_STATUS, SOCKET_TABS,
 };
 pub use socket_menu::{
     caption_slot, chrome_face, inspect_caption_slot, inspect_hint_slot, inspect_value_slot,

@@ -30,7 +30,7 @@ pub use ring::{StateEntry, StateRing, RING_MAX};
 pub use scan::{initial, is_hidden, listing, scan, sort_key, Cart, StoreError};
 pub use search::{fold, rank};
 pub use slot_state::{
-    read_slot_state, write_slot_state, CpuMode, Look, SaveFormat, Shader, SlotState,
+    read_slot_state, write_slot_state, CpuMode, Look, SaveFormat, Shader, SlotState, Tint,
     BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, FF_SPEED_DEFAULT, UTC_OFFSET_MAX, UTC_OFFSET_MIN,
     VOLUME_MAX,
 };

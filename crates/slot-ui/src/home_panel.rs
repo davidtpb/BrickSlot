@@ -12,18 +12,16 @@ pub enum HomeTile {
     Rumble,
     Wifi,
     Lights,
-    Restart,
     Power,
 }
 
 impl HomeTile {
-    pub const ALL: [HomeTile; 7] = [
+    pub const ALL: [HomeTile; 6] = [
         HomeTile::Screenshot,
         HomeTile::Sound,
         HomeTile::Rumble,
         HomeTile::Wifi,
         HomeTile::Lights,
-        HomeTile::Restart,
         HomeTile::Power,
     ];
 
@@ -34,7 +32,6 @@ impl HomeTile {
             HomeTile::Rumble => "Rumble",
             HomeTile::Wifi => "Wi-Fi",
             HomeTile::Lights => "Lights",
-            HomeTile::Restart => "Restart",
             HomeTile::Power => "Power",
         }
     }
@@ -100,9 +97,9 @@ const INSET: f32 = 20.0;
 const TITLE_Y: f32 = CARD_Y + 8.0;
 const TITLE_H: u32 = 40;
 
-pub const TILE_W: f32 = 80.0;
+pub const TILE_W: f32 = 92.0;
 pub const TILE_H: f32 = 84.0;
-const TILE_GAP: f32 = 7.0;
+const TILE_GAP: f32 = 10.0;
 pub const TILES_Y: f32 = CARD_Y + 56.0;
 pub const TILES_X: f32 = CARD_X
     + (CARD_W - TILE_W * HomeTile::ALL.len() as f32 - TILE_GAP * (HomeTile::ALL.len() - 1) as f32)

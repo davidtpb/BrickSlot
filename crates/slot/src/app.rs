@@ -47,8 +47,6 @@ const POWER_OFF_S: f32 = 0.16;
 const VOLUME_STEP: u8 = 5;
 /// How often the Home panel re-reads the temperature, clock and memory.
 const HOME_STATS_MS: Millis = 1000;
-/// How long Restart waits for its second press.
-const RESTART_CONFIRM_MS: Millis = 3000;
 
 const AUTOSAVE_MS: Millis = 60_000;
 const CARD_CHECK_MS: Millis = 2_000;
@@ -368,8 +366,6 @@ pub struct App {
     core_popup: Option<usize>,
     resume_popup: Option<usize>,
     left_off: Option<Vec<u8>>,
-    restart_armed_at: Option<Millis>,
-    restart_after_eject: bool,
     dropped_faces: Vec<TexId>,
     shell_generation: u32,
     settings_faces: Vec<Option<(TexId, u32, u32)>>,
@@ -521,8 +517,6 @@ impl App {
             core_popup: None,
             resume_popup: None,
             left_off: None,
-            restart_armed_at: None,
-            restart_after_eject: false,
             dropped_faces: Vec::new(),
             shell_generation: 0,
             settings_faces: Vec::new(),
@@ -2059,33 +2053,6 @@ impl App {
         }
     }
 
-    /// Whether Restart has been pressed once and waits for a second press.
-    fn restart_armed(&self) -> bool {
-        self.restart_armed_at
-            .is_some_and(|at| self.now().saturating_sub(at) <= RESTART_CONFIRM_MS)
-    }
-
-    /// Takes the game out without keeping where it got to and puts it back
-    /// fresh, so it starts from the save on the card.
-    fn restart_game(&mut self) {
-        let cart = match &mut self.phase {
-            Phase::Playing { cart } => std::mem::take(cart),
-            _ => return,
-        };
-        eprintln!("slot: restart: {cart} from the save on the card");
-        self.end_link();
-        self.close_game_menu();
-        self.settle_saves();
-        self.pending = None;
-        self.refusal = None;
-        self.refused_from = None;
-        self.restart_after_eject = true;
-        self.phase = Phase::Ejecting {
-            cart,
-            t: -EJECT_HOLD_S,
-        };
-    }
-
     pub fn home_open(&self) -> bool {
         self.home.is_some()
     }
@@ -2107,7 +2074,6 @@ impl App {
 
     fn close_home(&mut self) {
         self.home = None;
-        self.restart_armed_at = None;
     }
 
     fn home_tick(&mut self) {
@@ -2173,17 +2139,6 @@ impl App {
             slot_ui::HomeTile::Rumble => self.change_setting(QuickRow::Rumble, true),
             slot_ui::HomeTile::Wifi => self.change_setting(QuickRow::Wifi, true),
             slot_ui::HomeTile::Lights => self.change_setting(QuickRow::LightMode, true),
-            slot_ui::HomeTile::Restart => {
-                if !matches!(self.phase, Phase::Playing { .. }) {
-                    return self.say("Restart works in a game", "");
-                }
-                if !self.restart_armed() {
-                    self.restart_armed_at = Some(self.now());
-                    return;
-                }
-                self.close_home();
-                self.restart_game();
-            }
             slot_ui::HomeTile::Power => {
                 self.close_home();
                 self.open_power_menu();
@@ -2198,7 +2153,6 @@ impl App {
             slot_ui::HomeTile::Rumble => self.state.rumble,
             slot_ui::HomeTile::Wifi => self.state.wifi,
             slot_ui::HomeTile::Lights => self.state.light_mode != LightMode::Off,
-            slot_ui::HomeTile::Restart => self.restart_armed(),
             slot_ui::HomeTile::Power => false,
         })
     }
@@ -2225,8 +2179,6 @@ impl App {
                     LightMode::Colour => "Colour",
                     LightMode::Off => "Off",
                 },
-                slot_ui::HomeTile::Restart if on[i] => "Press A again",
-                slot_ui::HomeTile::Restart => "From save",
                 slot_ui::HomeTile::Power => "Menu",
                 _ if on[i] => "On",
                 _ => "Off",
@@ -3001,9 +2953,6 @@ impl App {
         if let Some(phase) = next {
             self.phase = phase;
             self.refused_from = None;
-            if matches!(self.phase, Phase::Shelf) && std::mem::take(&mut self.restart_after_eject) {
-                self.insert(true);
-            }
             let seated = match &self.phase {
                 Phase::Playing { cart } => Some(cart.clone()),
                 _ => None,

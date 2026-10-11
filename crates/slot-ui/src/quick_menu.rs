@@ -34,10 +34,11 @@ pub enum QuickRow {
     SaveFormat,
     AutoTime,
     Search,
+    Performance,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 28] = [
+    pub const ALL: [QuickRow; 29] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -66,6 +67,7 @@ impl QuickRow {
         QuickRow::SaveFormat,
         QuickRow::AutoTime,
         QuickRow::Search,
+        QuickRow::Performance,
     ];
 
     pub const MAIN: [QuickRow; 7] = [
@@ -87,7 +89,7 @@ impl QuickRow {
         QuickRow::GbPalettes,
     ];
 
-    pub const GAME: [QuickRow; 7] = [
+    pub const GAME: [QuickRow; 8] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Rewind,
@@ -95,6 +97,7 @@ impl QuickRow {
         QuickRow::Rumble,
         QuickRow::EjectSave,
         QuickRow::SaveFormat,
+        QuickRow::Performance,
     ];
 
     pub const LIGHTS: [QuickRow; 4] = [
@@ -136,7 +139,8 @@ impl QuickRow {
             | QuickRow::Turbo
             | QuickRow::Rumble
             | QuickRow::EjectSave
-            | QuickRow::SaveFormat => &QuickRow::GAME,
+            | QuickRow::SaveFormat
+            | QuickRow::Performance => &QuickRow::GAME,
             _ => &QuickRow::MAIN,
         }
     }
@@ -195,6 +199,7 @@ impl QuickRow {
             QuickRow::SaveFormat => "Save Format",
             QuickRow::AutoTime => "Set Time Automatically",
             QuickRow::Search => "Search Games",
+            QuickRow::Performance => "Performance",
         }
     }
 
@@ -272,6 +277,9 @@ pub enum QuickValue {
     Candy,
     Police,
     Heartbeat,
+    CpuStock,
+    CpuSaver,
+    CpuPerformance,
 }
 
 impl QuickValue {
@@ -288,7 +296,7 @@ impl QuickValue {
         QuickValue::Level9,
     ];
 
-    pub const ALL: [QuickValue; 48] = [
+    pub const ALL: [QuickValue; 51] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -337,6 +345,9 @@ impl QuickValue {
         QuickValue::Candy,
         QuickValue::Police,
         QuickValue::Heartbeat,
+        QuickValue::CpuStock,
+        QuickValue::CpuSaver,
+        QuickValue::CpuPerformance,
     ];
 
     pub fn index(self) -> usize {
@@ -393,6 +404,9 @@ impl QuickValue {
             QuickValue::Candy => "Candy",
             QuickValue::Police => "Police",
             QuickValue::Heartbeat => "Heartbeat",
+            QuickValue::CpuStock => "Default",
+            QuickValue::CpuSaver => "Battery Saver",
+            QuickValue::CpuPerformance => "Performance",
         }
     }
 

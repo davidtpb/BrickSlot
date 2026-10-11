@@ -8,9 +8,9 @@ use slot_input::{Action, Btn, MUTE_CHORD_MS};
 use slot_power::{Battery, Charge, LedState, LidPolicy, Lights, LightsEffect, LightsMode, Power};
 use slot_retro::LinkChannel;
 use slot_store::{
-    format_stamp, read_slot_state, scan, write_slot_state, Cart, Core, GbPalette, LightColour,
-    LightEffect, LightLevel, LightMode, Platform, SaveFormat, Shader, SlotState, StateEntry,
-    StateRing, Theme, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX, VOLUME_MAX,
+    format_stamp, read_slot_state, scan, write_slot_state, Cart, Core, CpuMode, GbPalette,
+    LightColour, LightEffect, LightLevel, LightMode, Platform, SaveFormat, Shader, SlotState,
+    StateEntry, StateRing, Theme, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX, VOLUME_MAX,
 };
 use slot_ui::{
     board_from, board_zoom, draw_backdrop, draw_empty_slot, draw_footer, draw_slot_name,
@@ -227,6 +227,14 @@ pub const LINKED_HOLD_MS: Millis = 1000;
 pub const UNPLUG_HOLD_MS: Millis = 420;
 
 pub const PLAY_GAP_MS: Millis = 1000;
+
+fn cpu_profile(mode: CpuMode) -> slot_power::CpuProfile {
+    match mode {
+        CpuMode::Stock => slot_power::CpuProfile::Stock,
+        CpuMode::Saver => slot_power::CpuProfile::Saver,
+        CpuMode::Performance => slot_power::CpuProfile::Performance,
+    }
+}
 
 pub const SCREENSHOTS: &str = "Screenshots";
 
@@ -716,6 +724,11 @@ impl App {
             QuickRow::Syncthing => Some(QuickValue::flag(self.state.syncthing)),
             QuickRow::Achievements => Some(QuickValue::flag(self.state.achievements)),
             QuickRow::AutoTime => Some(QuickValue::flag(self.state.auto_time)),
+            QuickRow::Performance => Some(match self.state.cpu {
+                CpuMode::Stock => QuickValue::CpuStock,
+                CpuMode::Saver => QuickValue::CpuSaver,
+                CpuMode::Performance => QuickValue::CpuPerformance,
+            }),
             QuickRow::SaveFormat => Some(match self.state.save_format {
                 SaveFormat::RetroArch => QuickValue::RetroArch,
                 SaveFormat::Slot => QuickValue::Slot,
@@ -1118,6 +1131,9 @@ impl App {
             self.phase = clock_screen(secs, 0, false);
         }
         power.set_lights(self.lights());
+        if self.state.cpu != CpuMode::Stock {
+            power.set_cpu(cpu_profile(self.state.cpu));
+        }
         self.power = Some(power);
         self.battery_at = self.now();
         self.charge_at = self.now();
@@ -1644,6 +1660,7 @@ impl App {
             | QuickRow::Achievements
             | QuickRow::SaveFormat
             | QuickRow::AutoTime
+            | QuickRow::Performance
             | QuickRow::Rumble => {}
         }
     }
@@ -1725,6 +1742,13 @@ impl App {
             QuickRow::AutoTime => {
                 s.auto_time = !s.auto_time;
                 self.clock_asked = false;
+            }
+            QuickRow::Performance => {
+                s.cpu = s.cpu.step(right);
+                let profile = cpu_profile(s.cpu);
+                if let Some(power) = &mut self.power {
+                    power.set_cpu(profile);
+                }
             }
             QuickRow::Achievements => {
                 s.achievements = !s.achievements;

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::{Battery, Charge, LedState, Lights, LightsEffect, LightsMode, Platform};
+use crate::{Battery, Charge, CpuProfile, LedState, Lights, LightsEffect, LightsMode, Platform};
 
 const TOP_STEP: u32 = 9;
 
@@ -145,6 +145,7 @@ pub struct DevicePlatform {
     led_state: Option<LedState>,
     disp_dark: bool,
     rainbow: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    cpu_stock: Option<CpuSettings>,
 }
 
 impl DevicePlatform {
@@ -204,6 +205,7 @@ impl DevicePlatform {
             led_state: None,
             disp_dark: false,
             rainbow: None,
+            cpu_stock: None,
         }
     }
 
@@ -240,6 +242,7 @@ impl DevicePlatform {
             led_state: None,
             disp_dark: false,
             rainbow: None,
+            cpu_stock: None,
         }
     }
 
@@ -658,6 +661,97 @@ pub fn hue_rgb(hue: f32) -> u32 {
     byte(r) << 16 | byte(g) << 8 | byte(b)
 }
 
+const CPUFREQ: &str = "devices/system/cpu/cpu0/cpufreq";
+
+/// Battery Saver keeps the clock at or under this.
+const SAVER_MAX_KHZ: u32 = 1_200_000;
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct CpuSettings {
+    governor: String,
+    min: u32,
+    max: u32,
+}
+
+impl CpuSettings {
+    fn read(dir: &Path) -> Option<CpuSettings> {
+        Some(CpuSettings {
+            governor: fs::read_to_string(dir.join("scaling_governor"))
+                .ok()?
+                .trim()
+                .to_string(),
+            min: read_number(&dir.join("scaling_min_freq"))?,
+            max: read_number(&dir.join("scaling_max_freq"))?,
+        })
+    }
+
+    fn frequencies(dir: &Path) -> Vec<u32> {
+        let mut f: Vec<u32> = fs::read_to_string(dir.join("scaling_available_frequencies"))
+            .unwrap_or_default()
+            .split_whitespace()
+            .filter_map(|v| v.parse().ok())
+            .collect();
+        f.sort_unstable();
+        f
+    }
+
+    fn governor_of(dir: &Path, wanted: &[&str], fallback: &str) -> String {
+        let have = fs::read_to_string(dir.join("scaling_available_governors")).unwrap_or_default();
+        wanted
+            .iter()
+            .find(|g| have.split_whitespace().any(|h| h == **g))
+            .map_or(fallback.to_string(), |g| g.to_string())
+    }
+
+    fn saver(&self, dir: &Path) -> CpuSettings {
+        let f = CpuSettings::frequencies(dir);
+        let lowest = f.first().copied().unwrap_or(self.min);
+        let cap = f
+            .iter()
+            .copied()
+            .filter(|&k| k <= SAVER_MAX_KHZ)
+            .max()
+            .unwrap_or(self.max.min(SAVER_MAX_KHZ));
+        CpuSettings {
+            governor: CpuSettings::governor_of(
+                dir,
+                &["conservative", "ondemand", "schedutil"],
+                &self.governor,
+            ),
+            min: lowest,
+            max: cap.max(lowest),
+        }
+    }
+
+    fn performance(&self, dir: &Path) -> CpuSettings {
+        let f = CpuSettings::frequencies(dir);
+        let top = f.last().copied().unwrap_or(self.max);
+        CpuSettings {
+            governor: CpuSettings::governor_of(dir, &["performance"], &self.governor),
+            min: top,
+            max: top,
+        }
+    }
+
+    /// Opens the range out first, so the min never sits above the max on
+    /// the way, then narrows it to what is wanted.
+    fn write(&self, dir: &Path) {
+        let put = |name: &str, v: String| {
+            if let Err(e) = fs::write(dir.join(name), v) {
+                eprintln!("slot: cpu {name}: {e}");
+            }
+        };
+        let f = CpuSettings::frequencies(dir);
+        if let (Some(lo), Some(hi)) = (f.first(), f.last()) {
+            put("scaling_min_freq", lo.to_string());
+            put("scaling_max_freq", hi.to_string());
+        }
+        put("scaling_governor", self.governor.clone());
+        put("scaling_max_freq", self.max.to_string());
+        put("scaling_min_freq", self.min.to_string());
+    }
+}
+
 const SUSPEND_TRIES: u32 = 5;
 
 /// Writes "mem" to /sys/power/state, which returns once the handheld wakes.
@@ -876,6 +970,24 @@ impl Platform for DevicePlatform {
                 }
             }
         }
+    }
+
+    fn set_cpu(&mut self, profile: CpuProfile) {
+        let dir = self.sysfs.join(CPUFREQ);
+        let Some(now) = CpuSettings::read(&dir) else {
+            return;
+        };
+        let stock = self.cpu_stock.get_or_insert(now).clone();
+        let want = match profile {
+            CpuProfile::Stock => stock,
+            CpuProfile::Saver => stock.saver(&dir),
+            CpuProfile::Performance => stock.performance(&dir),
+        };
+        want.write(&dir);
+        eprintln!(
+            "slot: cpu {profile:?}: {} {}-{} kHz",
+            want.governor, want.min, want.max
+        );
     }
 
     fn can_deep_sleep(&self) -> bool {

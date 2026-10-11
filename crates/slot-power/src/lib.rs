@@ -72,6 +72,15 @@ impl LightsEffect {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum CpuProfile {
+    /// Whatever the system set, left alone.
+    #[default]
+    Stock,
+    Saver,
+    Performance,
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Lights {
     pub mode: LightsMode,
@@ -108,6 +117,8 @@ pub trait Platform: Send {
     }
 
     fn set_lights(&mut self, _lights: Lights) {}
+
+    fn set_cpu(&mut self, _profile: CpuProfile) {}
 
     /// Whether the handheld can suspend to RAM instead of powering off
     /// after sleeping a while.

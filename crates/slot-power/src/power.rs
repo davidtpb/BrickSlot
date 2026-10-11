@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::{Battery, Charge, LedState, LidPolicy, Lights, Platform};
+use crate::{Battery, Charge, CpuProfile, LedState, LidPolicy, Lights, Platform};
 
 pub struct Power {
     platform: Box<dyn Platform>,
@@ -44,6 +44,10 @@ impl Power {
 
     pub fn set_led(&mut self, state: LedState) {
         self.platform.set_led(state)
+    }
+
+    pub fn set_cpu(&mut self, profile: CpuProfile) {
+        self.platform.set_cpu(profile);
     }
 
     pub fn can_deep_sleep(&self) -> bool {

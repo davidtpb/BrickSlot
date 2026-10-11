@@ -270,3 +270,59 @@ fn the_new_effects_play_over_a_static_light() {
     assert_ne!(m, "FFFFFF", "Aurora never drew");
     assert_ne!(m, lr, "the lights are not offset along the palette");
 }
+
+fn cpufreq(sys: &TempDir) -> std::path::PathBuf {
+    let dir = sys.path().join("devices/system/cpu/cpu0/cpufreq");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("scaling_available_frequencies"),
+        "408000 600000 816000 1008000 1200000 1416000 1608000 1800000\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("scaling_available_governors"),
+        "ondemand userspace powersave conservative performance\n",
+    )
+    .unwrap();
+    fs::write(dir.join("scaling_governor"), "ondemand\n").unwrap();
+    fs::write(dir.join("scaling_min_freq"), "1008000\n").unwrap();
+    fs::write(dir.join("scaling_max_freq"), "1800000\n").unwrap();
+    dir
+}
+
+#[test]
+fn performance_profiles_set_the_clock_range_and_default_puts_it_back() {
+    use slot_power::CpuProfile;
+    let (sys, dev) = brick_pro_tree();
+    let dir = cpufreq(&sys);
+    let mut p = brick_pro(&sys, &dev);
+    let now = |f: &str| fs::read_to_string(dir.join(f)).unwrap().trim().to_string();
+    p.set_cpu(CpuProfile::Saver);
+    assert_eq!(
+        (
+            now("scaling_governor"),
+            now("scaling_min_freq"),
+            now("scaling_max_freq")
+        ),
+        ("conservative".into(), "408000".into(), "1200000".into())
+    );
+    p.set_cpu(CpuProfile::Performance);
+    assert_eq!(
+        (
+            now("scaling_governor"),
+            now("scaling_min_freq"),
+            now("scaling_max_freq")
+        ),
+        ("performance".into(), "1800000".into(), "1800000".into())
+    );
+    p.set_cpu(CpuProfile::Stock);
+    assert_eq!(
+        (
+            now("scaling_governor"),
+            now("scaling_min_freq"),
+            now("scaling_max_freq")
+        ),
+        ("ondemand".into(), "1008000".into(), "1800000".into()),
+        "Default did not put back what the system had"
+    );
+}

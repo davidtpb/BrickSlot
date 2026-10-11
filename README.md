@@ -52,7 +52,7 @@ Release notes can be found in the [changelog](CHANGELOG.md).
 | Anbernic RG35XXSP  | Yes                        | 1.5.0         |
 | Anbernic 35XX Plus | Yes                        | 1.5.0         |
 | Anbernic RG28XX    | Yes                        | 1.6.0         |
-| TrimUI Brick Pro   | Untested port              | Unreleased    |
+| TrimUI Brick Pro   | Yes (early, tested)        | Unreleased    |
 | TrimUI Brick       | Untested port              | Unreleased    |
 
 RG28XX support was contributed by [GamerAnim](https://github.com/GamerAnim). Its panel is mounted

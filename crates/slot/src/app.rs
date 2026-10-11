@@ -1899,7 +1899,7 @@ impl App {
             charging: self
                 .battery
                 .is_some_and(|b| matches!(b.charge, Charge::Charging)),
-            wifi: self.state.wifi,
+            wifi: self.net.online(),
         };
         lines[slot_ui::SOCKET_STATUS] = (status.text(), true);
         if let Some(cart) = self.shelf().carts.get(self.shelf().index) {

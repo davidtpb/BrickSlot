@@ -181,3 +181,19 @@ fn the_classic_style_keeps_the_board_for_the_core() {
     press(&mut a, Btn::Start);
     assert!(!a.core_popup_open());
 }
+
+#[test]
+fn the_wifi_mark_waits_for_a_connection_not_just_the_switch() {
+    let d = common::tmp_root_with_carts(&["Fusion", "Zero Mission"]);
+    let mut s = slot_store::read_slot_state(d.path());
+    s.clock_set = true;
+    s.look = Look::Socket;
+    s.wifi = true;
+    slot_store::write_slot_state(d.path(), &s).unwrap();
+    let (a, _) = app_booting_at(d.path(), CLOCK_IS_SET);
+    let status = &a.socket_lines().unwrap()[slot_ui::SOCKET_STATUS].0;
+    assert!(
+        !slot_ui::SocketStatus::parse(status).wifi,
+        "Wi-Fi shows as connected before any network was joined: {status}"
+    );
+}

@@ -17,6 +17,7 @@ pub mod fileserver;
 pub mod frames;
 pub mod frontend;
 pub mod input;
+pub mod keyboard;
 pub mod label_cache;
 pub mod labels;
 pub mod latency;

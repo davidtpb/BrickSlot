@@ -16,6 +16,59 @@ pub enum NetJob {
         title: String,
         port: u16,
     },
+    /// Looks for networks in range.
+    Scan,
+    /// Joins a network, remembering it for next time. An empty password
+    /// joins an open network.
+    Join {
+        ssid: String,
+        psk: String,
+    },
+}
+
+/// A network in range.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Network {
+    pub ssid: String,
+    /// Signal strength in dBm: nearer zero is stronger.
+    pub signal: i32,
+    pub secured: bool,
+}
+
+impl Network {
+    /// Signal as bars from 1 to 4.
+    pub fn bars(&self) -> u8 {
+        match self.signal {
+            s if s >= -55 => 4,
+            s if s >= -67 => 3,
+            s if s >= -78 => 2,
+            _ => 1,
+        }
+    }
+}
+
+/// The networks `net.sh scan` printed, strongest first.
+pub fn parse_scan(text: &str) -> Vec<Network> {
+    let mut out: Vec<Network> = text
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, '\t');
+            let signal = parts.next()?.trim().parse().ok()?;
+            let flags = parts.next()?;
+            let ssid = parts.next()?.trim_end_matches('\r');
+            (!ssid.is_empty()).then(|| Network {
+                ssid: ssid.to_string(),
+                signal,
+                secured: ["WPA", "WEP", "RSN", "SAE"]
+                    .iter()
+                    .any(|k| flags.contains(k)),
+            })
+        })
+        .collect();
+    out.sort_by_key(|n| std::cmp::Reverse(n.signal));
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|n| seen.insert(n.ssid.clone()));
+    out
 }
 
 pub const SYNCTHING_PORT: u16 = 8384;
@@ -26,6 +79,7 @@ pub struct Net {
     sent: Vec<NetJob>,
     online: Arc<AtomicBool>,
     clock: Option<Receiver<i64>>,
+    networks: Option<Receiver<Vec<Network>>>,
 }
 
 impl Net {
@@ -36,6 +90,7 @@ impl Net {
             sent: Vec::new(),
             online: Arc::new(AtomicBool::new(false)),
             clock: None,
+            networks: None,
         }
     }
 
@@ -46,12 +101,13 @@ impl Net {
         let (jobs, rx) = std::sync::mpsc::channel();
         let (tell, said) = std::sync::mpsc::channel();
         let (set, clock) = std::sync::mpsc::channel();
+        let (found, networks) = std::sync::mpsc::channel();
         let root = root.to_path_buf();
         let online = Arc::new(AtomicBool::new(false));
         let up = online.clone();
         let spawned = std::thread::Builder::new()
             .name("slot-net".into())
-            .spawn(move || work(&root, &rx, &tell, &up, &set));
+            .spawn(move || work(&root, &rx, &tell, &up, &set, &found));
         if let Err(e) = spawned {
             eprintln!("slot: net: {e}");
             return Net::idle();
@@ -62,6 +118,7 @@ impl Net {
             sent: Vec::new(),
             online,
             clock: Some(clock),
+            networks: Some(networks),
         }
     }
 
@@ -83,6 +140,11 @@ impl Net {
     /// Seconds since 1970 (UTC) from a time server, once one has answered.
     pub fn clock(&self) -> Option<i64> {
         self.clock.as_ref()?.try_recv().ok()
+    }
+
+    /// The networks a scan found, once it has finished.
+    pub fn networks(&self) -> Option<Vec<Network>> {
+        self.networks.as_ref()?.try_recv().ok()
     }
 
     pub fn heard(&self) -> Option<(String, String)> {
@@ -194,6 +256,7 @@ fn work(
     tell: &Sender<(String, String)>,
     online: &AtomicBool,
     clock: &Sender<i64>,
+    found: &Sender<Vec<Network>>,
 ) {
     let say = |title: &str, detail: String| {
         let _ = tell.send((title.to_string(), detail));
@@ -207,7 +270,10 @@ fn work(
                         online.store(true, Ordering::Relaxed);
                         say("Wi-Fi connected", ip);
                     }
-                    None => say("Wi-Fi did not connect", "Check Config/wifi.txt".into()),
+                    None => say(
+                        "Wi-Fi did not connect",
+                        "Join a network under Network".into(),
+                    ),
                 }
             }
             NetJob::WifiDown => {
@@ -245,6 +311,45 @@ fn work(
                     ),
                 );
             }
+            NetJob::Scan => {
+                let out = std::process::Command::new("/bin/sh")
+                    .arg(script(root, "net.sh"))
+                    .arg("scan")
+                    .env("SLOT_ROOT", root)
+                    .output();
+                let networks = match out {
+                    Ok(o) => parse_scan(&String::from_utf8_lossy(&o.stdout)),
+                    Err(e) => {
+                        eprintln!("slot: net: scan: {e}");
+                        Vec::new()
+                    }
+                };
+                eprintln!("slot: net: scan found {} networks", networks.len());
+                let _ = found.send(networks);
+            }
+            NetJob::Join { ssid, psk } => {
+                online.store(false, Ordering::Relaxed);
+                let joined = std::process::Command::new("/bin/sh")
+                    .arg(script(root, "net.sh"))
+                    .arg("join")
+                    .env("SLOT_ROOT", root)
+                    .env("NET_SSID", &ssid)
+                    .env("NET_PSK", &psk)
+                    .status();
+                if let Err(e) = joined {
+                    eprintln!("slot: net: join: {e}");
+                }
+                match wait_address(root) {
+                    Some(ip) => {
+                        online.store(true, Ordering::Relaxed);
+                        say(&format!("Joined {ssid}"), ip);
+                    }
+                    None => say(
+                        &format!("Could not join {ssid}"),
+                        "Check the password, or see slot-net.log".into(),
+                    ),
+                }
+            }
             NetJob::SyncClock => match network_time() {
                 Some(secs) => {
                     let _ = clock.send(secs);
@@ -252,5 +357,31 @@ fn work(
                 None => eprintln!("slot: net: no time server answered"),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod scan_tests {
+    use super::*;
+
+    #[test]
+    fn a_scan_reads_strongest_first_without_repeats_or_hidden_networks() {
+        let text = "-70\t[WPA2-PSK-CCMP][ESS]\tHome Net\n-48\t[WPA2-PSK-CCMP][ESS]\tHome Net\n-60\t[ESS]\tCafe\n-80\t[WPA2]\t\nnonsense\n";
+        let n = parse_scan(text);
+        assert_eq!(
+            n.iter().map(|n| n.ssid.as_str()).collect::<Vec<_>>(),
+            ["Home Net", "Cafe"]
+        );
+        assert_eq!(n[0].signal, -48);
+        assert!(n[0].secured);
+        assert!(!n[1].secured);
+        assert_eq!(n[0].bars(), 4);
+        assert_eq!(n[1].bars(), 3);
+    }
+
+    #[test]
+    fn a_name_with_tabs_or_spaces_is_kept_whole() {
+        let n = parse_scan("-50\t[WPA2]\tMy  Home\tNet\n");
+        assert_eq!(n[0].ssid, "My  Home\tNet");
     }
 }

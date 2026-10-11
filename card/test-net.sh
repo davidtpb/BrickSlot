@@ -1,23 +1,43 @@
 #!/bin/sh
 set -eu
+[ -n "${NET_TEST_TRACE:-}" ] && set -x
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/System/net.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
-mkdir -p "$TMP/card/Config" "$TMP/run" "$TMP/bin"
+mkdir -p "$TMP/card/Config" "$TMP/run" "$TMP/bin" "$TMP/sys/wlan0"
 LOG="$TMP/calls"
-for tool in ip wpa_supplicant wpa_cli udhcpc; do
+for tool in ip wpa_supplicant udhcpc; do
 	printf '#!/bin/sh\necho "%s $*" >> "%s"\n' "$tool" "$LOG" > "$TMP/bin/$tool"
 	chmod +x "$TMP/bin/$tool"
 done
+cat > "$TMP/bin/wpa_cli" <<STUB
+#!/bin/sh
+echo "wpa_cli \$*" >> "$LOG"
+case "\$*" in
+*scan_results*)
+	printf 'bssid / frequency / signal level / flags / ssid\n'
+	printf 'aa:01\t2412\t-70\t[WPA2-PSK-CCMP][ESS]\tHome Net\n'
+	printf 'aa:02\t5180\t-48\t[WPA2-PSK-CCMP][ESS]\tHome Net\n'
+	printf 'aa:03\t2437\t-60\t[ESS]\tCafe\n'
+	printf 'aa:04\t2462\t-80\t[WPA2-PSK-CCMP][ESS]\t\n'
+	;;
+*list_networks*)
+	printf 'network id / ssid / bssid / flags\n'
+	printf '0\tHome Net\tany\t\n1\tNew Place\tany\t\n'
+	;;
+esac
+exit 0
+STUB
+chmod +x "$TMP/bin/wpa_cli"
 
 net() {
 	SLOT_ROOT="$TMP/card" AGS_RUN="$TMP/run" AGS_NET_CONF="$TMP/etc/wpa.conf" \
-		AGS_NET_CTRL="$TMP/etc/sockets" AGS_IP="$TMP/bin/ip" \
+		AGS_NET_CTRL="$TMP/etc/sockets" AGS_IP="$TMP/bin/ip" AGS_NET_SYS="$TMP/sys" \
 		AGS_WPA_SUPPLICANT="$TMP/bin/wpa_supplicant" AGS_WPA_CLI="$TMP/bin/wpa_cli" \
-		AGS_UDHCPC="$TMP/bin/udhcpc" sh "$SCRIPT" "$@"
+		AGS_WPA_PASSPHRASE="$TMP/bin/none" AGS_UDHCPC="$TMP/bin/udhcpc" sh "$SCRIPT" "$@"
 }
 
 fail() {
@@ -32,6 +52,7 @@ grep -q 'psk="hunter22"' "$TMP/etc/wpa.conf" || fail "wifi.txt password was not 
 grep -q "ctrl_interface=$TMP/etc/sockets" "$TMP/etc/wpa.conf" || fail "no control socket"
 [ -f "$TMP/run/slot-wifi.on" ] || fail "up did not remember Wi-Fi is on"
 grep -q '^udhcpc -i wlan0' "$LOG" || fail "no dhcp client was started"
+[ -s "$TMP/card/slot-net.log" ] || fail "nothing was logged"
 
 net up
 [ "$(grep -c 'ssid="Home Net"' "$TMP/etc/wpa.conf")" = 1 ] || fail "network added twice"
@@ -49,5 +70,27 @@ net down
 : > "$LOG"
 net resume
 [ ! -s "$LOG" ] || fail "resume brought Wi-Fi back after it was turned off"
+
+out="$(net scan)"
+first="$(echo "$out" | head -n 1)"
+[ "$(echo "$first" | cut -f3)" = "Home Net" ] || fail "the strongest network is not first: $out"
+[ "$(echo "$first" | cut -f1)" = "-48" ] || fail "a network kept its weaker signal: $out"
+[ "$(echo "$out" | grep -c 'Home Net')" = 1 ] || fail "a network was listed twice: $out"
+echo "$out" | grep -q "$(printf '\tCafe$')" || fail "an open network is missing: $out"
+[ "$(echo "$out" | wc -l)" = 2 ] || fail "a hidden network was listed: $out"
+
+: > "$LOG"
+NET_SSID="New Place" NET_PSK='p@ss "word"' net join
+grep -q 'ssid="New Place"' "$TMP/etc/wpa.conf" || fail "join did not remember the network"
+grep -q 'select_network 1' "$LOG" || fail "join did not switch to the network"
+[ -f "$TMP/run/slot-wifi.on" ] || fail "join did not leave Wi-Fi on"
+NET_SSID="New Place" NET_PSK='other' net join
+[ "$(grep -c 'ssid="New Place"' "$TMP/etc/wpa.conf")" = 1 ] || fail "joining again kept the old password too"
+grep -q 'psk="other"' "$TMP/etc/wpa.conf" || fail "the new password was not kept"
+grep -q 'ssid="Home Net"' "$TMP/etc/wpa.conf" || fail "joining forgot another network"
+
+NET_SSID="Cafe" NET_PSK="" net join
+awk '/ssid="Cafe"/{f=1} f&&/key_mgmt=NONE/{ok=1} END{exit !ok}' "$TMP/etc/wpa.conf" ||
+	fail "an open network was not joined without a password"
 
 echo "net: all passed"

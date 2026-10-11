@@ -39,10 +39,11 @@ pub enum QuickRow {
     FileTransfer,
     Look,
     ClockFormat,
+    JoinNetwork,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 33] = [
+    pub const ALL: [QuickRow; 34] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -76,6 +77,7 @@ impl QuickRow {
         QuickRow::FileTransfer,
         QuickRow::Look,
         QuickRow::ClockFormat,
+        QuickRow::JoinNetwork,
     ];
 
     pub const MAIN: [QuickRow; 7] = [
@@ -117,8 +119,9 @@ impl QuickRow {
         QuickRow::LightLevel,
     ];
 
-    pub const NETWORK: [QuickRow; 6] = [
+    pub const NETWORK: [QuickRow; 7] = [
         QuickRow::Wifi,
+        QuickRow::JoinNetwork,
         QuickRow::AutoTime,
         QuickRow::FileTransfer,
         QuickRow::Syncthing,
@@ -149,7 +152,8 @@ impl QuickRow {
             | QuickRow::Syncthing
             | QuickRow::Achievements
             | QuickRow::Labels
-            | QuickRow::FileTransfer => &QuickRow::NETWORK,
+            | QuickRow::FileTransfer
+            | QuickRow::JoinNetwork => &QuickRow::NETWORK,
             QuickRow::FastForward
             | QuickRow::FastForwardSound
             | QuickRow::Rewind
@@ -220,6 +224,7 @@ impl QuickRow {
             QuickRow::Look => "Style",
             QuickRow::ClockFormat => "Clock",
             QuickRow::Labels => "Download Labels",
+            QuickRow::JoinNetwork => "Join Network",
             QuickRow::FileTransfer => "File Transfer",
         }
     }
@@ -235,6 +240,7 @@ impl QuickRow {
                 | QuickRow::Network
                 | QuickRow::Search
                 | QuickRow::Labels
+                | QuickRow::JoinNetwork
         )
     }
 

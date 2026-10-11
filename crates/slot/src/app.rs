@@ -307,6 +307,18 @@ pub enum Phase {
         cart: Option<String>,
     },
     Search,
+    /// The networks in range, to pick one to join.
+    Networks {
+        list: Vec<crate::net::Network>,
+        at: usize,
+        scanning: bool,
+    },
+    /// Typing the password for a network.
+    Password {
+        ssid: String,
+        keys: crate::keyboard::Keyboard,
+        list: Vec<crate::net::Network>,
+    },
 }
 
 pub struct App {
@@ -835,7 +847,8 @@ impl App {
             | QuickRow::Lights
             | QuickRow::Network
             | QuickRow::Search
-            | QuickRow::Labels => None,
+            | QuickRow::Labels
+            | QuickRow::JoinNetwork => None,
         }
     }
 
@@ -1521,6 +1534,8 @@ impl App {
                 _ => {}
             },
             Phase::Search => self.search_input(action),
+            Phase::Networks { .. } => self.networks_input(action),
+            Phase::Password { .. } => self.password_input(action),
             Phase::Inserting { .. } if action == Action::Eject => self.eject(),
             Phase::Playing { .. } => match action {
                 Action::GbaDown(Btn::L1) if self.slot_owns_the_shoulders() => {
@@ -1625,7 +1640,10 @@ impl App {
     }
 
     pub fn wants_socket_chrome(&self) -> bool {
-        (self.socket_look() || self.customize.is_some() || self.core_popup.is_some())
+        (self.socket_look()
+            || self.customize.is_some()
+            || self.core_popup.is_some()
+            || matches!(self.phase, Phase::Networks { .. }))
             && self.socket_chrome.is_empty()
     }
 
@@ -1717,9 +1735,11 @@ impl App {
         let core_popup = self
             .core_popup
             .filter(|_| matches!(self.phase, Phase::Shelf));
+        let networks = matches!(self.phase, Phase::Networks { .. });
         let shown = (self.socket_look() && (row.is_some() || self.power_menu.is_some()))
             || customizing.is_some()
-            || core_popup.is_some();
+            || core_popup.is_some()
+            || networks;
         if !shown {
             return None;
         }
@@ -1778,6 +1798,29 @@ impl App {
                 lines[slot_ui::option_slot(i)] = (text, true);
             }
             lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+        }
+        if let Phase::Networks { list, scanning, .. } = &self.phase {
+            let (first, shown, _) = self.networks_window();
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Wi-Fi Networks".into(), true);
+            if *scanning {
+                lines[slot_ui::option_slot(0)] = ("Looking for networks\u{2026}".into(), true);
+            } else if list.is_empty() {
+                lines[slot_ui::option_slot(0)] = ("No networks found".into(), true);
+            }
+            for (i, n) in list.iter().skip(first).take(shown).enumerate() {
+                let bars: String = (1..=4)
+                    .map(|b| {
+                        if b <= n.bars() {
+                            '\u{25cf}'
+                        } else {
+                            '\u{25cb}'
+                        }
+                    })
+                    .collect();
+                let open = if n.secured { "" } else { "   Open" };
+                lines[slot_ui::option_slot(i)] = (format!("{}   {bars}{open}", n.ssid), true);
+            }
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close    Y  Scan again"), true);
         }
         if self.power_menu.is_some() {
             lines[slot_ui::POPUP_TITLE_SLOT] = ("Power".into(), true);
@@ -2203,6 +2246,119 @@ impl App {
         self.home_faces = faces;
     }
 
+    pub fn search_light(&self) -> bool {
+        self.socket_look() || matches!(self.phase, Phase::Password { .. })
+    }
+
+    fn open_networks(&mut self) {
+        if !self.state.wifi {
+            self.state.wifi = true;
+            self.persist();
+        }
+        self.net.send(NetJob::Scan);
+        self.phase = Phase::Networks {
+            list: Vec::new(),
+            at: 0,
+            scanning: true,
+        };
+    }
+
+    /// The first network the list shows, how many it shows, and which of
+    /// them the cursor is on.
+    fn networks_window(&self) -> (usize, usize, Option<usize>) {
+        let Phase::Networks { list, at, scanning } = &self.phase else {
+            return (0, 0, None);
+        };
+        if *scanning || list.is_empty() {
+            return (0, 0, None);
+        }
+        let shown = list.len().min(slot_ui::POPUP_OPTIONS);
+        let first = at.saturating_sub(shown - 1).min(list.len() - shown);
+        (first, shown, Some(at - first))
+    }
+
+    /// Puts a finished scan's networks on the list, while it is up.
+    pub fn networks_found(&mut self, found: Vec<crate::net::Network>) {
+        if let Phase::Networks { list, at, scanning } = &mut self.phase {
+            *list = found;
+            *at = 0;
+            *scanning = false;
+        }
+    }
+
+    fn back_to_join(&mut self) {
+        self.phase = Phase::QuickMenu {
+            row: QuickRow::JoinNetwork,
+        };
+    }
+
+    fn join(&mut self, ssid: String, psk: String) {
+        self.say(format!("Joining {ssid}"), "");
+        self.net.send(NetJob::Join { ssid, psk });
+        self.back_to_join();
+    }
+
+    fn networks_input(&mut self, action: Action) {
+        let Phase::Networks { list, at, scanning } = &mut self.phase else {
+            return;
+        };
+        let n = list.len();
+        match action {
+            Action::GbaDown(Btn::Up) if n > 0 && !*scanning => *at = (*at + n - 1) % n,
+            Action::GbaDown(Btn::Down) if n > 0 && !*scanning => *at = (*at + 1) % n,
+            Action::GbaDown(Btn::Y) if !*scanning => {
+                *scanning = true;
+                self.net.send(NetJob::Scan);
+            }
+            Action::GbaDown(Btn::A) if n > 0 && !*scanning => {
+                let picked = list[*at].clone();
+                let list = std::mem::take(list);
+                if picked.secured {
+                    self.phase = Phase::Password {
+                        ssid: picked.ssid,
+                        keys: crate::keyboard::Keyboard::default(),
+                        list,
+                    };
+                } else {
+                    self.join(picked.ssid, String::new());
+                }
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => self.back_to_join(),
+            _ => {}
+        }
+    }
+
+    fn password_input(&mut self, action: Action) {
+        let Phase::Password { ssid, keys, list } = &mut self.phase else {
+            return;
+        };
+        match action {
+            Action::GbaDown(Btn::Up) => keys.step(0, -1),
+            Action::GbaDown(Btn::Down) => keys.step(0, 1),
+            Action::GbaDown(Btn::Left) | Action::ShelfLeft => keys.step(-1, 0),
+            Action::GbaDown(Btn::Right) | Action::ShelfRight => keys.step(1, 0),
+            Action::GbaDown(Btn::A) => keys.type_key(),
+            Action::GbaDown(Btn::X) => keys.space(),
+            Action::GbaDown(Btn::Y) => keys.next_layer(),
+            Action::GbaDown(Btn::B) => {
+                if !keys.delete() {
+                    let at = list.iter().position(|n| n.ssid == *ssid).unwrap_or(0);
+                    self.phase = Phase::Networks {
+                        list: std::mem::take(list),
+                        at,
+                        scanning: false,
+                    };
+                }
+            }
+            Action::GbaDown(Btn::Start) if !keys.text.is_empty() => {
+                let (ssid, psk) = (ssid.clone(), keys.text.clone());
+                self.join(ssid, psk);
+            }
+            Action::QuickMenu => self.back_to_join(),
+            _ => {}
+        }
+    }
+
     fn open_search(&mut self) {
         self.shelf_mut().release_hold();
         self.play_held = None;
@@ -2290,6 +2446,9 @@ impl App {
     /// The text for every slot of the search screen and whether it is lit,
     /// while the screen is up.
     pub fn search_lines(&self) -> Option<Vec<(String, bool)>> {
+        if let Phase::Password { ssid, keys, .. } = &self.phase {
+            return Some(password_lines(ssid, keys));
+        }
         if !matches!(self.phase, Phase::Search) {
             return None;
         }
@@ -2362,6 +2521,7 @@ impl App {
             QuickRow::About => self.phase = Phase::About,
             QuickRow::Search => self.open_search(),
             QuickRow::Labels => self.download_labels(),
+            QuickRow::JoinNetwork => self.open_networks(),
             QuickRow::Screen | QuickRow::Game | QuickRow::Lights | QuickRow::Network => {
                 if let Some(row) = row.child() {
                     self.phase = Phase::QuickMenu { row };
@@ -2512,7 +2672,8 @@ impl App {
             | QuickRow::Lights
             | QuickRow::Network
             | QuickRow::Search
-            | QuickRow::Labels => return,
+            | QuickRow::Labels
+            | QuickRow::JoinNetwork => return,
         }
         if QuickRow::LIGHTS.contains(&row) {
             let lights = self.lights();
@@ -2739,6 +2900,11 @@ impl App {
         self.timers();
         self.poll_link();
         self.home_tick();
+        if matches!(self.phase, Phase::Networks { scanning: true, .. }) {
+            if let Some(found) = self.net.networks() {
+                self.networks_found(found);
+            }
+        }
         if slot_ui::twelve_hour() != self.state.clock_12h {
             slot_ui::set_twelve_hour(self.state.clock_12h);
         }
@@ -2850,6 +3016,7 @@ impl App {
                 Some(slot_ui::HOME_SPLIT)
             }
             (Phase::Search, None) if self.socket_look() => Some(slot_ui::SEARCH_SPLIT),
+            (Phase::Password { .. }, None) => Some(slot_ui::SEARCH_SPLIT),
             (Phase::QuickMenu { .. }, None) if self.socket_look() => Some(slot_ui::SETTINGS_SPLIT),
             (Phase::QuickMenu { .. }, None) => Some(slot_ui::QUICK_SPLIT),
             (Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }, None)
@@ -3413,6 +3580,32 @@ impl App {
                 light: self.socket_look(),
             }
             .draw(out),
+            Phase::Password { keys, .. } => slot_ui::SearchScreen {
+                faces: &self.search_faces,
+                row: keys.row,
+                col: keys.col,
+                pick: Some(1),
+                picked_ms: 0,
+                light: true,
+            }
+            .draw(out),
+            Phase::Networks { .. } => {
+                out.push(Draw::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: OUT_W as f32,
+                    h: OUT_H as f32,
+                    colour: [0.2, 0.2, 0.2, 1.0],
+                });
+                let (_, shown, focus) = self.networks_window();
+                slot_ui::SocketPopup {
+                    chrome: &self.socket_chrome,
+                    faces: &self.settings_faces,
+                    options: shown.max(1),
+                    focus: focus.unwrap_or(usize::MAX),
+                }
+                .draw(out);
+            }
         }
         if let Some(picker) = self.core_picker_shown() {
             self.draw_core_picker(&picker, out);
@@ -4972,4 +5165,32 @@ fn draw_menu_rows(
             alpha: 1.0,
         });
     }
+}
+
+/// The search screen's slots, filled for typing a network's password.
+fn password_lines(ssid: &str, keys: &crate::keyboard::Keyboard) -> Vec<(String, bool)> {
+    let mut lines = vec![(String::new(), false); slot_ui::SEARCH_SLOTS];
+    lines[slot_ui::SEARCH_QUERY] = (format!("Join {ssid}"), true);
+    lines[slot_ui::search_hit_slot(0)] = ("Password".into(), false);
+    lines[slot_ui::search_hit_slot(1)] = (format!("{}_", keys.text), true);
+    let layers: Vec<String> = crate::keyboard::LAYER_NAMES
+        .iter()
+        .enumerate()
+        .map(|(i, n)| match i == keys.layer {
+            true => format!("[{n}]"),
+            false => n.to_string(),
+        })
+        .collect();
+    lines[slot_ui::search_hit_slot(3)] = (format!("Y  {}", layers.join("  ")), false);
+    for (row, ks) in crate::keyboard::LAYERS[keys.layer].iter().enumerate() {
+        for (col, k) in ks.iter().enumerate() {
+            let lit = (row, col) == (keys.row, keys.col);
+            lines[slot_ui::search_key_slot(row, col)] = (k.to_string(), lit);
+        }
+    }
+    lines[slot_ui::SEARCH_LEGEND] = (
+        "A type   B delete   X space   Y shift   START join".into(),
+        false,
+    );
+    lines
 }

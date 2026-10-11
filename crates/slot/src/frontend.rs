@@ -312,7 +312,7 @@ impl Frontend {
         let Some(lines) = self.session.app().search_lines() else {
             return;
         };
-        let light = self.session.app().socket_look();
+        let light = self.session.app().search_light();
         let face = match light {
             true => slot_ui::search_face_light,
             false => slot_ui::search_face,

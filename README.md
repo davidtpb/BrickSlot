@@ -101,6 +101,7 @@ saves, and the files in the old format are kept as `.bak`.
 
 These live in the quick menu (tap MENU on the shelf).
 
+- **Join Network** (Settings > Network): scans for networks in range, then joins one, with an on-screen keyboard for its password (Y switches between lower case, upper case and symbols). Joined networks are remembered. What Wi-Fi does is logged to `slot-net.log` on the card.
 - **Saves put on the card**: a save copied in from another device or a backup is noticed when the game goes in, which then starts from it instead of where it was left. **Restart** on the Home panel (press A twice) does the same by hand.
 - **Customize** (**X** on the shelf): pick the selected game's cart material (Default, Opaque, Clear, Glitter) and colour from a grid, seen on the cart as you go. B closes and keeps it in `Config/cart_shell.txt`.
 - **Clock** (Settings > Screen > Clock): 24-hour or 12-hour time with AM/PM.

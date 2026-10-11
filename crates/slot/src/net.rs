@@ -11,6 +11,11 @@ pub enum NetJob {
     SyncthingStop,
     SyncClock,
     Labels(Vec<crate::labels::Wanted>),
+    /// Says where a page served on this port can be reached.
+    Announce {
+        title: String,
+        port: u16,
+    },
 }
 
 pub const SYNCTHING_PORT: u16 = 8384;
@@ -226,6 +231,10 @@ fn work(
             NetJob::SyncthingStop => {
                 run(root, "syncthing.sh", "stop");
             }
+            NetJob::Announce { title, port } => match address(root) {
+                Some(ip) => say(&title, format!("http://{ip}:{port}")),
+                None => say(&title, format!("Port {port}, but Wi-Fi has no address")),
+            },
             NetJob::Labels(wanted) => {
                 let tally = crate::labels::fetch_all(&wanted, crate::labels::http_get);
                 say(

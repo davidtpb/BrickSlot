@@ -13,6 +13,7 @@ pub mod crash;
 pub mod drc;
 pub mod emu;
 pub mod face_builder;
+pub mod fileserver;
 pub mod frames;
 pub mod frontend;
 pub mod input;

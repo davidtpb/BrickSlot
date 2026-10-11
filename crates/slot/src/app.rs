@@ -331,6 +331,7 @@ pub struct App {
     net: crate::net::Net,
     cheevos_login: CheevosLogin,
     clock_asked: bool,
+    file_server: Option<crate::fileserver::FileServer>,
     power_quiet_until: Millis,
     play_key: Option<String>,
     play_ms: Millis,
@@ -467,6 +468,7 @@ impl App {
             net: crate::net::Net::idle(),
             cheevos_login: CheevosLogin::Waiting,
             clock_asked: false,
+            file_server: None,
             power_quiet_until: 0,
             play_key: None,
             play_ms: 0,
@@ -724,6 +726,7 @@ impl App {
             QuickRow::Syncthing => Some(QuickValue::flag(self.state.syncthing)),
             QuickRow::Achievements => Some(QuickValue::flag(self.state.achievements)),
             QuickRow::AutoTime => Some(QuickValue::flag(self.state.auto_time)),
+            QuickRow::FileTransfer => Some(QuickValue::flag(self.file_server.is_some())),
             QuickRow::Performance => Some(match self.state.cpu {
                 CpuMode::Stock => QuickValue::CpuStock,
                 CpuMode::Saver => QuickValue::CpuSaver,
@@ -1478,6 +1481,28 @@ impl App {
         }
     }
 
+    fn toggle_file_transfer(&mut self) {
+        if self.file_server.take().is_some() {
+            return self.say("File transfer off", "");
+        }
+        if !self.net.online() {
+            return self.say("Turn on Wi-Fi first", "Network > Wi-Fi");
+        }
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        match crate::fileserver::FileServer::start(&root, crate::fileserver::PORT) {
+            Ok(server) => {
+                self.net.send(NetJob::Announce {
+                    title: "File transfer on".into(),
+                    port: server.port,
+                });
+                self.file_server = Some(server);
+            }
+            Err(e) => self.say("File transfer would not start", e.to_string()),
+        }
+    }
+
     fn download_labels(&mut self) {
         if !self.net.online() {
             return self.say("Turn on Wi-Fi first", "Network > Wi-Fi");
@@ -1694,6 +1719,7 @@ impl App {
             | QuickRow::SaveFormat
             | QuickRow::AutoTime
             | QuickRow::Performance
+            | QuickRow::FileTransfer
             | QuickRow::Rumble => {}
         }
     }
@@ -1766,12 +1792,14 @@ impl App {
                 } else {
                     s.syncthing = false;
                     s.achievements = false;
+                    self.file_server = None;
                     crate::cheevos::enable(false);
                     self.cheevos_login = CheevosLogin::Waiting;
                     self.net.send(NetJob::WifiDown);
                 }
             }
             QuickRow::SaveFormat => s.save_format = s.save_format.other(),
+            QuickRow::FileTransfer => return self.toggle_file_transfer(),
             QuickRow::AutoTime => {
                 s.auto_time = !s.auto_time;
                 self.clock_asked = false;

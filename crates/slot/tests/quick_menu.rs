@@ -682,9 +682,9 @@ fn syncthing_brings_wifi_with_it_and_wifi_off_takes_syncthing_down() {
     press(&mut a, Btn::Right);
     assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::On));
     assert_eq!(a.quick_value(QuickRow::Syncthing), Some(QuickValue::On));
-    press(&mut a, Btn::Up);
-    press(&mut a, Btn::Up);
-    assert_eq!(a.quick_menu(), Some(QuickRow::Wifi));
+    while a.quick_menu() != Some(QuickRow::Wifi) {
+        press(&mut a, Btn::Up);
+    }
     press(&mut a, Btn::Right);
     assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::Off));
     assert_eq!(a.quick_value(QuickRow::Syncthing), Some(QuickValue::Off));
@@ -714,10 +714,9 @@ fn retroachievements_needs_wifi_and_goes_when_wifi_does() {
     assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::On));
     assert_eq!(a.net_jobs(), [NetJob::WifiUp]);
     assert!(read_slot_state(d.path()).achievements);
-    press(&mut a, Btn::Up);
-    press(&mut a, Btn::Up);
-    press(&mut a, Btn::Up);
-    assert_eq!(a.quick_menu(), Some(QuickRow::Wifi));
+    while a.quick_menu() != Some(QuickRow::Wifi) {
+        press(&mut a, Btn::Up);
+    }
     press(&mut a, Btn::Right);
     assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::Off));
     assert_eq!(a.quick_value(QuickRow::Achievements), Some(QuickValue::Off));
@@ -752,4 +751,16 @@ fn set_time_automatically_is_on_by_default_and_can_be_turned_off() {
     press(&mut a, Btn::Right);
     assert_eq!(a.quick_value(QuickRow::AutoTime), Some(QuickValue::Off));
     assert!(!read_slot_state(d.path()).auto_time);
+}
+
+#[test]
+fn file_transfer_needs_wifi_and_is_never_left_on_from_the_menu_alone() {
+    let (_d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::FileTransfer);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::FileTransfer), Some(QuickValue::Off));
+    assert_eq!(
+        a.take_message().map(|m| m.0),
+        Some("Turn on Wi-Fi first".to_string())
+    );
 }

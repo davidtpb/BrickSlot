@@ -36,10 +36,11 @@ pub enum QuickRow {
     Search,
     Performance,
     Labels,
+    FileTransfer,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 30] = [
+    pub const ALL: [QuickRow; 31] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -70,6 +71,7 @@ impl QuickRow {
         QuickRow::Search,
         QuickRow::Performance,
         QuickRow::Labels,
+        QuickRow::FileTransfer,
     ];
 
     pub const MAIN: [QuickRow; 7] = [
@@ -109,9 +111,10 @@ impl QuickRow {
         QuickRow::LightLevel,
     ];
 
-    pub const NETWORK: [QuickRow; 5] = [
+    pub const NETWORK: [QuickRow; 6] = [
         QuickRow::Wifi,
         QuickRow::AutoTime,
+        QuickRow::FileTransfer,
         QuickRow::Syncthing,
         QuickRow::Achievements,
         QuickRow::Labels,
@@ -137,7 +140,8 @@ impl QuickRow {
             | QuickRow::AutoTime
             | QuickRow::Syncthing
             | QuickRow::Achievements
-            | QuickRow::Labels => &QuickRow::NETWORK,
+            | QuickRow::Labels
+            | QuickRow::FileTransfer => &QuickRow::NETWORK,
             QuickRow::FastForward
             | QuickRow::FastForwardSound
             | QuickRow::Rewind
@@ -206,6 +210,7 @@ impl QuickRow {
             QuickRow::Search => "Search Games",
             QuickRow::Performance => "Performance",
             QuickRow::Labels => "Download Labels",
+            QuickRow::FileTransfer => "File Transfer",
         }
     }
 

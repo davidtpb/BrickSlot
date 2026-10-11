@@ -115,6 +115,16 @@ These live in the quick menu (tap MENU on the shelf).
 - **Network > Wi-Fi**: joins the networks you saved in TrimUI's own Wi-Fi menu. To add
   one by hand, put `ssid = ...` and `password = ...` lines in `Config/wifi.txt`. Link play
   borrows the radio and gives it back afterwards.
+- **Network > File Transfer**: a web page at the address the banner shows
+  (`http://<ip>:8080`) for uploading and downloading games, saves, states, labels,
+  screenshots and BIOS files from a computer or phone on the same Wi-Fi. It only reaches
+  those folders, has no password, and is off again after every restart.
+- **Network > Download Labels**: fetches box art from the libretro thumbnail collection for
+  every game with no label yet (official games mostly; ROM hacks usually are not there).
+  Restart to see them.
+- **Gameplay > Performance**: Default (as the system set it), Battery Saver (up to 1.2 GHz)
+  or Performance (flat out).
+- **Screenshots**: MENU + A in a game saves the picture to `Screenshots/`.
 - **Network > Set Time Automatically** (on by default): once Wi-Fi connects, the clock is
   set from an internet time server. Your time zone stays the one picked under Date & Time.
 - **Network > Syncthing**: runs Syncthing so saves and states sync with your computer or

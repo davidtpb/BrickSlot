@@ -80,6 +80,14 @@ What changes on TrimUI hardware:
 - The card is `/mnt/SDCARD`, and brickslot leaves the boot logo alone.
 - The 1024x768 panel is 4:3, so the same 640x480 bezel art fits it.
 
+## Saves
+
+In-game (battery) saves are written the way RetroArch writes them:
+`Saves/GBA/<game>.srm`, plus `<game>.rtc` for Game Boy carts with a clock. RetroArch,
+NextUI and other RetroArch-based firmware can load them, and theirs load here. A `.sav`
+from an older slot is still read, and is renamed to `.sav.bak` the first time the game
+saves again.
+
 ## Extras borrowed from NextUI and NX Redux
 
 These live in the quick menu (tap MENU on the shelf).

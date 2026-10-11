@@ -49,7 +49,7 @@ fn eject_clears_the_slot_only_after_the_state_is_durable() {
     let r = StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald");
     assert_eq!(r.read_resume().unwrap().unwrap().len(), 1024);
     assert_eq!(
-        std::fs::read(d.path().join("Saves/GBA/Emerald.sav")).unwrap(),
+        std::fs::read(d.path().join("Saves/GBA/Emerald.srm")).unwrap(),
         b"savdata"
     );
     assert!(

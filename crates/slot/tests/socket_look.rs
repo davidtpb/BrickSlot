@@ -121,6 +121,9 @@ fn socket_settings_put_the_categories_left_and_the_page_right() {
         lines[slot_ui::value_slot(0)].1,
         "the first setting is not under the cursor"
     );
+    assert!(lines[slot_ui::SETTINGS_HINT].0.ends_with("Choose"));
+    press(&mut a, Btn::Down);
+    let lines = a.settings_lines().unwrap();
     assert!(lines[slot_ui::SETTINGS_HINT].0.ends_with("Change"));
 }
 
@@ -196,4 +199,73 @@ fn the_wifi_mark_waits_for_a_connection_not_just_the_switch() {
         !slot_ui::SocketStatus::parse(status).wifi,
         "Wi-Fi shows as connected before any network was joined: {status}"
     );
+}
+
+fn open_row(a: &mut App, target: slot_ui::QuickRow) {
+    a.apply(Action::QuickMenu);
+    let parent = target.parent().expect("a page row");
+    while !matches!(a.phase(), Phase::QuickMenu { row } if *row == parent) {
+        press(a, Btn::Down);
+    }
+    press(a, Btn::A);
+    while !matches!(a.phase(), Phase::QuickMenu { row } if *row == target) {
+        press(a, Btn::Down);
+    }
+}
+
+#[test]
+fn a_on_a_many_choice_setting_opens_a_picker_and_a_picks() {
+    use slot_ui::{QuickRow, QuickValue};
+    let (d, mut a) = shelf_with(Look::Socket);
+    open_row(&mut a, QuickRow::LightEffect);
+    let before = a.quick_value(QuickRow::LightEffect);
+    press(&mut a, Btn::A);
+    assert!(a.picker_open());
+    let lines = a.settings_lines().unwrap();
+    assert_eq!(
+        lines[slot_ui::POPUP_TITLE_SLOT].0,
+        QuickRow::LightEffect.label()
+    );
+    assert!(lines[slot_ui::option_slot(0)].0.contains('\u{2713}'));
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::A);
+    assert!(!a.picker_open());
+    let after = a.quick_value(QuickRow::LightEffect);
+    assert_ne!(after, before);
+    assert_eq!(after, Some(QuickValue::Blink));
+    assert_eq!(
+        slot_store::read_slot_state(d.path()).light_effect,
+        slot_store::LightEffect::Blink
+    );
+}
+
+#[test]
+fn b_closes_the_picker_without_changing_the_setting() {
+    use slot_ui::QuickRow;
+    let (_d, mut a) = shelf_with(Look::Socket);
+    open_row(&mut a, QuickRow::GbaShader);
+    let before = a.quick_value(QuickRow::GbaShader);
+    press(&mut a, Btn::A);
+    assert!(a.picker_open());
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::B);
+    assert!(!a.picker_open());
+    assert_eq!(a.quick_value(QuickRow::GbaShader), before);
+    assert!(matches!(a.phase(), Phase::QuickMenu { .. }));
+}
+
+#[test]
+fn a_flips_an_on_off_setting_in_the_socket_look() {
+    use slot_ui::{QuickRow, QuickValue};
+    let (_d, mut a) = shelf_with(Look::Socket);
+    open_row(&mut a, QuickRow::Rewind);
+    let before = a.quick_value(QuickRow::Rewind);
+    press(&mut a, Btn::A);
+    assert!(!a.picker_open());
+    assert_ne!(a.quick_value(QuickRow::Rewind), before);
+    assert!(matches!(
+        a.quick_value(QuickRow::Rewind),
+        Some(QuickValue::On | QuickValue::Off)
+    ));
 }

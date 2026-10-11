@@ -368,6 +368,7 @@ pub struct App {
     fav_shelf: Shelf,
     inspect: bool,
     recent_popup: Option<(Vec<slot_store::library::Played>, usize)>,
+    picker: Option<(QuickRow, Vec<QuickValue>, usize)>,
     favorites: std::collections::HashSet<String>,
     core_popup: Option<usize>,
     resume_popup: Option<usize>,
@@ -523,6 +524,7 @@ impl App {
             fav_shelf: Shelf::new(Vec::new()),
             inspect: false,
             recent_popup: None,
+            picker: None,
             favorites: std::collections::HashSet::new(),
             core_popup: None,
             resume_popup: None,
@@ -865,86 +867,108 @@ impl App {
 
     pub fn quick_value(&self, row: QuickRow) -> Option<QuickValue> {
         match row {
-            QuickRow::FastForward => QuickValue::speed(self.state.ff_speed),
-            QuickRow::FastForwardSound => Some(QuickValue::flag(self.state.ff_sound)),
-            QuickRow::ColourCorrection => Some(QuickValue::flag(self.state.colour_correction)),
-            QuickRow::GbPalettes => Some(QuickValue::flag(self.state.gb_palettes)),
-            QuickRow::GbaShader => Some(shader_value(self.state.shader_gba)),
-            QuickRow::GbShader => Some(shader_value(self.state.shader_gb)),
-            QuickRow::Rumble => Some(QuickValue::flag(self.state.rumble)),
-            QuickRow::EjectSave => Some(QuickValue::flag(self.state.eject_save)),
-            QuickRow::StartFresh => Some(QuickValue::flag(self.state.start_fresh)),
-            QuickRow::Turbo => Some(QuickValue::flag(self.state.turbo)),
-            QuickRow::Rewind => Some(QuickValue::flag(self.state.rewind)),
-            QuickRow::Brightness => Some(QuickValue::level(self.state.brightness)),
-            QuickRow::Warmth => Some(QuickValue::level(self.state.blue_light)),
-            QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
-            QuickRow::Syncthing => Some(QuickValue::flag(self.state.syncthing)),
-            QuickRow::Achievements => Some(QuickValue::flag(self.state.achievements)),
-            QuickRow::AutoTime => Some(QuickValue::flag(self.state.auto_time)),
             QuickRow::FileTransfer => Some(QuickValue::flag(self.file_server.is_some())),
-            QuickRow::Performance => Some(match self.state.cpu {
-                CpuMode::Stock => QuickValue::CpuStock,
-                CpuMode::Saver => QuickValue::CpuSaver,
-                CpuMode::Performance => QuickValue::CpuPerformance,
-            }),
-            QuickRow::ClockFormat => Some(match self.state.clock_12h {
-                true => QuickValue::Hour12,
-                false => QuickValue::Hour24,
-            }),
-            QuickRow::Look => Some(match self.state.look {
-                Look::Classic => QuickValue::LookClassic,
-                Look::Socket => QuickValue::LookSocket,
-            }),
-            QuickRow::SaveFormat => Some(match self.state.save_format {
-                SaveFormat::RetroArch => QuickValue::RetroArch,
-                SaveFormat::Slot => QuickValue::Slot,
-            }),
-            QuickRow::LightMode => Some(match self.state.light_mode {
-                LightMode::Battery => QuickValue::Battery,
-                LightMode::Colour => QuickValue::Colour,
-                LightMode::Off => QuickValue::Off,
-            }),
-            QuickRow::LightColour => Some(match self.state.light_colour {
-                LightColour::White => QuickValue::White,
-                LightColour::Red => QuickValue::Red,
-                LightColour::Orange => QuickValue::Orange,
-                LightColour::Yellow => QuickValue::Yellow,
-                LightColour::Green => QuickValue::Green,
-                LightColour::Cyan => QuickValue::Cyan,
-                LightColour::Blue => QuickValue::Blue,
-                LightColour::Purple => QuickValue::Purple,
-                LightColour::Pink => QuickValue::Pink,
-            }),
-            QuickRow::LightEffect => Some(match self.state.light_effect {
-                LightEffect::Static => QuickValue::Static,
-                LightEffect::Breathe => QuickValue::Breathe,
-                LightEffect::Blink => QuickValue::Blink,
-                LightEffect::Rainbow => QuickValue::Rainbow,
-                LightEffect::RainbowWave => QuickValue::RainbowWave,
-                LightEffect::Fire => QuickValue::Fire,
-                LightEffect::Ocean => QuickValue::Ocean,
-                LightEffect::Aurora => QuickValue::Aurora,
-                LightEffect::Sunset => QuickValue::Sunset,
-                LightEffect::Candy => QuickValue::Candy,
-                LightEffect::Police => QuickValue::Police,
-                LightEffect::Heartbeat => QuickValue::Heartbeat,
-            }),
-            QuickRow::LightLevel => Some(match self.state.light_level {
-                LightLevel::Low => QuickValue::Low,
-                LightLevel::Medium => QuickValue::Medium,
-                LightLevel::High => QuickValue::High,
-            }),
-            QuickRow::DateTime
-            | QuickRow::About
-            | QuickRow::Screen
-            | QuickRow::Game
-            | QuickRow::Lights
-            | QuickRow::Network
-            | QuickRow::Search
-            | QuickRow::Labels
-            | QuickRow::JoinNetwork
-            | QuickRow::WifiStatus => None,
+            _ => setting_value(&self.state, row),
+        }
+    }
+
+    /// Every choice a setting with more than two values offers, in order, for
+    /// the Socket picker popup.
+    fn picker_choices(&self, row: QuickRow) -> Option<Vec<QuickValue>> {
+        let mut s = self.state.clone();
+        let mut each = |set: &mut dyn FnMut(&mut slot_store::SlotState, usize), n: usize| {
+            (0..n)
+                .filter_map(|i| {
+                    set(&mut s, i);
+                    setting_value(&s, row)
+                })
+                .collect::<Vec<_>>()
+        };
+        let list = match row {
+            QuickRow::FastForward => each(&mut |s, i| s.ff_speed = FF_SPEEDS[i], FF_SPEEDS.len()),
+            QuickRow::GbaShader => {
+                each(&mut |s, i| s.shader_gba = Shader::GBA[i], Shader::GBA.len())
+            }
+            QuickRow::GbShader => each(&mut |s, i| s.shader_gb = Shader::GB[i], Shader::GB.len()),
+            QuickRow::Performance => each(
+                &mut |s, i| s.cpu = [CpuMode::Stock, CpuMode::Saver, CpuMode::Performance][i],
+                3,
+            ),
+            QuickRow::LightMode => each(
+                &mut |s, i| s.light_mode = LightMode::ALL[i],
+                LightMode::ALL.len(),
+            ),
+            QuickRow::LightColour => each(
+                &mut |s, i| s.light_colour = LightColour::ALL[i],
+                LightColour::ALL.len(),
+            ),
+            QuickRow::LightEffect => each(
+                &mut |s, i| s.light_effect = LightEffect::ALL[i],
+                LightEffect::ALL.len(),
+            ),
+            QuickRow::LightLevel => each(
+                &mut |s, i| s.light_level = LightLevel::ALL[i],
+                LightLevel::ALL.len(),
+            ),
+            _ => return None,
+        };
+        let mut seen = Vec::new();
+        for v in list {
+            if !seen.contains(&v) {
+                seen.push(v);
+            }
+        }
+        (seen.len() > 2).then_some(seen)
+    }
+
+    pub fn picker_open(&self) -> bool {
+        self.picker.is_some()
+    }
+
+    fn open_picker(&mut self, row: QuickRow) -> bool {
+        let Some(list) = self.picker_choices(row) else {
+            return false;
+        };
+        let at = self
+            .quick_value(row)
+            .and_then(|v| list.iter().position(|&c| c == v))
+            .unwrap_or(0);
+        self.picker = Some((row, list, at));
+        true
+    }
+
+    fn picker_input(&mut self, action: Action) {
+        let Some((row, list, at)) = &mut self.picker else {
+            return;
+        };
+        let n = list.len();
+        match action {
+            Action::GbaDown(Btn::Up) => *at = (*at + n - 1) % n,
+            Action::GbaDown(Btn::Down) => *at = (*at + 1) % n,
+            Action::GbaDown(Btn::A) => {
+                let (row, list, at) = (*row, list.clone(), *at);
+                self.picker = None;
+                self.pick_setting(row, &list, at);
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => self.picker = None,
+            _ => {}
+        }
+    }
+
+    /// Steps a setting along until it shows the picked choice, so each step's
+    /// side effects (backlight, CPU, lights) run as they would from the pad.
+    fn pick_setting(&mut self, row: QuickRow, list: &[QuickValue], to: usize) {
+        for _ in 0..list.len() * 2 {
+            let Some(now) = self
+                .quick_value(row)
+                .and_then(|v| list.iter().position(|&c| c == v))
+            else {
+                return;
+            };
+            if now == to {
+                return;
+            }
+            self.change_setting(row, to > now);
         }
     }
 
@@ -1908,9 +1932,25 @@ impl App {
             lines[slot_ui::SETTINGS_CLOSE] = (key("B", close), true);
             let hint = match model.opens {
                 true => key("A", "Open"),
+                false if self.picker_choices(row).is_some() => key("A", "Choose"),
                 false => key("\u{2190}\u{2192}", "Change"),
             };
             lines[slot_ui::SETTINGS_HINT] = (hint, true);
+            if let Some((picked, list, at)) =
+                self.picker.as_ref().filter(|_| self.power_menu.is_none())
+            {
+                let (first, shown, _) = popup_window(list.len(), *at);
+                lines[slot_ui::POPUP_TITLE_SLOT] = (picked.label().to_string(), true);
+                let now = self.quick_value(*picked);
+                for (i, v) in list.iter().skip(first).take(shown).enumerate() {
+                    let text = match now == Some(*v) {
+                        true => format!("{}  \u{2713}", v.text()),
+                        false => v.text().to_string(),
+                    };
+                    lines[slot_ui::option_slot(i)] = (text, true);
+                }
+                lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+            }
         }
         if let Some(c) = customizing {
             let material = slot_ui::Material::of(self.selected_shell());
@@ -2783,11 +2823,20 @@ impl App {
     }
 
     fn quick_menu_input(&mut self, row: QuickRow, action: Action) {
+        if self.picker.is_some() {
+            return self.picker_input(action);
+        }
         let row = match action {
             Action::GbaDown(Btn::Up) => row.up(),
             Action::GbaDown(Btn::Down) => row.down(),
             Action::GbaDown(Btn::Left) => return self.change_setting(row, false),
             Action::GbaDown(Btn::Right) => return self.change_setting(row, true),
+            Action::GbaDown(Btn::A) if self.socket_look() && !row.opens() => {
+                if !self.open_picker(row) && self.quick_value(row).is_some() {
+                    self.change_setting(row, true);
+                }
+                return;
+            }
             Action::GbaDown(Btn::A) => return self.open_quick_row(row),
             Action::GbaDown(Btn::B) | Action::QuickMenu => {
                 self.phase = match row.parent() {
@@ -3188,6 +3237,9 @@ impl App {
 
     pub fn update(&mut self, dt: f32) {
         self.clock += dt as f64 * 1000.0;
+        if !matches!(self.phase, Phase::QuickMenu { .. }) {
+            self.picker = None;
+        }
         if self.name_pending && self.shelf_platform.face.is_some() {
             self.name_pending = false;
             self.shelf_named = Some(self.now());
@@ -3946,6 +3998,20 @@ impl App {
                 faces: &self.settings_faces,
                 options: 2,
                 focus,
+            }
+            .draw(out);
+        }
+        if let Some((_, list, at)) = self
+            .picker
+            .as_ref()
+            .filter(|_| matches!(self.phase, Phase::QuickMenu { .. }) && self.power_menu.is_none())
+        {
+            let (_, shown, focus) = popup_window(list.len(), *at);
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: shown,
+                focus: focus.unwrap_or(usize::MAX),
             }
             .draw(out);
         }
@@ -5614,4 +5680,89 @@ fn popup_window(len: usize, at: usize) -> (usize, usize, Option<usize>) {
     let shown = len.min(slot_ui::POPUP_OPTIONS);
     let first = at.saturating_sub(shown - 1).min(len - shown);
     (first, shown, Some(at - first))
+}
+
+fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue> {
+    match row {
+        QuickRow::FastForward => QuickValue::speed(s.ff_speed),
+        QuickRow::FastForwardSound => Some(QuickValue::flag(s.ff_sound)),
+        QuickRow::ColourCorrection => Some(QuickValue::flag(s.colour_correction)),
+        QuickRow::GbPalettes => Some(QuickValue::flag(s.gb_palettes)),
+        QuickRow::GbaShader => Some(shader_value(s.shader_gba)),
+        QuickRow::GbShader => Some(shader_value(s.shader_gb)),
+        QuickRow::Rumble => Some(QuickValue::flag(s.rumble)),
+        QuickRow::EjectSave => Some(QuickValue::flag(s.eject_save)),
+        QuickRow::StartFresh => Some(QuickValue::flag(s.start_fresh)),
+        QuickRow::Turbo => Some(QuickValue::flag(s.turbo)),
+        QuickRow::Rewind => Some(QuickValue::flag(s.rewind)),
+        QuickRow::Brightness => Some(QuickValue::level(s.brightness)),
+        QuickRow::Warmth => Some(QuickValue::level(s.blue_light)),
+        QuickRow::Wifi => Some(QuickValue::flag(s.wifi)),
+        QuickRow::Syncthing => Some(QuickValue::flag(s.syncthing)),
+        QuickRow::Achievements => Some(QuickValue::flag(s.achievements)),
+        QuickRow::AutoTime => Some(QuickValue::flag(s.auto_time)),
+        QuickRow::FileTransfer => None,
+        QuickRow::Performance => Some(match s.cpu {
+            CpuMode::Stock => QuickValue::CpuStock,
+            CpuMode::Saver => QuickValue::CpuSaver,
+            CpuMode::Performance => QuickValue::CpuPerformance,
+        }),
+        QuickRow::ClockFormat => Some(match s.clock_12h {
+            true => QuickValue::Hour12,
+            false => QuickValue::Hour24,
+        }),
+        QuickRow::Look => Some(match s.look {
+            Look::Classic => QuickValue::LookClassic,
+            Look::Socket => QuickValue::LookSocket,
+        }),
+        QuickRow::SaveFormat => Some(match s.save_format {
+            SaveFormat::RetroArch => QuickValue::RetroArch,
+            SaveFormat::Slot => QuickValue::Slot,
+        }),
+        QuickRow::LightMode => Some(match s.light_mode {
+            LightMode::Battery => QuickValue::Battery,
+            LightMode::Colour => QuickValue::Colour,
+            LightMode::Off => QuickValue::Off,
+        }),
+        QuickRow::LightColour => Some(match s.light_colour {
+            LightColour::White => QuickValue::White,
+            LightColour::Red => QuickValue::Red,
+            LightColour::Orange => QuickValue::Orange,
+            LightColour::Yellow => QuickValue::Yellow,
+            LightColour::Green => QuickValue::Green,
+            LightColour::Cyan => QuickValue::Cyan,
+            LightColour::Blue => QuickValue::Blue,
+            LightColour::Purple => QuickValue::Purple,
+            LightColour::Pink => QuickValue::Pink,
+        }),
+        QuickRow::LightEffect => Some(match s.light_effect {
+            LightEffect::Static => QuickValue::Static,
+            LightEffect::Breathe => QuickValue::Breathe,
+            LightEffect::Blink => QuickValue::Blink,
+            LightEffect::Rainbow => QuickValue::Rainbow,
+            LightEffect::RainbowWave => QuickValue::RainbowWave,
+            LightEffect::Fire => QuickValue::Fire,
+            LightEffect::Ocean => QuickValue::Ocean,
+            LightEffect::Aurora => QuickValue::Aurora,
+            LightEffect::Sunset => QuickValue::Sunset,
+            LightEffect::Candy => QuickValue::Candy,
+            LightEffect::Police => QuickValue::Police,
+            LightEffect::Heartbeat => QuickValue::Heartbeat,
+        }),
+        QuickRow::LightLevel => Some(match s.light_level {
+            LightLevel::Low => QuickValue::Low,
+            LightLevel::Medium => QuickValue::Medium,
+            LightLevel::High => QuickValue::High,
+        }),
+        QuickRow::DateTime
+        | QuickRow::About
+        | QuickRow::Screen
+        | QuickRow::Game
+        | QuickRow::Lights
+        | QuickRow::Network
+        | QuickRow::Search
+        | QuickRow::Labels
+        | QuickRow::JoinNetwork
+        | QuickRow::WifiStatus => None,
+    }
 }

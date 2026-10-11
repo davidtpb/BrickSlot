@@ -56,9 +56,10 @@ impl DeviceInput {
                 eprintln!("slot: input {name}: {e}");
             }
         }
+        let lidless = slot_power::Board::detect().is_trimui();
         DeviceInput {
             pending,
-            hall: find_hall(Path::new(PSY)),
+            hall: (!lidless).then(|| find_hall(Path::new(PSY))).flatten(),
             lid_shut: None,
             next_lid_poll: 0,
         }
@@ -195,6 +196,7 @@ impl Trace {
         let mut out = self.out.lock().unwrap_or_else(|e| e.into_inner());
         let _ = writeln!(out, "{line}");
         let _ = out.flush();
+        let _ = out.sync_data();
     }
 }
 

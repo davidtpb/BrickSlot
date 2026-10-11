@@ -54,7 +54,7 @@ impl Keymap {
     pub fn to_raw(self, ev: Ev) -> Option<RawEvent> {
         let btn = match ev.kind {
             EV_KEY => self.btn(ev.code)?,
-            EV_SW if ev.code == SW_LID => Btn::Lid,
+            EV_SW if ev.code == SW_LID && self == Keymap::Anbernic => Btn::Lid,
             _ => return None,
         };
         match ev.value {

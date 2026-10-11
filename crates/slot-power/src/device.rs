@@ -62,6 +62,7 @@ const EVIOCSFF: c_ulong = 0x4030_4580;
 const DISPDBG_MAX: u32 = 255;
 
 const DISP_MAX: u32 = 255;
+const DISP_WAKE: u32 = 8;
 const DISP_LCD_SET_BRIGHTNESS: c_ulong = 0x102;
 
 const TRIMUI_MOTOR_GPIO: &str = "class/gpio/gpio227/value";
@@ -142,6 +143,7 @@ pub struct DevicePlatform {
     board: Board,
     lights: Lights,
     led_state: Option<LedState>,
+    disp_dark: bool,
 }
 
 impl DevicePlatform {
@@ -199,6 +201,7 @@ impl DevicePlatform {
             board,
             lights: Lights::default(),
             led_state: None,
+            disp_dark: false,
         }
     }
 
@@ -233,6 +236,7 @@ impl DevicePlatform {
             board,
             lights: Lights::default(),
             led_state: None,
+            disp_dark: false,
         }
     }
 
@@ -617,9 +621,15 @@ impl Platform for DevicePlatform {
                 write(dir.join("start"), "1".to_string());
             }
             Backlight::Disp(node) => {
+                // As NextUI does on the Brick: a panel brought back from 0 goes
+                // through a low level first, or it can stay dark.
+                if self.disp_dark && value > 0 {
+                    let _ = disp_brightness(node, DISP_WAKE);
+                }
                 if let Err(e) = disp_brightness(node, value) {
                     eprintln!("slot: {}: {e}", node.display());
                 }
+                self.disp_dark = value == 0;
             }
         }
     }

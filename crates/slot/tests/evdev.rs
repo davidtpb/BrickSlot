@@ -390,3 +390,14 @@ fn trimui_triggers_press_past_half_travel_and_release_below_it() {
     assert_eq!(t.feed(ev(ABS_RZ, 255)), Some(RawEvent::Down(Btn::R2)));
     assert_eq!(t.feed(ev(0x10, 1)), None, "a hat is not a trigger");
 }
+
+#[test]
+fn a_trimui_switch_event_is_never_taken_for_a_lid() {
+    use slot::input::evdev::Keymap;
+    let shut = decode(&packet(EV_SW, SW_LID, 1)).unwrap();
+    assert_eq!(Keymap::TrimUi.to_raw(shut), None, "the Brick has no lid");
+    assert_eq!(
+        Keymap::Anbernic.to_raw(shut),
+        Some(RawEvent::Down(Btn::Lid))
+    );
+}

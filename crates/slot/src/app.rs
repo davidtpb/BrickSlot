@@ -1284,14 +1284,26 @@ impl App {
     pub fn apply(&mut self, action: Action) {
         if self.power_menu.is_some() {
             match action {
-                Action::LidClose => return self.doze(),
-                Action::LidOpen => return self.wake(),
+                Action::LidClose => {
+                    eprintln!("slot: lid closed");
+                    return self.doze();
+                }
+                Action::LidOpen => {
+                    eprintln!("slot: lid opened");
+                    return self.wake();
+                }
                 _ => return self.power_menu_input(action),
             }
         }
         match action {
-            Action::LidClose => return self.doze(),
-            Action::LidOpen => return self.wake(),
+            Action::LidClose => {
+                eprintln!("slot: lid closed");
+                return self.doze();
+            }
+            Action::LidOpen => {
+                eprintln!("slot: lid opened");
+                return self.wake();
+            }
             Action::PowerPress => {
                 if self.link_active() {
                     self.end_link();
@@ -2840,6 +2852,7 @@ impl App {
             _ => None,
         };
         self.polaroids = None;
+        eprintln!("slot: doze at {:.1} ms", crate::boot_time::ms());
         self.phase = Phase::Doze { cart };
         self.dozed_at = self.now();
         self.radio.ask(RadioJob::Cool);
@@ -2852,6 +2865,7 @@ impl App {
         let Phase::Doze { cart } = &mut self.phase else {
             return;
         };
+        eprintln!("slot: wake at {:.1} ms", crate::boot_time::ms());
         self.phase = match cart.take() {
             Some(cart) => Phase::Playing { cart },
             None => Phase::Shelf,

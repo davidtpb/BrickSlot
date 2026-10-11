@@ -80,6 +80,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
     assert_eq!(
         QuickRow::MAIN.map(QuickRow::label),
         [
+            "Search Games",
             "Screen",
             "Gameplay",
             "Lights",
@@ -120,7 +121,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::About,
             QuickRow::Game,
             QuickRow::Lights,
-            QuickRow::Network
+            QuickRow::Network,
+            QuickRow::Search
         ]
     );
     assert_eq!(

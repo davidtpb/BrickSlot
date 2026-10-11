@@ -269,6 +269,7 @@ pub enum Phase {
     Doze {
         cart: Option<String>,
     },
+    Search,
 }
 
 pub struct App {
@@ -308,6 +309,8 @@ pub struct App {
     link_transport: Option<(u16, Box<dyn LinkChannel>)>,
     restarting: bool,
     messages: std::collections::VecDeque<(String, String)>,
+    search: crate::search::Search,
+    search_faces: Vec<Option<(TexId, u32, u32)>>,
     net: crate::net::Net,
     cheevos_login: CheevosLogin,
     clock_asked: bool,
@@ -440,6 +443,8 @@ impl App {
             link_transport: None,
             restarting: false,
             messages: std::collections::VecDeque::new(),
+            search: crate::search::Search::default(),
+            search_faces: Vec::new(),
             net: crate::net::Net::idle(),
             cheevos_login: CheevosLogin::Waiting,
             clock_asked: false,
@@ -735,7 +740,8 @@ impl App {
             | QuickRow::Screen
             | QuickRow::Game
             | QuickRow::Lights
-            | QuickRow::Network => None,
+            | QuickRow::Network
+            | QuickRow::Search => None,
         }
     }
 
@@ -1376,8 +1382,10 @@ impl App {
                 Action::Insert => self.insert(!self.state.eject_save),
                 Action::GbaDown(Btn::L1) => self.switch_shelf(-1),
                 Action::GbaDown(Btn::R1) => self.switch_shelf(1),
+                Action::GbaDown(Btn::Y) => self.open_search(),
                 _ => {}
             },
+            Phase::Search => self.search_input(action),
             Phase::Inserting { .. } if action == Action::Eject => self.eject(),
             Phase::Playing { .. } => match action {
                 Action::GbaDown(Btn::L1) if self.slot_owns_the_shoulders() => {
@@ -1414,6 +1422,129 @@ impl App {
         }
     }
 
+    fn open_search(&mut self) {
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+        self.refresh_search();
+        self.phase = Phase::Search;
+    }
+
+    fn refresh_search(&mut self) {
+        let stems: Vec<(Platform, Vec<String>)> = self
+            .shelves
+            .iter()
+            .map(|(p, s)| (*p, s.carts.iter().map(|c| c.stem.clone()).collect()))
+            .collect();
+        self.search
+            .refresh(stems.iter().map(|(p, s)| (*p, s.as_slice())));
+    }
+
+    fn search_input(&mut self, action: Action) {
+        let changed = match action {
+            Action::GbaDown(Btn::Up) => {
+                self.search.step(0, -1);
+                false
+            }
+            Action::GbaDown(Btn::Down) => {
+                self.search.step(0, 1);
+                false
+            }
+            Action::GbaDown(Btn::Left) | Action::ShelfLeft => {
+                self.search.step(-1, 0);
+                false
+            }
+            Action::GbaDown(Btn::Right) | Action::ShelfRight => {
+                self.search.step(1, 0);
+                false
+            }
+            Action::GbaDown(Btn::A) => self.search.type_key(),
+            Action::GbaDown(Btn::B) => {
+                if !self.search.delete() {
+                    self.phase = Phase::Shelf;
+                    return;
+                }
+                true
+            }
+            Action::GbaDown(Btn::L1) => {
+                self.search.pick_by(-1);
+                false
+            }
+            Action::GbaDown(Btn::R1) => {
+                self.search.pick_by(1);
+                false
+            }
+            Action::GbaDown(Btn::Start) => {
+                self.go_to_hit();
+                return;
+            }
+            Action::QuickMenu => {
+                self.phase = Phase::Shelf;
+                return;
+            }
+            _ => false,
+        };
+        if changed {
+            self.refresh_search();
+        }
+    }
+
+    fn go_to_hit(&mut self) {
+        let Some(hit) = self.search.picked().cloned() else {
+            return;
+        };
+        self.phase = Phase::Shelf;
+        if hit.shelf != self.shelf_at {
+            self.shelf_at = hit.shelf;
+            self.shelf_platform = slot_ui::Printed::default();
+            self.slot_letter = None;
+        }
+        self.shelf_mut().select(hit.index);
+        self.shelf_named = None;
+        self.name_pending = true;
+    }
+
+    /// The text for every slot of the search screen and whether it is lit,
+    /// while the screen is up.
+    pub fn search_lines(&self) -> Option<Vec<(String, bool)>> {
+        if !matches!(self.phase, Phase::Search) {
+            return None;
+        }
+        let s = &self.search;
+        let mut lines = vec![(String::new(), false); slot_ui::SEARCH_SLOTS];
+        lines[slot_ui::SEARCH_QUERY] = (format!("Search: {}_", s.query), true);
+        for i in 0..slot_ui::SEARCH_HITS {
+            let text = match s.hits.get(i) {
+                Some(hit) => format!("{}  ({})", hit.name, hit.platform.dir_name()),
+                None if i == 0 && !s.query.trim().is_empty() => "No games found".to_string(),
+                None => String::new(),
+            };
+            lines[slot_ui::search_hit_slot(i)] = (text, s.pick == i);
+        }
+        for (row, keys) in crate::search::KEYS.iter().enumerate() {
+            for (col, key) in keys.iter().enumerate() {
+                let lit = (row, col) == (s.row, s.col);
+                lines[slot_ui::search_key_slot(row, col)] = (key.to_string(), lit);
+            }
+        }
+        let more = match s.hits.len() {
+            n if n > slot_ui::SEARCH_HITS => format!("   {n} found"),
+            _ => String::new(),
+        };
+        lines[slot_ui::SEARCH_LEGEND] = (
+            format!("A type   B delete   L/R pick   START go{more}"),
+            false,
+        );
+        Some(lines)
+    }
+
+    pub fn set_search_faces(&mut self, faces: Vec<Option<(TexId, u32, u32)>>) {
+        self.search_faces = faces;
+    }
+
+    pub fn search(&self) -> &crate::search::Search {
+        &self.search
+    }
+
     fn open_quick_menu(&mut self) {
         self.phase = Phase::QuickMenu {
             row: QuickRow::MAIN[0],
@@ -1445,6 +1576,7 @@ impl App {
                 self.phase = clock_screen(self.utc_secs(), self.state.utc_offset_min, true);
             }
             QuickRow::About => self.phase = Phase::About,
+            QuickRow::Search => self.open_search(),
             QuickRow::Screen | QuickRow::Game | QuickRow::Lights | QuickRow::Network => {
                 if let Some(row) = row.child() {
                     self.phase = Phase::QuickMenu { row };
@@ -1575,7 +1707,8 @@ impl App {
             | QuickRow::Screen
             | QuickRow::Game
             | QuickRow::Lights
-            | QuickRow::Network => return,
+            | QuickRow::Network
+            | QuickRow::Search => return,
         }
         if QuickRow::LIGHTS.contains(&row) {
             let lights = self.lights();
@@ -2410,6 +2543,13 @@ impl App {
                 });
                 return;
             }
+            Phase::Search => slot_ui::SearchScreen {
+                faces: &self.search_faces,
+                row: self.search.row,
+                col: self.search.col,
+                pick: (!self.search.hits.is_empty()).then_some(self.search.pick),
+            }
+            .draw(out),
         }
         if let Some(picker) = self.core_picker_shown() {
             self.draw_core_picker(&picker, out);

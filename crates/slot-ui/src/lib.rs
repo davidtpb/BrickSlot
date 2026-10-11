@@ -17,6 +17,7 @@ mod power_menu;
 mod quick_menu;
 mod rebuild;
 mod refusal;
+mod search;
 mod shelf;
 mod shell;
 mod silhouette;
@@ -67,6 +68,10 @@ pub use quick_menu::{
 };
 pub use rebuild::{rebuild_count_face, rebuild_title_face, RebuildScreen};
 pub use refusal::Refusal;
+pub use search::{
+    search_face, search_hit_slot, search_key_slot, SearchScreen, SEARCH_HITS, SEARCH_LEGEND,
+    SEARCH_QUERY, SEARCH_SLOTS,
+};
 pub use shelf::{foot_y, rest_y, set_shelf_slack, Shelf};
 pub use shell::{
     gb_table_shells, gba_shell_for, lookup_order_is_exact_then_family_then_default, shell_for,

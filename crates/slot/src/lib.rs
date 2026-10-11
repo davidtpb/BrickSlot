@@ -32,6 +32,7 @@ pub mod prefetch;
 pub mod resample;
 pub mod rewind;
 pub mod root;
+pub mod search;
 pub mod session;
 pub mod state_writer;
 pub mod thumb;

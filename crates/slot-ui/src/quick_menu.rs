@@ -33,10 +33,11 @@ pub enum QuickRow {
     Achievements,
     SaveFormat,
     AutoTime,
+    Search,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 27] = [
+    pub const ALL: [QuickRow; 28] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -64,9 +65,11 @@ impl QuickRow {
         QuickRow::Achievements,
         QuickRow::SaveFormat,
         QuickRow::AutoTime,
+        QuickRow::Search,
     ];
 
-    pub const MAIN: [QuickRow; 6] = [
+    pub const MAIN: [QuickRow; 7] = [
+        QuickRow::Search,
         QuickRow::Screen,
         QuickRow::Game,
         QuickRow::Lights,
@@ -191,6 +194,7 @@ impl QuickRow {
             QuickRow::Achievements => "RetroAchievements",
             QuickRow::SaveFormat => "Save Format",
             QuickRow::AutoTime => "Set Time Automatically",
+            QuickRow::Search => "Search Games",
         }
     }
 
@@ -203,6 +207,7 @@ impl QuickRow {
                 | QuickRow::Game
                 | QuickRow::Lights
                 | QuickRow::Network
+                | QuickRow::Search
         )
     }
 

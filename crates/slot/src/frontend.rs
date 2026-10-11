@@ -55,6 +55,15 @@ pub struct Frontend {
     clocks: Clocks,
     about: AboutFace,
     quick_clock: QuickClock,
+    search_texes: Vec<SearchLine>,
+}
+
+#[derive(Clone, Default)]
+struct SearchLine {
+    text: Option<String>,
+    lit: bool,
+    tex: Option<TexId>,
+    face: Option<(TexId, u32, u32)>,
 }
 
 #[derive(Default)]
@@ -136,6 +145,7 @@ impl Frontend {
             clocks: Clocks::default(),
             about: AboutFace::default(),
             quick_clock: QuickClock::default(),
+            search_texes: Vec::new(),
         }
     }
 
@@ -286,6 +296,41 @@ impl Frontend {
         app.set_toast_faces(toasts);
     }
 
+    /// Keeps a texture per line of the search screen, redrawing only the
+    /// lines whose text or highlight changed since the last frame.
+    fn sync_search(&mut self, compositor: &mut Compositor) {
+        let Some(lines) = self.session.app().search_lines() else {
+            return;
+        };
+        self.search_texes.resize(lines.len(), SearchLine::default());
+        let mut changed = false;
+        for (slot, (line, (text, lit))) in self.search_texes.iter_mut().zip(lines).enumerate() {
+            if line.text.as_deref() == Some(text.as_str()) && line.lit == lit {
+                continue;
+            }
+            changed = true;
+            let face = slot_ui::search_face(slot, &text, lit);
+            line.face = match (face.w > 0 && face.h > 0, line.tex) {
+                (false, _) => None,
+                (true, Some(tex)) => {
+                    compositor.update_texture(tex, face.w, face.h, &face.rgba);
+                    Some((tex, face.w, face.h))
+                }
+                (true, None) => {
+                    let tex = compositor.create_texture(face.w, face.h, &face.rgba);
+                    line.tex = Some(tex);
+                    Some((tex, face.w, face.h))
+                }
+            };
+            line.text = Some(text);
+            line.lit = lit;
+        }
+        if changed {
+            let faces = self.search_texes.iter().map(|l| l.face).collect();
+            self.session.app_mut().set_search_faces(faces);
+        }
+    }
+
     fn show_message(&mut self, compositor: &mut Compositor) {
         let app = self.session.app_mut();
         let Some(tex) = app.message_tex() else {
@@ -363,6 +408,7 @@ impl Frontend {
         }
         self.cart_faces.sync(self.session.app_mut(), compositor);
         self.show_message(compositor);
+        self.sync_search(compositor);
         sync_clock(self.session.app_mut(), compositor, &mut self.clocks);
         sync_about(self.session.app_mut(), compositor, &mut self.about);
         sync_quick_clock(self.session.app_mut(), compositor, &mut self.quick_clock);

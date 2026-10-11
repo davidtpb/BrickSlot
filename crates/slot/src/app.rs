@@ -225,6 +225,10 @@ pub const LINKED_HOLD_MS: Millis = 1000;
 
 pub const UNPLUG_HOLD_MS: Millis = 420;
 
+pub const PLAY_GAP_MS: Millis = 1000;
+
+pub const PLAY_FLUSH_MS: Millis = 60_000;
+
 #[derive(Debug)]
 pub enum Phase {
     SetClock {
@@ -295,6 +299,10 @@ pub struct App {
     starting: Option<LinkStarting>,
     link_transport: Option<(u16, Box<dyn LinkChannel>)>,
     restarting: bool,
+    messages: std::collections::VecDeque<(String, String)>,
+    play_key: Option<String>,
+    play_ms: Millis,
+    play_tick: Option<Millis>,
     act_at: Millis,
     root: Option<PathBuf>,
     state: SlotState,
@@ -420,6 +428,10 @@ impl App {
             starting: None,
             link_transport: None,
             restarting: false,
+            messages: std::collections::VecDeque::new(),
+            play_key: None,
+            play_ms: 0,
+            play_tick: None,
             act_at: 0,
             root: None,
             state: SlotState::default(),
@@ -1834,8 +1846,81 @@ impl App {
         self.timers();
     }
 
+    pub fn say(&mut self, title: impl Into<String>, detail: impl Into<String>) {
+        self.messages.push_back((title.into(), detail.into()));
+    }
+
+    pub fn take_message(&mut self) -> Option<(String, String)> {
+        if self.hud.said(self.now()) == Some(Toast::Message) {
+            return None;
+        }
+        self.messages.pop_front()
+    }
+
+    pub fn show_message(&mut self) {
+        let now = self.now();
+        self.hud.toast(Toast::Message, now);
+    }
+
+    pub fn message_tex(&self) -> Option<TexId> {
+        self.hud.toast_tex(Toast::Message)
+    }
+
+    fn track_play(&mut self) {
+        let now = self.now();
+        let playing = matches!(self.phase, Phase::Playing { .. }) && self.game_menu.is_none();
+        if playing {
+            if let Some(last) = self.play_tick {
+                self.play_ms += now.saturating_sub(last).min(PLAY_GAP_MS);
+            }
+            self.play_tick = Some(now);
+        } else {
+            self.play_tick = None;
+        }
+        if playing && self.play_key.is_none() {
+            if let Some(cart) = self.seated_cart() {
+                let key = crate::playtime::key(cart.platform, &cart.stem);
+                let title = cart.stem.clone();
+                if let Some(root) = &self.root {
+                    let secs = crate::playtime::read(root, &key);
+                    if secs >= 60 {
+                        self.say(format!("Played {}", crate::playtime::format(secs)), title);
+                    }
+                }
+                self.play_key = Some(key);
+            }
+        }
+        if self.play_ms >= PLAY_FLUSH_MS || (!playing && self.play_ms >= 1000) {
+            self.flush_play();
+        }
+        if matches!(self.phase, Phase::Shelf | Phase::Ejecting { .. }) {
+            self.flush_play();
+            self.play_key = None;
+        }
+    }
+
+    fn flush_play(&mut self) {
+        let secs = self.play_ms / 1000;
+        if secs == 0 {
+            return;
+        }
+        let (Some(root), Some(key)) = (self.root.clone(), self.play_key.clone()) else {
+            self.play_ms = 0;
+            return;
+        };
+        self.play_ms -= secs * 1000;
+        let _ = std::thread::Builder::new()
+            .name("slot-playtime".into())
+            .spawn(move || {
+                if let Err(e) = crate::playtime::add(&root, &key, secs) {
+                    eprintln!("slot: playtime {key}: {e}");
+                }
+            });
+    }
+
     fn timers(&mut self) {
         self.play_hold();
+        self.track_play();
         let offer = self.undo_label();
         if let Some(p) = &mut self.polaroids {
             p.set_undo(offer);
@@ -3116,6 +3201,12 @@ impl App {
 
     pub fn settle_saves(&mut self) {
         self.state_writer.flush();
+        let secs = std::mem::take(&mut self.play_ms) / 1000;
+        if let (Some(root), Some(key), true) = (&self.root, &self.play_key, secs > 0) {
+            if let Err(e) = crate::playtime::add(root, key, secs) {
+                eprintln!("slot: playtime {key}: {e}");
+            }
+        }
         if let Some(h) = self.pending_save.take() {
             let _ = h.join();
         }

@@ -159,6 +159,10 @@ impl Hud {
         self.toasts = toasts;
     }
 
+    pub fn toast_tex(&self, toast: Toast) -> Option<TexId> {
+        self.toasts.get(toast.index()).copied()
+    }
+
     pub fn toast(&mut self, toast: Toast, now: Millis) {
         self.said = Some((toast, now));
     }
@@ -378,11 +382,14 @@ impl Hud {
 
     fn toast_alpha(&self, now: Millis) -> f32 {
         match self.said {
+            Some((Toast::Message, shown)) => fade(shown, now.saturating_sub(MESSAGE_EXTRA_MS)),
             Some((_, shown)) => fade(shown, now),
             None => 0.0,
         }
     }
 }
+
+const MESSAGE_EXTRA_MS: Millis = 2_500;
 
 fn fade(shown: Millis, now: Millis) -> f32 {
     let age = now.saturating_sub(shown);

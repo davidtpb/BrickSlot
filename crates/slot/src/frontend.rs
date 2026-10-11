@@ -286,6 +286,19 @@ impl Frontend {
         app.set_toast_faces(toasts);
     }
 
+    fn show_message(&mut self, compositor: &mut Compositor) {
+        let app = self.session.app_mut();
+        let Some(tex) = app.message_tex() else {
+            return;
+        };
+        let Some((title, detail)) = app.take_message() else {
+            return;
+        };
+        let face = slot_ui::message_face(&title, &detail);
+        compositor.update_texture(tex, face.w, face.h, &face.rgba);
+        app.show_message();
+    }
+
     fn upload_wallpaper(&mut self, compositor: &mut Compositor) {
         let app = self.session.app();
         let seed = app.wall_secs().unsigned_abs();
@@ -349,6 +362,7 @@ impl Frontend {
             crate::latency::taken();
         }
         self.cart_faces.sync(self.session.app_mut(), compositor);
+        self.show_message(compositor);
         sync_clock(self.session.app_mut(), compositor, &mut self.clocks);
         sync_about(self.session.app_mut(), compositor, &mut self.about);
         sync_quick_clock(self.session.app_mut(), compositor, &mut self.quick_clock);

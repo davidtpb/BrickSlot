@@ -24,6 +24,7 @@ pub enum Toast {
     ShaderSimpletex,
     CardUnwritable,
     Palette(GbPalette),
+    Message,
 }
 
 impl Toast {
@@ -49,12 +50,14 @@ impl Toast {
         Self::FIXED
             .into_iter()
             .chain(GbPalette::all().map(Toast::Palette))
+            .chain([Toast::Message])
             .collect()
     }
 
     pub fn index(self) -> usize {
         match self {
             Toast::Palette(p) => Self::FIXED.len() + p.index(),
+            Toast::Message => Self::FIXED.len() + GbPalette::all().count(),
             fixed => Self::FIXED.iter().position(|t| *t == fixed).unwrap_or(0),
         }
     }
@@ -66,6 +69,7 @@ impl Toast {
     pub fn detail(self) -> Option<&'static str> {
         match self {
             Toast::CardUnwritable => Some("Progress is not being saved"),
+            Toast::Message => Some(""),
             _ => None,
         }
     }
@@ -88,6 +92,7 @@ impl Toast {
             Toast::ShaderSimpletex => "Shader: Simpletex",
             Toast::CardUnwritable => "Can't write to SD card",
             Toast::Palette(p) => p.label(),
+            Toast::Message => "",
         }
     }
 }
@@ -100,6 +105,12 @@ const TOAST_MIN_PX: f32 = 12.0;
 const ALARM_W: u32 = 560;
 const ALARM_H: u32 = 44;
 const ALARM_PX: f32 = 32.0;
+const MESSAGE_W: u32 = 600;
+const MESSAGE_H: u32 = 28;
+const MESSAGE_PX: f32 = 22.0;
+const MESSAGE_MIN_PX: f32 = 14.0;
+const MESSAGE_MIDDLE: f32 = 52.0;
+
 const DETAIL_H: u32 = 30;
 const DETAIL_PX: f32 = 20.0;
 
@@ -112,6 +123,15 @@ struct Setting {
 }
 
 fn setting(toast: Toast) -> Setting {
+    if toast == Toast::Message {
+        return Setting {
+            w: MESSAGE_W,
+            h: MESSAGE_H,
+            px: MESSAGE_PX,
+            min_px: MESSAGE_MIN_PX,
+            middle: MESSAGE_MIDDLE,
+        };
+    }
     match toast.alarm() {
         true => Setting {
             w: ALARM_W,
@@ -147,6 +167,29 @@ fn detail_h(toast: Toast) -> u32 {
         Some(_) => DETAIL_H,
         None => 0,
     }
+}
+
+pub fn message_face(title: &str, detail: &str) -> CartFace {
+    let s = setting(Toast::Message);
+    let Some(font) = text::label_font() else {
+        return CartFace {
+            rgba: vec![0; ((s.w + 2 * HALO_PX) * (s.h + DETAIL_H + 2 * HALO_PX) * 4) as usize],
+            w: s.w + 2 * HALO_PX,
+            h: s.h + DETAIL_H + 2 * HALO_PX,
+        };
+    };
+    let layout = text::fit(font, title, s.w as f32, 1, s.px, s.min_px);
+    let mut cov = text::coverage(s.w, s.h, &layout);
+    let layout = text::fit(
+        font,
+        detail,
+        s.w as f32,
+        1,
+        DETAIL_PX,
+        DETAIL_PX.min(s.min_px),
+    );
+    cov.extend(text::coverage(s.w, DETAIL_H, &layout));
+    haloed(&cov, s.w, s.h + DETAIL_H, HUD_INK)
 }
 
 pub fn toast_face(toast: Toast) -> CartFace {
@@ -239,7 +282,7 @@ mod tests {
     #[test]
     fn every_toast_is_set_at_full_size() {
         let font = text::label_font().expect("label font");
-        for t in Toast::all() {
+        for t in Toast::all().into_iter().filter(|t| *t != Toast::Message) {
             let s = setting(t);
             let layout = text::fit(font, t.text(), s.w as f32, 1, s.px, s.min_px);
             assert_eq!(

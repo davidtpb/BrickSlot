@@ -82,4 +82,4 @@ pub use sticker::{
     draw_sticker, head_rows, sticker_face, sticker_lines, StickerFields, COPYRIGHT, CREDITS, DC,
     HOME, ORIGIN, STICKER_H, STICKER_W,
 };
-pub use toast::{toast_box, toast_face, toast_rect, Toast};
+pub use toast::{message_face, toast_box, toast_face, toast_rect, Toast};

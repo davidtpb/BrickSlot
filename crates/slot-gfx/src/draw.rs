@@ -110,7 +110,7 @@ pub struct Sprites {
     u_colour: gl::types::GLint,
     u_turn: gl::types::GLint,
     u_span: gl::types::GLint,
-    warp: Warp,
+    warp: Option<Warp>,
 }
 
 impl Sprites {
@@ -138,8 +138,16 @@ impl Sprites {
             u_turn = crate::gl::uniform_location(prog, "u_turn");
             u_span = crate::gl::uniform_location(prog, "u_span");
         }
-        let warp = unsafe {
-            let wp = crate::shaders::program(WARP_VERT, WARP_FRAG)?;
+        let warp = match crate::shaders::program(WARP_VERT, WARP_FRAG) {
+            Ok(wp) => Some(wp),
+            Err(e) => {
+                eprintln!(
+                    "slot: gfx: the perspective shader would not build, carts lie flat: {e:?}"
+                );
+                None
+            }
+        };
+        let warp = warp.map(|wp| unsafe {
             gl::UseProgram(wp);
             gl::Uniform1i(crate::gl::uniform_location(wp, "u_tex"), 0);
             gl::Uniform2f(
@@ -155,7 +163,7 @@ impl Sprites {
                 u_colour: crate::gl::uniform_location(wp, "u_colour"),
                 u_grey: crate::gl::uniform_location(wp, "u_grey"),
             }
-        };
+        });
         Ok(Sprites {
             warp,
             prog,
@@ -230,7 +238,21 @@ impl Sprites {
                 let Some(t) = self.textures.get(tex.0) else {
                     continue;
                 };
-                let w = &self.warp;
+                let Some(w) = &self.warp else {
+                    let Some((x, y, bw, bh)) = item.bounds() else {
+                        continue;
+                    };
+                    unsafe {
+                        gl::BindTexture(gl::TEXTURE_2D, *t);
+                        gl::Uniform4f(self.u_rect, x, y, bw, bh);
+                        gl::Uniform2f(self.u_turn, 1.0, 0.0);
+                        gl::Uniform2f(self.u_span, 0.0, 1.0);
+                        gl::Uniform4f(self.u_colour, 1.0, 1.0, 1.0, alpha);
+                    }
+                    let _ = grey;
+                    quad.draw();
+                    continue;
+                };
                 unsafe {
                     if !warping {
                         gl::UseProgram(w.prog);
@@ -319,7 +341,9 @@ impl Drop for Sprites {
             gl::DeleteTextures(self.textures.len() as i32, self.textures.as_ptr());
             gl::DeleteTextures(1, &self.white);
             gl::DeleteProgram(self.prog);
-            gl::DeleteProgram(self.warp.prog);
+            if let Some(w) = &self.warp {
+                gl::DeleteProgram(w.prog);
+            }
         }
     }
 }

@@ -357,6 +357,7 @@ impl Session {
         self.app.power_menu().is_some()
             || self.app.game_menu_open()
             || self.app.home_open()
+            || self.app.resume_popup_open()
             || self.app.shutting_down()
     }
 

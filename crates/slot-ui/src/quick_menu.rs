@@ -40,7 +40,7 @@ pub enum QuickRow {
     Look,
     ClockFormat,
     JoinNetwork,
-    AskResume,
+    StartFresh,
 }
 
 impl QuickRow {
@@ -79,7 +79,7 @@ impl QuickRow {
         QuickRow::Look,
         QuickRow::ClockFormat,
         QuickRow::JoinNetwork,
-        QuickRow::AskResume,
+        QuickRow::StartFresh,
     ];
 
     pub const MAIN: [QuickRow; 7] = [
@@ -110,7 +110,7 @@ impl QuickRow {
         QuickRow::Turbo,
         QuickRow::Rumble,
         QuickRow::EjectSave,
-        QuickRow::AskResume,
+        QuickRow::StartFresh,
         QuickRow::SaveFormat,
         QuickRow::Performance,
     ];
@@ -165,7 +165,7 @@ impl QuickRow {
             | QuickRow::EjectSave
             | QuickRow::SaveFormat
             | QuickRow::Performance
-            | QuickRow::AskResume => &QuickRow::GAME,
+            | QuickRow::StartFresh => &QuickRow::GAME,
             _ => &QuickRow::MAIN,
         }
     }
@@ -229,7 +229,7 @@ impl QuickRow {
             QuickRow::ClockFormat => "Clock",
             QuickRow::Labels => "Download Labels",
             QuickRow::JoinNetwork => "Join Network",
-            QuickRow::AskResume => "Ask to Resume",
+            QuickRow::StartFresh => "Start Fresh",
             QuickRow::FileTransfer => "File Transfer",
         }
     }

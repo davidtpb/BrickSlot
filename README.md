@@ -102,7 +102,7 @@ saves, and the files in the old format are kept as `.bak`.
 These live in the quick menu (tap MENU on the shelf).
 
 - **Join Network** (Settings > Network): scans for networks in range, then joins one, with an on-screen keyboard for its password (Y switches between lower case, upper case and symbols). Joined networks are remembered. What Wi-Fi does is logged to `slot-net.log` on the card.
-- **Continue or start fresh**: inserting a game that was left mid-play asks whether to continue where it was left or start fresh from its save. Turn the question off with Gameplay > Ask to Resume; tapping A then continues and holding A starts fresh.
+- **Start fresh, load where you left off from MENU**: a game goes in fresh from its save. If it was left mid-play, a tap of MENU in the game offers to load where it was left. Turn Gameplay > Start Fresh off to have games pick up where they were left instead (hold A then starts fresh).
 - **Saves put on the card**: a save copied in from another device or a backup is noticed when the game goes in, which then starts from it instead of where it was left. **Restart** on the Home panel (press A twice) does the same by hand.
 - **Customize** (**X** on the shelf): pick the selected game's cart material (Default, Opaque, Clear, Glitter) and colour from a grid, seen on the cart as you go. B closes and keeps it in `Config/cart_shell.txt`.
 - **Clock** (Settings > Screen > Clock): 24-hour or 12-hour time with AM/PM.

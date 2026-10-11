@@ -463,7 +463,7 @@ pub fn clocked(root: &Path) {
 /// game was left, as tests of resuming expect.
 pub fn taps_resume(root: &Path) {
     let mut s = slot_store::read_slot_state(root);
-    s.ask_resume = false;
+    s.start_fresh = false;
     write_slot_state(root, &s).expect("write slot.state");
 }
 

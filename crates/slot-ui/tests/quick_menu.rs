@@ -114,7 +114,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Auto Save on Eject",
             "Start Fresh",
             "Save Format",
-            "Performance"
+            "Performance",
+            "Menu Sounds"
         ]
     );
     let opens: Vec<QuickRow> = QuickRow::ALL.into_iter().filter(|r| r.opens()).collect();

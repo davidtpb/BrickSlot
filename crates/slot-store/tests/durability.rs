@@ -213,6 +213,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             cpu: slot_store::CpuMode::Stock,
             look: slot_store::Look::Classic,
             tint: slot_store::Tint::Default,
+            menu_sounds: true,
             clock_12h: false,
             start_fresh: true,
         }

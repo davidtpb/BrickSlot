@@ -1551,6 +1551,61 @@ impl App {
     }
 
     pub fn apply(&mut self, action: Action) {
+        let sound = match action {
+            Action::GbaDown(
+                Btn::Up
+                | Btn::Down
+                | Btn::Left
+                | Btn::Right
+                | Btn::L1
+                | Btn::R1
+                | Btn::L2
+                | Btn::R2,
+            ) => Some(Sfx::Move),
+            Action::GbaDown(Btn::A | Btn::X | Btn::Y | Btn::Start) | Action::HomePanel => {
+                Some(Sfx::Select)
+            }
+            Action::GbaDown(Btn::B | Btn::Select) | Action::QuickMenu => Some(Sfx::Back),
+            _ => None,
+        }
+        .filter(|_| self.state.menu_sounds);
+        let Some(sound) = sound else {
+            return self.apply_action(action);
+        };
+        let before = self.menu_fingerprint();
+        self.apply_action(action);
+        if self.sfx.is_none() && self.menu_fingerprint() != before {
+            self.sfx = Some(sound);
+        }
+    }
+
+    /// Everything a menu press can change, to tell whether a press did
+    /// anything worth a sound.
+    fn menu_fingerprint(&self) -> String {
+        if matches!(self.phase, Phase::Playing { .. })
+            && self.home.is_none()
+            && self.resume_popup.is_none()
+            && self.game_menu.is_none()
+        {
+            return String::new();
+        }
+        format!(
+            "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{}|{}|{}|{:?}|{:?}",
+            self.phase,
+            self.power_menu,
+            self.core_popup,
+            self.resume_popup,
+            self.picker.as_ref().map(|p| p.2),
+            self.recent_popup.as_ref().map(|p| p.1),
+            self.inspect,
+            self.shelf_at,
+            self.shelf().index,
+            self.customize,
+            self.home,
+        )
+    }
+
+    fn apply_action(&mut self, action: Action) {
         let power_key = matches!(
             action,
             Action::PowerPress | Action::PowerTap | Action::PowerHold | Action::PowerOff
@@ -2877,6 +2932,7 @@ impl App {
             QuickRow::EjectSave
             | QuickRow::Look
             | QuickRow::Tint
+            | QuickRow::MenuSounds
             | QuickRow::ClockFormat
             | QuickRow::StartFresh
             | QuickRow::Turbo
@@ -2982,6 +3038,7 @@ impl App {
             QuickRow::SaveFormat => s.save_format = s.save_format.other(),
             QuickRow::Look => s.look = s.look.other(),
             QuickRow::Tint => s.tint = s.tint.step(right),
+            QuickRow::MenuSounds => s.menu_sounds = !s.menu_sounds,
             QuickRow::ClockFormat => {
                 s.clock_12h = !s.clock_12h;
                 slot_ui::set_twelve_hour(s.clock_12h);
@@ -5726,6 +5783,7 @@ fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue>
             true => QuickValue::Hour12,
             false => QuickValue::Hour24,
         }),
+        QuickRow::MenuSounds => Some(QuickValue::flag(s.menu_sounds)),
         QuickRow::Tint => Some(match s.tint {
             slot_store::Tint::Default => QuickValue::TintDefault,
             slot_store::Tint::Pastel => QuickValue::TintPastel,

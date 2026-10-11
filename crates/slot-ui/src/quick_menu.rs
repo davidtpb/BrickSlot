@@ -39,6 +39,7 @@ pub enum QuickRow {
     FileTransfer,
     Look,
     Tint,
+    MenuSounds,
     ClockFormat,
     JoinNetwork,
     StartFresh,
@@ -46,7 +47,7 @@ pub enum QuickRow {
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 37] = [
+    pub const ALL: [QuickRow; 38] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -80,6 +81,7 @@ impl QuickRow {
         QuickRow::FileTransfer,
         QuickRow::Look,
         QuickRow::Tint,
+        QuickRow::MenuSounds,
         QuickRow::ClockFormat,
         QuickRow::JoinNetwork,
         QuickRow::StartFresh,
@@ -108,7 +110,7 @@ impl QuickRow {
         QuickRow::GbPalettes,
     ];
 
-    pub const GAME: [QuickRow; 9] = [
+    pub const GAME: [QuickRow; 10] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Rewind,
@@ -118,6 +120,7 @@ impl QuickRow {
         QuickRow::StartFresh,
         QuickRow::SaveFormat,
         QuickRow::Performance,
+        QuickRow::MenuSounds,
     ];
 
     pub const LIGHTS: [QuickRow; 4] = [
@@ -173,6 +176,7 @@ impl QuickRow {
             | QuickRow::EjectSave
             | QuickRow::SaveFormat
             | QuickRow::Performance
+            | QuickRow::MenuSounds
             | QuickRow::StartFresh => &QuickRow::GAME,
             _ => &QuickRow::MAIN,
         }
@@ -235,6 +239,7 @@ impl QuickRow {
             QuickRow::Performance => "Performance",
             QuickRow::Look => "Style",
             QuickRow::Tint => "Theme",
+            QuickRow::MenuSounds => "Menu Sounds",
             QuickRow::ClockFormat => "Clock",
             QuickRow::Labels => "Download Labels",
             QuickRow::JoinNetwork => "Join Network",

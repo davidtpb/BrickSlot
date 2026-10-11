@@ -51,6 +51,8 @@ pub struct SlotState {
     pub cpu: CpuMode,
     pub look: Look,
     pub tint: Tint,
+    /// Ticks and blips as the menus are used.
+    pub menu_sounds: bool,
     pub clock_12h: bool,
     pub start_fresh: bool,
 }
@@ -272,6 +274,7 @@ impl Default for SlotState {
             cpu: CpuMode::Stock,
             look: Look::Classic,
             tint: Tint::Default,
+            menu_sounds: true,
             clock_12h: false,
             start_fresh: true,
         }
@@ -292,7 +295,7 @@ pub fn read_slot_state(root: &Path) -> SlotState {
 
 pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     let text = format!(
-        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\nsave_format={}\nauto_time={}\ncpu={}\nlook={}\nclock_12h={}\nstart_fresh={}\ntint={}\n",
+        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\nsave_format={}\nauto_time={}\ncpu={}\nlook={}\nclock_12h={}\nstart_fresh={}\ntint={}\nmenu_sounds={}\n",
         s.cart.as_deref().unwrap_or(""),
         s.cart_platform.map_or(String::new(), platform_key),
         s.brightness,
@@ -327,7 +330,8 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.look.name(),
         s.clock_12h,
         s.start_fresh,
-        s.tint.name()
+        s.tint.name(),
+        s.menu_sounds
     );
     atomic_write(&state_path(root), text.as_bytes())
 }
@@ -366,6 +370,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut cpu = None;
     let mut look = None;
     let mut tint = None;
+    let mut menu_sounds = None;
     let mut clock_12h = None;
     let mut start_fresh = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
@@ -405,6 +410,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "cpu" => cpu = CpuMode::parse(value),
             "look" => look = Look::parse(value),
             "tint" => tint = Tint::parse(value),
+            "menu_sounds" => menu_sounds = value.parse().ok(),
             "clock_12h" => clock_12h = value.parse().ok(),
             "start_fresh" => start_fresh = value.parse().ok(),
             "shader_gb" => shader_gb = Shader::parse(value).filter(|s| Shader::GB.contains(s)),
@@ -447,6 +453,7 @@ fn parse(text: &str) -> Option<SlotState> {
         cpu: cpu.unwrap_or(fallback.cpu),
         look: look.unwrap_or(fallback.look),
         tint: tint.unwrap_or(fallback.tint),
+        menu_sounds: menu_sounds.unwrap_or(fallback.menu_sounds),
         clock_12h: clock_12h.unwrap_or(fallback.clock_12h),
         start_fresh: start_fresh.unwrap_or(fallback.start_fresh),
     })

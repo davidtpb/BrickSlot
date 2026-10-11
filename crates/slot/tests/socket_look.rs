@@ -147,3 +147,37 @@ fn the_classic_style_keeps_its_own_settings() {
     assert!(a.settings_lines().is_none());
     assert_eq!(a.frame_split(), Some(slot_ui::QUICK_SPLIT));
 }
+
+#[test]
+fn start_in_the_socket_style_picks_the_core_from_a_popup() {
+    let (d, mut a) = shelf_with(Look::Socket);
+    press(&mut a, Btn::Start);
+    assert!(a.core_popup_open(), "no core popup");
+    let lines = a.settings_lines().expect("popup text");
+    assert_eq!(lines[slot_ui::POPUP_TITLE_SLOT].0, "Core");
+    assert!(lines[slot_ui::option_slot(0)].0.starts_with("mGBA"));
+    assert!(lines[slot_ui::option_slot(1)].0.starts_with("gpSP"));
+    let before = a.selected_stem().unwrap().to_string();
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::A);
+    assert!(!a.core_popup_open());
+    assert_eq!(
+        slot_store::core_for(d.path(), &before),
+        slot_store::Core::Gpsp
+    );
+    press(&mut a, Btn::Start);
+    let lines = a.settings_lines().unwrap();
+    assert!(
+        lines[slot_ui::option_slot(1)].0.contains('\u{2713}'),
+        "the core in use is not marked"
+    );
+    press(&mut a, Btn::B);
+    assert!(!a.core_popup_open());
+}
+
+#[test]
+fn the_classic_style_keeps_the_board_for_the_core() {
+    let (_d, mut a) = shelf_with(Look::Classic);
+    press(&mut a, Btn::Start);
+    assert!(!a.core_popup_open());
+}

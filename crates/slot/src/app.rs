@@ -351,6 +351,7 @@ pub struct App {
     socket_backdrop: Option<TexId>,
     socket_chrome: Vec<(TexId, u32, u32)>,
     customize: Option<Customize>,
+    core_popup: Option<usize>,
     dropped_faces: Vec<TexId>,
     shell_generation: u32,
     settings_faces: Vec<Option<(TexId, u32, u32)>>,
@@ -499,6 +500,7 @@ impl App {
             socket_backdrop: None,
             socket_chrome: Vec::new(),
             customize: None,
+            core_popup: None,
             dropped_faces: Vec::new(),
             shell_generation: 0,
             settings_faces: Vec::new(),
@@ -1448,6 +1450,12 @@ impl App {
             }
             return self.customize_input(action);
         }
+        if self.core_popup.is_some() {
+            if self.adjust(action) {
+                return;
+            }
+            return self.core_popup_input(action);
+        }
         if let Phase::SetClock {
             picker, from_menu, ..
         } = &mut self.phase
@@ -1611,7 +1619,8 @@ impl App {
     }
 
     pub fn wants_socket_chrome(&self) -> bool {
-        (self.socket_look() || self.customize.is_some()) && self.socket_chrome.is_empty()
+        (self.socket_look() || self.customize.is_some() || self.core_popup.is_some())
+            && self.socket_chrome.is_empty()
     }
 
     pub fn set_socket_chrome(&mut self, chrome: Vec<(TexId, u32, u32)>) {
@@ -1699,8 +1708,12 @@ impl App {
         let customizing = self
             .customize
             .filter(|_| matches!(self.phase, Phase::Shelf));
+        let core_popup = self
+            .core_popup
+            .filter(|_| matches!(self.phase, Phase::Shelf));
         let shown = (self.socket_look() && (row.is_some() || self.power_menu.is_some()))
-            || customizing.is_some();
+            || customizing.is_some()
+            || core_popup.is_some();
         if !shown {
             return None;
         }
@@ -1743,6 +1756,22 @@ impl App {
                 }
                 lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
             }
+        }
+        if core_popup.is_some() && self.power_menu.is_none() {
+            let now = self
+                .root
+                .as_deref()
+                .zip(self.selected_stem())
+                .map(|(root, stem)| slot_store::core_for(root, stem));
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Core".into(), true);
+            for (i, c) in Core::ALL.iter().enumerate() {
+                let text = match now == Some(*c) {
+                    true => format!("{}  \u{2713}", c.text()),
+                    false => c.text().to_string(),
+                };
+                lines[slot_ui::option_slot(i)] = (text, true);
+            }
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
         }
         if self.power_menu.is_some() {
             lines[slot_ui::POPUP_TITLE_SLOT] = ("Power".into(), true);
@@ -3351,6 +3380,18 @@ impl App {
             }
             .draw(out);
         }
+        if let Some(focus) = self
+            .core_popup
+            .filter(|_| matches!(self.phase, Phase::Shelf) && self.power_menu.is_none())
+        {
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: Core::ALL.len(),
+                focus,
+            }
+            .draw(out);
+        }
         if let Some(focus) = self.power_menu {
             slot_ui::SocketPopup {
                 chrome: &self.socket_chrome,
@@ -3970,6 +4011,9 @@ impl App {
         let Some(root) = self.root.clone() else {
             return;
         };
+        if self.socket_look() {
+            return self.open_core_popup(&root);
+        }
         let Some(cart) = self.shelf().carts.get(self.shelf().index) else {
             return;
         };
@@ -3985,6 +4029,43 @@ impl App {
         self.core_picker = Some(picker);
         self.shelf_mut().release_hold();
         self.play_held = None;
+    }
+
+    /// The core choice as a Socket popup: the cores in a list, the cursor on
+    /// the one the game runs on now.
+    fn open_core_popup(&mut self, root: &Path) {
+        let Some(cart) = self.shelf().carts.get(self.shelf().index) else {
+            return;
+        };
+        if cart.platform != Platform::Gba {
+            return;
+        }
+        let now = slot_store::core_for(root, &cart.stem);
+        self.core_popup = Core::ALL.iter().position(|c| *c == now);
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+    }
+
+    fn core_popup_input(&mut self, action: Action) {
+        let Some(at) = self.core_popup else {
+            return;
+        };
+        let n = Core::ALL.len();
+        match action {
+            Action::GbaDown(Btn::Up) => self.core_popup = Some((at + n - 1) % n),
+            Action::GbaDown(Btn::Down) => self.core_popup = Some((at + 1) % n),
+            Action::GbaDown(Btn::A) => {
+                self.write_core(Core::ALL[at]);
+                self.core_popup = None;
+                self.say(format!("Plays on {}", Core::ALL[at].text()), "");
+            }
+            Action::GbaDown(Btn::B) | Action::GbaDown(Btn::Start) => self.core_popup = None,
+            _ => {}
+        }
+    }
+
+    pub fn core_popup_open(&self) -> bool {
+        self.core_popup.is_some()
     }
 
     fn core_faces_ready(&self) -> bool {

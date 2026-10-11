@@ -198,6 +198,14 @@ struct Playback {
     failing: bool,
 }
 
+/// On the Brick Pro the first button press after the codec was let go froze
+/// the whole handheld, with reopening it the only thing in flight. NextUI
+/// never closes it there, so on TrimUI the device stays open through silence.
+fn keeps_device_open() -> bool {
+    static HOLD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *HOLD.get_or_init(|| slot_power::Board::detect().is_trimui())
+}
+
 fn play(ring: &Arc<Ring>, sample_rate: u32) -> Result<Playback, AudioError> {
     let alsa = Alsa::load()?;
     let pcm = match alsa.open_pcm(sample_rate) {
@@ -221,27 +229,33 @@ impl Playback {
         let mut buf = vec![0i16; PERIOD_FRAMES * CHANNELS as usize];
         let span = Duration::from_secs_f64(PERIOD_FRAMES as f64 / self.rate as f64);
         let mut silence = Silence::new(RELEASE_AFTER);
+        let hold_open = keeps_device_open();
         while !stop.load(Ordering::Relaxed) {
             ring.fill(&mut buf);
             let hold = silence.hear(&buf, span);
             match (self.pcm, hold) {
-                (Some(_), false) => {
+                (Some(_), false) if !hold_open => {
                     self.release();
                     eprintln!("slot: audio released after silence");
                 }
-                (None, true) => match self.alsa.open_pcm(self.rate) {
-                    Ok(pcm) => {
-                        eprintln!("slot: audio reopened at {:.1} ms", crate::boot_time::ms());
-                        self.pcm = Some(pcm);
-                        self.failing = false;
+                (None, true) => {
+                    if !self.failing {
+                        eprintln!("slot: audio reopening at {:.1} ms", crate::boot_time::ms());
                     }
-                    Err(e) => {
-                        if !self.failing {
-                            eprintln!("slot: audio: {e}, retrying");
-                            self.failing = true;
+                    match self.alsa.open_pcm(self.rate) {
+                        Ok(pcm) => {
+                            eprintln!("slot: audio reopened at {:.1} ms", crate::boot_time::ms());
+                            self.pcm = Some(pcm);
+                            self.failing = false;
+                        }
+                        Err(e) => {
+                            if !self.failing {
+                                eprintln!("slot: audio: {e}, retrying");
+                                self.failing = true;
+                            }
                         }
                     }
-                },
+                }
                 _ => {}
             }
             match self.pcm {

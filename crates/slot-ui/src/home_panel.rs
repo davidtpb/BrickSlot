@@ -1,4 +1,5 @@
 use crate::draw::{Draw, TexId, OUT_H, OUT_W};
+use crate::home_icons::{ICON_D, RING_D};
 use crate::plate::UndoFace;
 use crate::power_menu::MENU_INK;
 use crate::search::sized;
@@ -11,16 +12,18 @@ pub enum HomeTile {
     Sound,
     Rumble,
     Wifi,
+    Bluetooth,
     Lights,
     Power,
 }
 
 impl HomeTile {
-    pub const ALL: [HomeTile; 6] = [
+    pub const ALL: [HomeTile; 7] = [
         HomeTile::Screenshot,
         HomeTile::Sound,
         HomeTile::Rumble,
         HomeTile::Wifi,
+        HomeTile::Bluetooth,
         HomeTile::Lights,
         HomeTile::Power,
     ];
@@ -31,6 +34,7 @@ impl HomeTile {
             HomeTile::Sound => "Sound",
             HomeTile::Rumble => "Rumble",
             HomeTile::Wifi => "Wi-Fi",
+            HomeTile::Bluetooth => "Bluetooth",
             HomeTile::Lights => "Lights",
             HomeTile::Power => "Power",
         }
@@ -96,19 +100,20 @@ const INSET: f32 = 20.0;
 
 const TITLE_Y: f32 = CARD_Y + 8.0;
 const TITLE_H: u32 = 40;
+/// The hairline under the title, as on NX Redux.
+const RULE_Y: f32 = TITLE_Y + TITLE_H as f32 + 6.0;
 
-pub const TILE_W: f32 = 92.0;
-pub const TILE_H: f32 = 84.0;
-const TILE_GAP: f32 = 10.0;
-pub const TILES_Y: f32 = CARD_Y + 56.0;
-pub const TILES_X: f32 = CARD_X
-    + (CARD_W - TILE_W * HomeTile::ALL.len() as f32 - TILE_GAP * (HomeTile::ALL.len() - 1) as f32)
-        / 2.0;
-const TILE_NAME_H: u32 = 34;
-const TILE_STATE_H: u32 = 30;
+pub const STATS_Y: f32 = RULE_Y + 12.0;
+const STAT_GAP: f32 = 12.0;
+const STAT_W: f32 =
+    (CARD_W - 2.0 * INSET - STAT_GAP * (HOME_STATS as f32 - 1.0)) / HOME_STATS as f32;
+const STAT_H: f32 = 64.0;
+const STATS_X: f32 = CARD_X + INSET;
+const STAT_NAME_H: u32 = 24;
+const STAT_VALUE_H: u32 = 32;
 
-pub const SLIDERS_Y: f32 = TILES_Y + TILE_H + 14.0;
-pub const SLIDER_PITCH: f32 = 48.0;
+pub const SLIDERS_Y: f32 = STATS_Y + STAT_H + 10.0;
+pub const SLIDER_PITCH: f32 = 44.0;
 const SLIDER_NAME_W: f32 = 150.0;
 pub const TRACK_X: f32 = CARD_X + INSET + SLIDER_NAME_W;
 pub const TRACK_W: f32 = 330.0;
@@ -116,22 +121,28 @@ const TRACK_H: f32 = 10.0;
 const SLIDER_VALUE_X: f32 = TRACK_X + TRACK_W + 12.0;
 const SLIDER_VALUE_W: f32 = CARD_X + CARD_W - INSET - SLIDER_VALUE_X;
 
-pub const STATS_Y: f32 = SLIDERS_Y + 2.0 * SLIDER_PITCH + 10.0;
-const STAT_W: f32 = 140.0;
-const STAT_H: f32 = 78.0;
-const STAT_GAP: f32 = 12.0;
-const STATS_X: f32 =
-    CARD_X + (CARD_W - STAT_W * HOME_STATS as f32 - STAT_GAP * (HOME_STATS - 1) as f32) / 2.0;
-const STAT_NAME_H: u32 = 28;
-const STAT_VALUE_H: u32 = 36;
+/// The round buttons: a disc each, its name under it and its state under
+/// that.
+pub const TILE_W: f32 = ICON_D as f32;
+pub const TILE_H: f32 = ICON_D as f32;
+const TILE_GAP: f32 = 22.0;
+pub const TILES_Y: f32 = SLIDERS_Y + 2.0 * SLIDER_PITCH + 14.0;
+pub const TILES_X: f32 = CARD_X
+    + (CARD_W
+        - TILE_W * HomeTile::ALL.len() as f32
+        - TILE_GAP * (HomeTile::ALL.len() as f32 - 1.0))
+        / 2.0;
+const LABEL_W: f32 = TILE_W + TILE_GAP - 2.0;
+const TILE_NAME_H: u32 = 22;
+const TILE_STATE_H: u32 = 18;
 
-const LEGEND_Y: f32 = STATS_Y + STAT_H + 6.0;
-const LEGEND_H: u32 = 36;
+const LEGEND_Y: f32 = TILES_Y + TILE_H + 4.0 + (TILE_NAME_H + TILE_STATE_H) as f32 + 4.0;
+const LEGEND_H: u32 = 30;
 
 const FRAME: f32 = 3.0;
 
-/// Where a taller screen opens the panel up in the Socket style: below the
-/// legend, across the card's plain foot.
+/// Where the Socket backdrop is split on a taller screen while the panel is
+/// up: below its legend, through plain card.
 pub const HOME_SPLIT: f32 = 430.0;
 
 /// The face for one slot of the panel in the Socket style: dark Inter on
@@ -143,13 +154,13 @@ pub fn home_face_light(slot: usize, label: &str, lit: bool) -> UndoFace {
     let (px, min, h, w, ink) = match slot {
         HOME_TITLE => (24.0, 15.0, TITLE_H, card_w - 120.0, INK_DARK),
         HOME_CLOCK => (22.0, 15.0, TITLE_H, 110.0, INK_DARK),
-        HOME_LEGEND => (16.0, 11.0, LEGEND_H, card_w, [96, 96, 96]),
-        s if s < TILE_STATE0 => (17.0, 11.0, TILE_NAME_H, TILE_W - 8.0, INK_DARK),
-        s if s < SLIDER_NAME0 => (15.0, 10.0, TILE_STATE_H, TILE_W - 8.0, ink),
+        HOME_LEGEND => (15.0, 11.0, LEGEND_H, card_w, INK_DARK),
+        s if s < TILE_STATE0 => (15.0, 10.0, TILE_NAME_H, LABEL_W, INK_DARK),
+        s if s < SLIDER_NAME0 => (12.0, 9.0, TILE_STATE_H, LABEL_W, ink),
         s if s < SLIDER_VALUE0 => (19.0, 13.0, 40, SLIDER_NAME_W - 10.0, ink),
         s if s < STAT_NAME0 => (18.0, 12.0, 40, SLIDER_VALUE_W, INK_DARK),
-        s if s < STAT_VALUE0 => (14.0, 10.0, STAT_NAME_H, STAT_W - 8.0, [96, 96, 96]),
-        _ => (21.0, 12.0, STAT_VALUE_H, STAT_W - 8.0, INK_DARK),
+        s if s < STAT_VALUE0 => (13.0, 10.0, STAT_NAME_H, STAT_W - 8.0, [96, 96, 96]),
+        _ => (20.0, 12.0, STAT_VALUE_H, STAT_W - 8.0, INK_DARK),
     };
     inter_fit_face(label, px, min, h, ink, w)
 }
@@ -161,13 +172,13 @@ pub fn home_face(slot: usize, label: &str, lit: bool) -> UndoFace {
     match slot {
         HOME_TITLE => sized(label, MENU_INK, 26.0, 16.0, TITLE_H, card_w - 120.0),
         HOME_CLOCK => sized(label, MENU_INK, 24.0, 16.0, TITLE_H, 110.0),
-        HOME_LEGEND => sized(label, DIM_INK, 18.0, 12.0, LEGEND_H, card_w),
-        s if s < TILE_STATE0 => sized(label, MENU_INK, 20.0, 12.0, TILE_NAME_H, TILE_W - 8.0),
-        s if s < SLIDER_NAME0 => sized(label, ink, 17.0, 11.0, TILE_STATE_H, TILE_W - 8.0),
+        HOME_LEGEND => sized(label, MENU_INK, 17.0, 12.0, LEGEND_H, card_w),
+        s if s < TILE_STATE0 => sized(label, MENU_INK, 17.0, 11.0, TILE_NAME_H, LABEL_W),
+        s if s < SLIDER_NAME0 => sized(label, ink, 14.0, 10.0, TILE_STATE_H, LABEL_W),
         s if s < SLIDER_VALUE0 => sized(label, ink, 22.0, 14.0, 40, SLIDER_NAME_W - 10.0),
         s if s < STAT_NAME0 => sized(label, ink, 20.0, 12.0, 40, SLIDER_VALUE_W),
-        s if s < STAT_VALUE0 => sized(label, DIM_INK, 16.0, 11.0, STAT_NAME_H, STAT_W - 8.0),
-        _ => sized(label, MENU_INK, 24.0, 12.0, STAT_VALUE_H, STAT_W - 8.0),
+        s if s < STAT_VALUE0 => sized(label, DIM_INK, 15.0, 11.0, STAT_NAME_H, STAT_W - 8.0),
+        _ => sized(label, MENU_INK, 22.0, 12.0, STAT_VALUE_H, STAT_W - 8.0),
     }
 }
 
@@ -253,6 +264,25 @@ pub struct HomeScreen<'a> {
     pub levels: [f32; 2],
     /// Drawn light, for the Socket style.
     pub light: bool,
+    /// Each button off then on, in the order of [`HomeTile::ALL`], then
+    /// the focus ring: see [`home_icon_faces`].
+    pub icons: &'a [(TexId, u32, u32)],
+}
+
+/// Every texture the panel's buttons need, in the order
+/// [`HomeScreen::icons`] takes them.
+pub fn home_icon_faces(light: bool) -> Vec<UndoFace> {
+    let mut out: Vec<UndoFace> = HomeTile::ALL
+        .iter()
+        .flat_map(|t| {
+            [
+                crate::home_icons::home_icon_face(*t, false, light),
+                crate::home_icons::home_icon_face(*t, true, light),
+            ]
+        })
+        .collect();
+    out.push(crate::home_icons::home_ring_face(light));
+    out
 }
 
 struct Palette {
@@ -268,9 +298,9 @@ pub const SOCKET_ON: [f32; 4] = [0.14, 0.64, 0.47, 1.0];
 fn palette(light: bool) -> Palette {
     match light {
         true => Palette {
-            card: [0.86, 0.86, 0.86, 1.0],
-            tile: [0.93, 0.93, 0.93, 1.0],
-            row: [0.74, 0.74, 0.74, 1.0],
+            card: grey(219),
+            tile: grey(237),
+            row: grey(189),
             on: SOCKET_ON,
             frame: [0.12, 0.12, 0.12, 1.0],
         },
@@ -287,6 +317,12 @@ fn palette(light: bool) -> Palette {
             ],
         },
     }
+}
+
+/// A light grey of the Socket style, in the chosen tint.
+fn grey(g: u8) -> [f32; 4] {
+    let [r, g, b] = crate::socket::tinted([g, g, g]);
+    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]
 }
 
 fn rect(out: &mut Vec<Draw>, (x, y, w, h): (f32, f32, f32, f32), colour: [f32; 4]) {
@@ -335,6 +371,20 @@ impl HomeScreen<'_> {
         self.put(out, slot, (right - fw as f32, y, fw as f32, h), true);
     }
 
+    fn icon(&self, out: &mut Vec<Draw>, at: usize, (x, y): (f32, f32)) {
+        let Some((tex, w, h)) = self.icons.get(at).copied() else {
+            return;
+        };
+        out.push(Draw::Tex {
+            x: x.round(),
+            y: y.round(),
+            w: w as f32,
+            h: h as f32,
+            tex,
+            alpha: 1.0,
+        });
+    }
+
     pub fn draw(&self, out: &mut Vec<Draw>) {
         let pal = palette(self.light);
         rect(out, (0.0, 0.0, OUT_W as f32, OUT_H as f32), SHADE);
@@ -354,35 +404,36 @@ impl HomeScreen<'_> {
             TITLE_Y,
             TITLE_H as f32,
         );
+        rect(
+            out,
+            (CARD_X + INSET, RULE_Y, CARD_W - 2.0 * INSET, 1.0),
+            pal.row,
+        );
 
-        let focus = self.panel.focus();
-        for (i, tile) in HomeTile::ALL.iter().enumerate() {
-            let r = tile_rect(i);
-            let fill = if self.on[i] { pal.on } else { pal.tile };
-            rect(out, r, fill);
-            if focus == HomeFocus::Tile(*tile) {
-                frame(out, r, pal.frame);
-            }
+        for i in 0..HOME_STATS {
+            let r = stat_rect(i);
+            rect(out, r, pal.tile);
             let (x, y, w, _) = r;
             self.put(
                 out,
-                home_tile_name_slot(i),
-                (x, y + 8.0, w, TILE_NAME_H as f32),
+                home_stat_name_slot(i),
+                (x, y + 4.0, w, STAT_NAME_H as f32),
                 false,
             );
             self.put(
                 out,
-                home_tile_state_slot(i),
+                home_stat_value_slot(i),
                 (
                     x,
-                    y + TILE_H - TILE_STATE_H as f32 - 8.0,
+                    y + STAT_H - STAT_VALUE_H as f32 - 4.0,
                     w,
-                    TILE_STATE_H as f32,
+                    STAT_VALUE_H as f32,
                 ),
                 false,
             );
         }
 
+        let focus = self.panel.focus();
         for i in 0..2 {
             let y = SLIDERS_Y + SLIDER_PITCH * i as f32;
             let row_focus = [HomeFocus::Brightness, HomeFocus::Volume][i];
@@ -414,34 +465,56 @@ impl HomeScreen<'_> {
             );
         }
 
-        for i in 0..HOME_STATS {
-            let r = stat_rect(i);
-            rect(out, r, pal.tile);
-            let (x, y, w, _) = r;
+        let ring = HomeTile::ALL.len() * 2;
+        for (i, tile) in HomeTile::ALL.iter().enumerate() {
+            let (x, y, w, h) = tile_rect(i);
+            match self.icons.is_empty() {
+                true => rect(
+                    out,
+                    (x, y, w, h),
+                    if self.on[i] { pal.on } else { pal.tile },
+                ),
+                false => self.icon(out, i * 2 + usize::from(self.on[i]), (x, y)),
+            }
+            if focus == HomeFocus::Tile(*tile) {
+                let pad = (RING_D - ICON_D) as f32 / 2.0;
+                match self.icons.get(ring) {
+                    Some(_) => self.icon(out, ring, (x - pad, y - pad)),
+                    None => frame(out, (x, y, w, h), pal.frame),
+                }
+            }
+            let label_x = x + (w - LABEL_W) / 2.0;
+            let name_y = y + h + 4.0;
             self.put(
                 out,
-                home_stat_name_slot(i),
-                (x, y + 6.0, w, STAT_NAME_H as f32),
+                home_tile_name_slot(i),
+                (label_x, name_y, LABEL_W, TILE_NAME_H as f32),
                 false,
             );
             self.put(
                 out,
-                home_stat_value_slot(i),
+                home_tile_state_slot(i),
                 (
-                    x,
-                    y + STAT_H - STAT_VALUE_H as f32 - 6.0,
-                    w,
-                    STAT_VALUE_H as f32,
+                    label_x,
+                    name_y + TILE_NAME_H as f32,
+                    LABEL_W,
+                    TILE_STATE_H as f32,
                 ),
                 false,
             );
         }
 
-        self.put(
+        rect(
+            out,
+            (CARD_X + INSET, LEGEND_Y - 3.0, CARD_W - 2.0 * INSET, 1.0),
+            pal.row,
+        );
+        self.put_right(
             out,
             HOME_LEGEND,
-            (CARD_X, LEGEND_Y, CARD_W, LEGEND_H as f32),
-            false,
+            CARD_X + CARD_W - INSET,
+            LEGEND_Y,
+            LEGEND_H as f32,
         );
     }
 }

@@ -9,6 +9,7 @@ mod clock;
 mod customize;
 mod draw;
 mod footer;
+mod home_icons;
 mod home_panel;
 mod hud;
 mod icon;
@@ -56,11 +57,13 @@ pub use customize::{
 };
 pub use draw::{Draw, TexId, OUT_H, OUT_W};
 pub use footer::{draw_footer, Printed};
+pub use home_icons::{home_icon_face, home_ring_face, ICON_D, RING_D};
 pub use home_panel::{
-    home_face, home_face_light, home_slider_name_slot, home_slider_value_slot, home_stat_name_slot,
-    home_stat_value_slot, home_tile_name_slot, home_tile_state_slot, stat_rect, tile_rect,
-    track_rect, HomeFocus, HomePanel, HomeScreen, HomeTile, CARD_H, CARD_W, CARD_X, CARD_Y,
-    HOME_ACCENT, HOME_CLOCK, HOME_LEGEND, HOME_SLOTS, HOME_SPLIT, HOME_STATS, HOME_TITLE,
+    home_face, home_face_light, home_icon_faces, home_slider_name_slot, home_slider_value_slot,
+    home_stat_name_slot, home_stat_value_slot, home_tile_name_slot, home_tile_state_slot,
+    stat_rect, tile_rect, track_rect, HomeFocus, HomePanel, HomeScreen, HomeTile, CARD_H, CARD_W,
+    CARD_X, CARD_Y, HOME_ACCENT, HOME_CLOCK, HOME_LEGEND, HOME_SLOTS, HOME_SPLIT, HOME_STATS,
+    HOME_TITLE,
 };
 pub use hud::{
     badge_at, ff_badge, FfState, Hud, HudKind, LinkBadge, Millis, ALARM_BAND_H, HUD_ICON_PX,

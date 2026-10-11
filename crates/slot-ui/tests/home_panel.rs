@@ -25,6 +25,7 @@ fn draw(panel: HomePanel, on: [bool; HomeTile::ALL.len()], levels: [f32; 2]) -> 
         on,
         levels,
         light: false,
+        icons: &[],
     }
     .draw(&mut out);
     out
@@ -51,15 +52,64 @@ fn every_tile_slider_and_stat_fits_inside_the_card_without_overlap() {
     for i in 0..2 {
         assert!(inside(track_rect(i)));
     }
-    assert!(
-        track_rect(0).1 > tiles[0].1 + tiles[0].3,
-        "sliders run into the tiles"
-    );
     for i in 0..HOME_STATS {
         let s = stat_rect(i);
         assert!(inside(s), "a stat at {s:?} leaves the card");
-        assert!(s.1 > track_rect(1).1, "stats run into the sliders");
+        assert!(
+            s.1 + s.3 < track_rect(0).1,
+            "the stats run into the sliders"
+        );
     }
+    assert!(
+        tiles[0].1 > track_rect(1).1 + track_rect(1).3,
+        "the buttons run into the sliders"
+    );
+    assert!(
+        tiles[0].1 + tiles[0].3 + 44.0 < slot_ui::HOME_SPLIT,
+        "the buttons' names reach the split"
+    );
+}
+
+#[test]
+fn the_buttons_are_round_textures_with_a_ring_on_the_focused_one() {
+    let mut p = HomePanel::new();
+    p.step(true);
+    let icons: Vec<_> = (0..HomeTile::ALL.len() * 2 + 1)
+        .map(|i| {
+            let d = if i == HomeTile::ALL.len() * 2 {
+                slot_ui::RING_D
+            } else {
+                slot_ui::ICON_D
+            };
+            (slot_gfx::TexId::from_raw(500 + i), d, d)
+        })
+        .collect();
+    let mut on = [false; HomeTile::ALL.len()];
+    on[2] = true;
+    let mut out = Vec::new();
+    HomeScreen {
+        faces: &[],
+        panel: p,
+        on,
+        levels: [0.0, 0.0],
+        light: true,
+        icons: &icons,
+    }
+    .draw(&mut out);
+    let texes: Vec<usize> = out
+        .iter()
+        .filter_map(|d| match d {
+            Draw::Tex { tex, .. } => icons.iter().position(|i| i.0 == *tex),
+            _ => None,
+        })
+        .collect();
+    assert!(texes.contains(&0), "the screenshot button is not drawn off");
+    assert!(texes.contains(&5), "the rumble button is not drawn on");
+    assert!(
+        !texes.contains(&4),
+        "the rumble button is drawn off as well"
+    );
+    assert!(texes.contains(&(HomeTile::ALL.len() * 2)), "no focus ring");
 }
 
 #[test]

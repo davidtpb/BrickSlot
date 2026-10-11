@@ -390,6 +390,11 @@ pub struct App {
     home_stats_at: Millis,
     net: crate::net::Net,
     bt: crate::bt::Bt,
+    /// The Bluetooth devices last listed.
+    bt_devices: Vec<crate::bt::BtDevice>,
+    /// The Home panel's round buttons, and whether they were drawn light.
+    home_icons: Vec<(TexId, u32, u32)>,
+    home_icons_light: bool,
     cheevos_login: CheevosLogin,
     clock_asked: bool,
     file_server: Option<crate::fileserver::FileServer>,
@@ -548,6 +553,9 @@ impl App {
             home_stats_at: 0,
             net: crate::net::Net::idle(),
             bt: crate::bt::Bt::idle(),
+            bt_devices: Vec::new(),
+            home_icons: Vec::new(),
+            home_icons_light: false,
             cheevos_login: CheevosLogin::Waiting,
             clock_asked: false,
             file_server: None,
@@ -2584,6 +2592,7 @@ impl App {
             slot_ui::HomeTile::Sound => self.mute_toggle(),
             slot_ui::HomeTile::Rumble => self.change_setting(QuickRow::Rumble, true),
             slot_ui::HomeTile::Wifi => self.change_setting(QuickRow::Wifi, true),
+            slot_ui::HomeTile::Bluetooth => self.change_setting(QuickRow::Bluetooth, true),
             slot_ui::HomeTile::Lights => self.change_setting(QuickRow::LightMode, true),
             slot_ui::HomeTile::Power => {
                 self.close_home();
@@ -2598,6 +2607,7 @@ impl App {
             slot_ui::HomeTile::Sound => !self.muted(),
             slot_ui::HomeTile::Rumble => self.state.rumble,
             slot_ui::HomeTile::Wifi => self.state.wifi,
+            slot_ui::HomeTile::Bluetooth => self.state.bluetooth,
             slot_ui::HomeTile::Lights => self.state.light_mode != LightMode::Off,
             slot_ui::HomeTile::Power => false,
         })
@@ -2620,6 +2630,12 @@ impl App {
                 slot_ui::HomeTile::Screenshot if on[i] => "Take",
                 slot_ui::HomeTile::Screenshot => "In game",
                 slot_ui::HomeTile::Wifi if on[i] && !self.net.online() => "Joining",
+                slot_ui::HomeTile::Bluetooth if on[i] => {
+                    match self.bt_devices.iter().find(|d| d.connected) {
+                        Some(_) => "Connected",
+                        None => "On",
+                    }
+                }
                 slot_ui::HomeTile::Lights => match self.state.light_mode {
                     LightMode::Battery => "Battery",
                     LightMode::Colour => "Colour",
@@ -2663,11 +2679,26 @@ impl App {
             lines[slot_ui::home_stat_value_slot(i)] = (value, true);
         }
         let legend = match self.on_shelf() {
-            true => "A select   D-PAD adjust   B close   MENU settings",
-            false => "A select   D-PAD adjust   B resume",
+            true => "MENU  Settings      B  Close      A  Select",
+            false => "B  Resume      A  Select",
         };
         lines[slot_ui::HOME_LEGEND] = (legend.to_string(), false);
         Some(lines)
+    }
+
+    /// Whether the Home panel's buttons are wanted, and drawn light: when
+    /// it is up without them, or with them drawn for the other look.
+    pub fn wants_home_icons(&self) -> Option<bool> {
+        let light = self.socket_look();
+        (self.home.is_some() && (self.home_icons.is_empty() || self.home_icons_light != light))
+            .then_some(light)
+    }
+
+    pub fn set_home_icons(&mut self, icons: Vec<(TexId, u32, u32)>, light: bool) {
+        let old = std::mem::replace(&mut self.home_icons, icons);
+        self.dropped_faces
+            .extend(old.into_iter().map(|(t, _, _)| t));
+        self.home_icons_light = light;
     }
 
     pub fn set_home_faces(&mut self, faces: Vec<Option<(TexId, u32, u32)>>) {
@@ -2731,6 +2762,7 @@ impl App {
     /// Puts a device list on the Bluetooth screen, while it is up, keeping
     /// the cursor on the device it was on.
     pub fn bt_found(&mut self, found: Vec<crate::bt::BtDevice>) {
+        self.bt_devices = found.clone();
         if let Phase::Bluetooth { list, at, scanning } = &mut self.phase {
             let was = list.get(*at).map(|d| d.mac.clone());
             *at = was
@@ -3454,6 +3486,9 @@ impl App {
         if self.painted_tint != self.state.tint {
             self.painted_tint = self.state.tint;
             self.dropped_faces.extend(self.socket_backdrop.take());
+            let icons = std::mem::take(&mut self.home_icons);
+            self.dropped_faces
+                .extend(icons.into_iter().map(|(t, _, _)| t));
             self.dropped_faces
                 .extend(self.socket_chrome.drain(..).map(|(t, _, _)| t));
         }
@@ -4265,6 +4300,7 @@ impl App {
         }
         if let Some(panel) = self.home {
             slot_ui::HomeScreen {
+                icons: &self.home_icons,
                 faces: &self.home_faces,
                 panel,
                 on: self.home_tiles_on(),

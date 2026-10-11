@@ -371,6 +371,13 @@ impl Frontend {
 
     /// The same for the Home panel.
     fn sync_home(&mut self, compositor: &mut Compositor) {
+        if let Some(light) = self.session.app().wants_home_icons() {
+            let icons = slot_ui::home_icon_faces(light)
+                .into_iter()
+                .map(|f| (compositor.create_texture(f.w, f.h, &f.rgba), f.w, f.h))
+                .collect();
+            self.session.app_mut().set_home_icons(icons, light);
+        }
         let Some(lines) = self.session.app().home_lines() else {
             return;
         };

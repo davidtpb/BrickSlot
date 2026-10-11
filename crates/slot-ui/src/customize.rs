@@ -2,7 +2,7 @@
 //! panel on the right to pick its material and colour, seen on the cart as
 //! they change.
 
-use slot_gfx::{Draw, TexId, OUT_W};
+use slot_gfx::{Draw, TexId, OUT_H, OUT_W};
 use slot_store::{Outline, ShellChoice, ShellFinish};
 
 use crate::socket_menu::Chrome;
@@ -349,6 +349,98 @@ impl CustomizeScreen<'_> {
     }
 }
 
+const INSPECT_ROW_TOP: f32 = PANEL_Y + 12.0 + PANEL_TITLE_H + 12.0;
+pub const INSPECT_PITCH: f32 = 54.0;
+
+pub fn inspect_row_top(i: usize) -> f32 {
+    INSPECT_ROW_TOP + INSPECT_PITCH * i as f32
+}
+
+/// A game's particulars beside it: on a panel like Customize's, a card for
+/// each fact, and the ways on from here along the foot.
+pub struct InspectScreen<'a> {
+    pub chrome: &'a [(TexId, u32, u32)],
+    pub faces: &'a [Option<(TexId, u32, u32)>],
+    pub rows: usize,
+}
+
+impl InspectScreen<'_> {
+    fn chrome(&self, c: Chrome, x: f32, y: f32, out: &mut Vec<Draw>) {
+        if let Some(&(tex, w, h)) = self.chrome.get(c.index()) {
+            out.push(Draw::Tex {
+                x: x.round(),
+                y: y.round(),
+                w: w as f32,
+                h: h as f32,
+                tex,
+                alpha: 1.0,
+            });
+        }
+    }
+
+    fn face(&self, slot: usize) -> Option<(TexId, f32, f32)> {
+        self.faces
+            .get(slot)
+            .copied()
+            .flatten()
+            .map(|(t, w, h)| (t, w as f32, h as f32))
+    }
+
+    fn put(&self, slot: usize, x: f32, y: f32, out: &mut Vec<Draw>) -> f32 {
+        let Some((tex, w, h)) = self.face(slot) else {
+            return 0.0;
+        };
+        out.push(Draw::Tex {
+            x: x.round(),
+            y: y.round(),
+            w,
+            h,
+            tex,
+            alpha: 1.0,
+        });
+        w
+    }
+
+    pub fn draw(&self, out: &mut Vec<Draw>) {
+        use crate::socket_menu::{
+            inspect_caption_slot, inspect_hint_slot, inspect_value_slot, CUSTOM_TITLE, INSPECT_ROWS,
+        };
+        self.chrome(Chrome::Panel, PANEL_X, PANEL_Y, out);
+        let title_y = PANEL_Y + 12.0;
+        self.chrome(Chrome::PanelTitle, PANEL_INNER_X, title_y, out);
+        if let Some((_, w, _)) = self.face(CUSTOM_TITLE) {
+            self.put(
+                CUSTOM_TITLE,
+                PANEL_INNER_X + (PANEL_INNER_W - w) / 2.0,
+                title_y,
+                out,
+            );
+        }
+        for i in 0..self.rows.min(INSPECT_ROWS) {
+            let y = inspect_row_top(i);
+            self.chrome(Chrome::PanelRow, PANEL_INNER_X, y, out);
+            self.put(inspect_caption_slot(i), PANEL_INNER_X + 16.0, y + 5.0, out);
+            self.put(inspect_value_slot(i), PANEL_INNER_X + 16.0, y + 21.0, out);
+        }
+        let foot = OUT_H as f32 - 12.0 - 34.0;
+        let mut x = 12.0;
+        for i in [0, 3, 1] {
+            let w = self.put(inspect_hint_slot(i), x, foot, out);
+            if w > 0.0 {
+                x += w + 8.0;
+            }
+        }
+        if let Some((_, w, _)) = self.face(inspect_hint_slot(2)) {
+            self.put(
+                inspect_hint_slot(2),
+                PANEL_INNER_X + PANEL_INNER_W - w,
+                foot,
+                out,
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,6 +507,12 @@ mod tests {
             (SWATCHES[6], ShellFinish::Clear)
         );
         assert_eq!(Material::of(Some(clear)), Material::Clear);
+    }
+
+    #[test]
+    fn the_inspect_cards_end_above_the_split() {
+        let last = inspect_row_top(crate::socket_menu::INSPECT_ROWS - 1) + PANEL_ROW_H;
+        assert!(last < crate::socket::SOCKET_SPLIT, "{last}");
     }
 
     #[test]

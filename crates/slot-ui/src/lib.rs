@@ -51,8 +51,8 @@ pub use clock::{
     twelve_hour, ClockPicker, Field,
 };
 pub use customize::{
-    swatch_rect, with_colour, with_material, CustomFocus, CustomizePanel, CustomizeScreen,
-    Material, CUSTOM_CART_X, SWATCHES, SWATCH_COLS,
+    inspect_row_top, swatch_rect, with_colour, with_material, CustomFocus, CustomizePanel,
+    CustomizeScreen, InspectScreen, Material, CUSTOM_CART_X, SWATCHES, SWATCH_COLS,
 };
 pub use draw::{Draw, TexId, OUT_H, OUT_W};
 pub use footer::{draw_footer, Printed};
@@ -109,9 +109,10 @@ pub use socket::{
     SOCKET_STATUS, SOCKET_TABS,
 };
 pub use socket_menu::{
-    caption_slot, chrome_face, item_top, option_slot, settings_face, side_slot, value_slot, Card,
-    Chrome, SocketPopup, SocketSettings, CUSTOM_CLOSE, CUSTOM_COLOUR, CUSTOM_MATERIAL,
-    CUSTOM_TITLE, CUSTOM_TYPE, CUSTOM_TYPE_VALUE, ITEMS as SETTINGS_ITEMS, POPUP_CLOSE_SLOT,
+    caption_slot, chrome_face, inspect_caption_slot, inspect_hint_slot, inspect_value_slot,
+    item_top, option_slot, settings_face, side_slot, value_slot, Card, Chrome, SocketPopup,
+    SocketSettings, CUSTOM_CLOSE, CUSTOM_COLOUR, CUSTOM_MATERIAL, CUSTOM_TITLE, CUSTOM_TYPE,
+    CUSTOM_TYPE_VALUE, INSPECT_HINTS, INSPECT_ROWS, ITEMS as SETTINGS_ITEMS, POPUP_CLOSE_SLOT,
     POPUP_OPTIONS, POPUP_TITLE_SLOT, SETTINGS_CLOSE, SETTINGS_HINT, SETTINGS_SLOTS, SETTINGS_SPLIT,
 };
 pub use sticker::{

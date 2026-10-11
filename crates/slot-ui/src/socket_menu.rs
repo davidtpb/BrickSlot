@@ -206,7 +206,25 @@ pub const CUSTOM_COLOUR: usize = CUSTOM_MATERIAL + 1;
 pub const CUSTOM_TYPE: usize = CUSTOM_COLOUR + 1;
 pub const CUSTOM_TYPE_VALUE: usize = CUSTOM_TYPE + 1;
 pub const CUSTOM_CLOSE: usize = CUSTOM_TYPE_VALUE + 1;
-pub const SETTINGS_SLOTS: usize = CUSTOM_CLOSE + 1;
+pub const INSPECT_ROWS: usize = 6;
+const INSPECT_CAPTION0: usize = CUSTOM_CLOSE + 1;
+const INSPECT_VALUE0: usize = INSPECT_CAPTION0 + INSPECT_ROWS;
+pub const INSPECT_HINTS: usize = 4;
+const INSPECT_HINT0: usize = INSPECT_VALUE0 + INSPECT_ROWS;
+pub const SETTINGS_SLOTS: usize = INSPECT_HINT0 + INSPECT_HINTS;
+
+pub fn inspect_caption_slot(i: usize) -> usize {
+    INSPECT_CAPTION0 + i
+}
+
+pub fn inspect_value_slot(i: usize) -> usize {
+    INSPECT_VALUE0 + i
+}
+
+/// 0 is the red way back; the rest are grey.
+pub fn inspect_hint_slot(i: usize) -> usize {
+    INSPECT_HINT0 + i
+}
 
 pub fn side_slot(i: usize) -> usize {
     SIDE0 + i
@@ -257,6 +275,18 @@ pub fn settings_face(slot: usize, text: &str, _lit: bool) -> UndoFace {
         CUSTOM_CLOSE => {
             let (k, l) = split(text);
             pill(k.as_deref(), &l, Style::Red, FOOT_H)
+        }
+        s if (INSPECT_CAPTION0..INSPECT_VALUE0).contains(&s) => {
+            inter_text_face(text, 13.0, 18, CAPTION)
+        }
+        s if (INSPECT_VALUE0..INSPECT_HINT0).contains(&s) => inter_text_face(text, 19.0, 26, INK),
+        s if s == INSPECT_HINT0 => {
+            let (k, l) = split(text);
+            pill(k.as_deref(), &l, Style::Red, FOOT_H)
+        }
+        s if s > INSPECT_HINT0 && s < SETTINGS_SLOTS => {
+            let (k, l) = split(text);
+            pill(k.as_deref(), &l, Style::Grey, FOOT_H)
         }
         POPUP_CLOSE_SLOT => {
             let (k, l) = split(text);

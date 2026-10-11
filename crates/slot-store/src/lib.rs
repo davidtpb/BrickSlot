@@ -6,6 +6,7 @@ pub mod gb;
 mod gb_palette;
 mod gba;
 pub mod ini;
+pub mod library;
 mod lights;
 mod platform;
 mod ring;

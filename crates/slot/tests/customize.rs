@@ -28,8 +28,9 @@ fn saved(d: &tempfile::TempDir) -> std::collections::HashMap<String, slot_store:
 }
 
 #[test]
-fn x_on_the_shelf_opens_customize_and_b_closes_it() {
+fn x_in_inspect_opens_customize_and_b_closes_it() {
     let (_d, mut a) = shelf();
+    press(&mut a, Btn::X);
     press(&mut a, Btn::X);
     assert!(a.customize_open());
     assert_eq!(a.frame_split(), Some(slot_ui::SOCKET_SPLIT));
@@ -45,6 +46,7 @@ fn a_picked_colour_shows_at_once_and_is_kept_for_that_game() {
     let (d, mut a) = shelf();
     let stem = a.selected_stem().unwrap().to_string();
     let generation = a.shell_generation();
+    press(&mut a, Btn::X);
     press(&mut a, Btn::X);
     press(&mut a, Btn::Down);
     press(&mut a, Btn::Down);
@@ -69,6 +71,7 @@ fn a_picked_colour_shows_at_once_and_is_kept_for_that_game() {
 fn the_material_list_picks_clear_and_default_forgets_the_colour() {
     let (d, mut a) = shelf();
     press(&mut a, Btn::X);
+    press(&mut a, Btn::X);
     press(&mut a, Btn::A);
     let lines = a.settings_lines().unwrap();
     assert_eq!(lines[slot_ui::POPUP_TITLE_SLOT].0, "Type");
@@ -88,6 +91,7 @@ fn the_material_list_picks_clear_and_default_forgets_the_colour() {
 fn the_shelf_stays_put_under_the_panel() {
     let (_d, mut a) = shelf();
     let before = a.selected_stem().map(str::to_owned);
+    press(&mut a, Btn::X);
     press(&mut a, Btn::X);
     press(&mut a, Btn::Down);
     press(&mut a, Btn::Right);

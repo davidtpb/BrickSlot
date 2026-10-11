@@ -363,6 +363,12 @@ pub struct App {
     socket_backdrop: Option<TexId>,
     socket_chrome: Vec<(TexId, u32, u32)>,
     customize: Option<Customize>,
+    /// The starred games, from every platform, as a shelf of their own
+    /// after the platforms' own.
+    fav_shelf: Shelf,
+    inspect: bool,
+    recent_popup: Option<(Vec<slot_store::library::Played>, usize)>,
+    favorites: std::collections::HashSet<String>,
     core_popup: Option<usize>,
     resume_popup: Option<usize>,
     left_off: Option<Vec<u8>>,
@@ -514,6 +520,10 @@ impl App {
             socket_backdrop: None,
             socket_chrome: Vec::new(),
             customize: None,
+            fav_shelf: Shelf::new(Vec::new()),
+            inspect: false,
+            recent_popup: None,
+            favorites: std::collections::HashSet::new(),
             core_popup: None,
             resume_popup: None,
             left_off: None,
@@ -595,6 +605,8 @@ impl App {
         let mut app = App::new(carts);
         app.root = Some(root.to_path_buf());
         app.state = read_slot_state(root);
+        app.favorites = slot_store::library::read_favorites(root);
+        app.rebuild_favorites();
         app.net = crate::net::Net::spawn(root);
         if app.state.syncthing {
             app.net.send(NetJob::SyncthingStart);
@@ -638,11 +650,95 @@ impl App {
     }
 
     fn shelf(&self) -> &Shelf {
-        &self.shelves[self.shelf_at].1
+        self.shelf_by(self.shelf_at)
     }
 
     fn shelf_mut(&mut self) -> &mut Shelf {
-        &mut self.shelves[self.shelf_at].1
+        let at = self.shelf_at;
+        self.shelf_by_mut(at)
+    }
+
+    /// A shelf by its place: the platforms' in order, then the favourites.
+    fn shelf_by(&self, at: usize) -> &Shelf {
+        match self.shelves.get(at) {
+            Some((_, shelf)) => shelf,
+            None => &self.fav_shelf,
+        }
+    }
+
+    fn shelf_by_mut(&mut self, at: usize) -> &mut Shelf {
+        match self.shelves.get_mut(at) {
+            Some((_, shelf)) => shelf,
+            None => &mut self.fav_shelf,
+        }
+    }
+
+    fn fav_at(&self) -> usize {
+        self.shelves.len()
+    }
+
+    pub fn on_favorites(&self) -> bool {
+        self.shelf_at == self.fav_at()
+    }
+
+    pub fn is_favorite(&self, cart: &Cart) -> bool {
+        self.favorites
+            .contains(&slot_store::library::game_key(cart.platform, &cart.stem))
+    }
+
+    /// Builds the favourites shelf again from the starred games, keeping the
+    /// selection where it can.
+    fn rebuild_favorites(&mut self) {
+        let keep = self
+            .on_favorites()
+            .then(|| self.selected_stem().map(str::to_owned))
+            .flatten();
+        let mut carts: Vec<Cart> = self
+            .shelves
+            .iter()
+            .flat_map(|(_, s)| s.carts.iter())
+            .filter(|c| self.is_favorite(c))
+            .cloned()
+            .collect();
+        carts.sort_by_key(|c| slot_ui::label_text(c).to_lowercase());
+        let old = std::mem::replace(&mut self.fav_shelf, Shelf::new(carts));
+        let mut old = old;
+        for i in 0..old.carts.len() {
+            self.dropped_faces.extend(old.take_face(i));
+        }
+        if let Some(i) = keep.and_then(|k| self.fav_shelf.carts.iter().position(|c| c.stem == k)) {
+            self.fav_shelf.select(i);
+        }
+        if self.on_favorites() && self.fav_shelf.carts.is_empty() {
+            if let Some(to) = self.next_shelf(1) {
+                self.shelf_at = to;
+            } else {
+                self.shelf_at = 0;
+            }
+            self.shelf_platform = slot_ui::Printed::default();
+            self.name_pending = true;
+        }
+    }
+
+    fn toggle_favorite(&mut self) {
+        let Some(cart) = self.shelf().carts.get(self.shelf().index).cloned() else {
+            return;
+        };
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        match slot_store::library::toggle_favorite(&root, cart.platform, &cart.stem) {
+            Ok(on) => {
+                let key = slot_store::library::game_key(cart.platform, &cart.stem);
+                if on {
+                    self.favorites.insert(key);
+                } else {
+                    self.favorites.remove(&key);
+                }
+                self.rebuild_favorites();
+            }
+            Err(e) => self.say("Could not save the favourite", e.to_string()),
+        }
     }
 
     fn switch_shelf(&mut self, by: i32) {
@@ -695,10 +791,10 @@ impl App {
     }
 
     fn next_shelf(&self, by: i32) -> Option<usize> {
-        let n = self.shelves.len() as i32;
+        let n = self.shelves.len() as i32 + 1;
         (1..n)
             .map(|step| (self.shelf_at as i32 + by * step).rem_euclid(n) as usize)
-            .find(|at| !self.shelves[*at].1.carts.is_empty())
+            .find(|at| !self.shelf_by(*at).carts.is_empty())
     }
 
     fn seat_of(&self, stem: &str, platform: Option<Platform>) -> Option<(usize, usize)> {
@@ -906,7 +1002,10 @@ impl App {
 
     pub fn shelf_platform_name(&self) -> Option<&'static str> {
         self.next_shelf(1)?;
-        Some(self.shelves[self.shelf_at].0.name())
+        match self.shelves.get(self.shelf_at) {
+            Some((platform, _)) => Some(platform.name()),
+            None => Some("FAVORITES"),
+        }
     }
 
     pub fn set_battery_percent_face(&mut self, face: TexId, w: u32) {
@@ -956,7 +1055,7 @@ impl App {
         let screen = here.on_screen();
         let mut wants: Vec<(usize, usize)> = screen.iter().map(|i| (self.shelf_at, *i)).collect();
         for at in self.neighbour_shelves() {
-            wants.extend(self.shelves[at].1.on_screen().into_iter().map(|i| (at, i)));
+            wants.extend(self.shelf_by(at).on_screen().into_iter().map(|i| (at, i)));
         }
         wants.extend(
             here.around(FACE_AHEAD)
@@ -966,7 +1065,7 @@ impl App {
         );
         wants
             .into_iter()
-            .filter(|(at, i)| self.shelves[*at].1.face(*i).is_none())
+            .filter(|(at, i)| self.shelf_by(*at).face(*i).is_none())
             .map(|(shelf, index)| FaceWant {
                 shelf,
                 index,
@@ -976,18 +1075,31 @@ impl App {
     }
 
     pub fn face_cart(&self, shelf: usize, index: usize) -> Option<&Cart> {
-        self.shelves.get(shelf)?.1.carts.get(index)
+        if shelf > self.fav_at() {
+            return None;
+        }
+        self.shelf_by(shelf).carts.get(index)
     }
 
     pub fn set_cart_face(&mut self, shelf: usize, index: usize, tex: TexId) -> Option<TexId> {
-        self.shelves.get_mut(shelf)?.1.set_face(index, tex)
+        if shelf > self.fav_at() {
+            return None;
+        }
+        self.shelf_by_mut(shelf).set_face(index, tex)
     }
 
     pub fn shed_faces(&mut self) -> Vec<TexId> {
         let neighbours = self.neighbour_shelves();
         let mut shed = std::mem::take(&mut self.dropped_faces);
-        for (at, (_, shelf)) in self.shelves.iter_mut().enumerate() {
-            let keep = if at == self.shelf_at {
+        let shelf_at = self.shelf_at;
+        let shelves = self
+            .shelves
+            .iter_mut()
+            .map(|(_, s)| s)
+            .chain(std::iter::once(&mut self.fav_shelf));
+        for (at, shelf) in shelves.enumerate() {
+            let at_here = at == shelf_at;
+            let keep = if at_here {
                 shelf.around(FACE_KEEP)
             } else if neighbours.contains(&at) {
                 shelf.on_screen()
@@ -1475,6 +1587,18 @@ impl App {
             }
             return self.core_popup_input(action);
         }
+        if self.recent_popup.is_some() {
+            if self.adjust(action) {
+                return;
+            }
+            return self.recent_input(action);
+        }
+        if self.inspect {
+            if self.adjust(action) {
+                return;
+            }
+            return self.inspect_input(action);
+        }
         if self.resume_popup.is_some() {
             if self.adjust(action) {
                 return;
@@ -1535,7 +1659,8 @@ impl App {
                 Action::GbaDown(Btn::L1) => self.switch_shelf(-1),
                 Action::GbaDown(Btn::R1) => self.switch_shelf(1),
                 Action::GbaDown(Btn::Y) => self.open_search(),
-                Action::GbaDown(Btn::X) => self.open_customize(),
+                Action::GbaDown(Btn::X) => self.open_inspect(),
+                Action::GbaDown(Btn::Select) => self.open_recent(),
                 Action::GbaDown(Btn::Home) | Action::HomePanel => self.open_home(),
                 _ => {}
             },
@@ -1651,6 +1776,8 @@ impl App {
             || self.customize.is_some()
             || self.core_popup.is_some()
             || self.resume_popup.is_some()
+            || self.inspect
+            || self.recent_popup.is_some()
             || matches!(self.phase, Phase::Networks { .. }))
             && self.socket_chrome.is_empty()
     }
@@ -1748,7 +1875,12 @@ impl App {
         let resume_popup = self
             .resume_popup
             .filter(|_| matches!(self.phase, Phase::Playing { .. }));
+        let on_shelf = matches!(self.phase, Phase::Shelf);
+        let inspecting = self.inspect && on_shelf;
+        let recent = self.recent_popup.as_ref().filter(|_| on_shelf);
         let shown = (self.socket_look() && (row.is_some() || self.power_menu.is_some()))
+            || inspecting
+            || recent.is_some()
             || customizing.is_some()
             || core_popup.is_some()
             || resume_popup.is_some()
@@ -1812,6 +1944,38 @@ impl App {
             }
             lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
         }
+        if inspecting {
+            for (i, (caption, value)) in self.inspect_rows().into_iter().enumerate() {
+                lines[slot_ui::inspect_caption_slot(i)] = (caption.into(), true);
+                lines[slot_ui::inspect_value_slot(i)] = (value, true);
+            }
+            lines[slot_ui::CUSTOM_TITLE] = ("Inspect".into(), true);
+            let starred = self
+                .shelf()
+                .carts
+                .get(self.shelf().index)
+                .is_some_and(|c| self.is_favorite(c));
+            lines[slot_ui::inspect_hint_slot(0)] = (key("B", "Back"), true);
+            lines[slot_ui::inspect_hint_slot(1)] = (
+                key("Y", if starred { "Unstar" } else { "\u{2605} Star" }),
+                true,
+            );
+            lines[slot_ui::inspect_hint_slot(2)] = (key("X", "Customize"), true);
+            lines[slot_ui::inspect_hint_slot(3)] = (key("A", "Play"), true);
+        }
+        if let Some((list, at)) = recent.filter(|_| self.power_menu.is_none()) {
+            let (first, shown, _) = popup_window(list.len(), *at);
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Recently Played".into(), true);
+            if list.is_empty() {
+                lines[slot_ui::option_slot(0)] = ("Nothing played yet".into(), true);
+            }
+            for (i, p) in list.iter().skip(first).take(shown).enumerate() {
+                let name = slot_ui::clean_label(&p.stem);
+                lines[slot_ui::option_slot(i)] =
+                    (format!("{name}   {}", p.platform.dir_name()), true);
+            }
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+        }
         if resume_popup.is_some() && self.power_menu.is_none() {
             let name = self
                 .shelf()
@@ -1858,7 +2022,8 @@ impl App {
     }
 
     pub fn wants_socket_backdrop(&self) -> bool {
-        (self.socket_look() || self.customize.is_some()) && self.socket_backdrop.is_none()
+        (self.socket_look() || self.customize.is_some() || self.inspect)
+            && self.socket_backdrop.is_none()
     }
 
     pub fn set_socket_backdrop(&mut self, tex: TexId) {
@@ -1875,7 +2040,7 @@ impl App {
             self.phase,
             Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }
         );
-        if !shelf_up || !(self.socket_look() || self.customize.is_some()) {
+        if !shelf_up || !(self.socket_look() || self.customize.is_some() || self.inspect) {
             return None;
         }
         let key = |k: &str, label: &str| format!("{k}{}{label}", slot_ui::KEY_SEP);
@@ -1885,9 +2050,18 @@ impl App {
             lines[slot_ui::SOCKET_L] = ("L".into(), true);
             lines[slot_ui::SOCKET_R] = ("R".into(), true);
         }
-        for (i, (platform, _)) in self.shelves.iter().take(slot_ui::SOCKET_TABS).enumerate() {
-            lines[slot_ui::socket_tab_slot(i)] =
+        let mut tabs = 0;
+        for (i, (platform, shelf)) in self.shelves.iter().enumerate() {
+            if shelf.carts.is_empty() || tabs >= slot_ui::SOCKET_TABS {
+                continue;
+            }
+            lines[slot_ui::socket_tab_slot(tabs)] =
                 (platform.dir_name().to_string(), i == self.shelf_at);
+            tabs += 1;
+        }
+        if !self.fav_shelf.carts.is_empty() && tabs < slot_ui::SOCKET_TABS {
+            lines[slot_ui::socket_tab_slot(tabs)] =
+                ("\u{2605} FAV".to_string(), self.on_favorites());
         }
         let status = slot_ui::SocketStatus {
             percent: self.battery.map(|b| b.percent),
@@ -1902,7 +2076,7 @@ impl App {
         }
         lines[slot_ui::socket_bottom_slot(0)] = (key("MENU", "Settings"), true);
         lines[slot_ui::socket_bottom_slot(1)] = (key("Y", "Search"), true);
-        lines[slot_ui::socket_bottom_slot(2)] = (key("X", "Customize"), true);
+        lines[slot_ui::socket_bottom_slot(2)] = (key("X", "Inspect"), true);
         Some(lines)
     }
 
@@ -2020,6 +2194,137 @@ impl App {
         if self.customize.is_some() {
             self.customize = Some(c);
         }
+    }
+
+    pub fn inspect_open(&self) -> bool {
+        self.inspect
+    }
+
+    pub fn recent_open(&self) -> bool {
+        self.recent_popup.is_some()
+    }
+
+    fn open_inspect(&mut self) {
+        if self.core_picker.is_some() || self.shelf().carts.is_empty() {
+            return;
+        }
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+        self.inspect = true;
+    }
+
+    fn inspect_input(&mut self, action: Action) {
+        match action {
+            Action::GbaDown(Btn::A) => {
+                self.inspect = false;
+                self.insert_or_ask();
+            }
+            Action::GbaDown(Btn::Y) => self.toggle_favorite(),
+            Action::GbaDown(Btn::X) => {
+                self.inspect = false;
+                self.open_customize();
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => self.inspect = false,
+            _ => {}
+        }
+    }
+
+    /// What Inspect says about the selected game, a caption and a value a card.
+    fn inspect_rows(&self) -> Vec<(&'static str, String)> {
+        let (Some(root), Some(cart)) = (&self.root, self.shelf().carts.get(self.shelf().index))
+        else {
+            return Vec::new();
+        };
+        let core = slot_store::core_for_platform(root, &cart.stem, cart.platform);
+        let secs = crate::playtime::read(root, &crate::playtime::key(cart.platform, &cart.stem));
+        let played = match secs {
+            0 => "Not played yet".to_string(),
+            s if s < 60 => "Under a minute".to_string(),
+            s if s < 3600 => format!("{} min", s / 60),
+            s => format!("{}h {:02}m", s / 3600, s / 60 % 60),
+        };
+        let last = slot_store::library::last_played(root, cart.platform, &cart.stem)
+            .map_or("Never".to_string(), slot_ui::date_time_text);
+        let save = match persist::read_sav(root, cart.platform, &cart.stem) {
+            Some(b) if b.len() >= 1024 => format!("{} KB", b.len() / 1024),
+            Some(b) => format!("{} bytes", b.len()),
+            None => "None yet".to_string(),
+        };
+        let states = StateRing::new(root, cart.platform, core, &cart.stem)
+            .list()
+            .map_or(0, |l| l.len());
+        vec![
+            ("System", cart.platform.name().to_string()),
+            ("Core", core.text().to_string()),
+            ("Play time", played),
+            ("Last played", last),
+            ("Battery save", save),
+            (
+                "Save states",
+                match states {
+                    0 => "None".to_string(),
+                    1 => "1 state".to_string(),
+                    n => format!("{n} states"),
+                },
+            ),
+        ]
+    }
+
+    fn open_recent(&mut self) {
+        let Some(root) = &self.root else {
+            return;
+        };
+        let list: Vec<_> = slot_store::library::read_recent(root)
+            .into_iter()
+            .filter(|p| self.seat_of(&p.stem, Some(p.platform)).is_some())
+            .collect();
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+        self.recent_popup = Some((list, 0));
+    }
+
+    fn recent_input(&mut self, action: Action) {
+        let Some((list, at)) = &mut self.recent_popup else {
+            return;
+        };
+        let n = list.len();
+        match action {
+            Action::GbaDown(Btn::Up) if n > 0 => *at = (*at + n - 1) % n,
+            Action::GbaDown(Btn::Down) if n > 0 => *at = (*at + 1) % n,
+            Action::GbaDown(Btn::A) if n > 0 => {
+                let picked = list[*at].clone();
+                self.recent_popup = None;
+                if let Some((shelf, i)) = self.seat_of(&picked.stem, Some(picked.platform)) {
+                    if shelf != self.shelf_at {
+                        self.shelf_at = shelf;
+                        self.shelf_platform = slot_ui::Printed::default();
+                        self.slot_letter = None;
+                    }
+                    self.shelf_mut().select(i);
+                    self.name_pending = true;
+                    self.insert_or_ask();
+                }
+            }
+            Action::GbaDown(Btn::B) | Action::GbaDown(Btn::Select) | Action::QuickMenu => {
+                self.recent_popup = None
+            }
+            _ => {}
+        }
+    }
+
+    fn draw_inspect(&self, out: &mut Vec<Draw>) {
+        let screen = self.socket_screen(0.0);
+        screen.draw_backdrop(out);
+        self.shelf()
+            .draw_socket_solo(self.now(), slot_ui::CUSTOM_CART_X, out);
+        screen.draw_clock(out);
+        screen.draw_name_at(slot_ui::CUSTOM_CART_X, out);
+        slot_ui::InspectScreen {
+            chrome: &self.socket_chrome,
+            faces: &self.settings_faces,
+            rows: slot_ui::INSPECT_ROWS,
+        }
+        .draw(out);
     }
 
     fn draw_customize(&self, out: &mut Vec<Draw>) {
@@ -2915,7 +3220,10 @@ impl App {
         let at = self.shelf_at;
         let next = match &mut self.phase {
             Phase::Shelf => {
-                let shelf = &mut self.shelves[at].1;
+                let shelf = match self.shelves.get_mut(at) {
+                    Some((_, shelf)) => shelf,
+                    None => &mut self.fav_shelf,
+                };
                 shelf.tick(now);
                 shelf.update(dt);
                 None
@@ -2977,6 +3285,7 @@ impl App {
         let docked = self.power_menu.is_none()
             && !self.socket_look()
             && self.customize.is_none()
+            && !self.inspect
             && matches!(
                 self.phase,
                 Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }
@@ -2998,7 +3307,9 @@ impl App {
 
     pub fn frame_split(&self) -> Option<f32> {
         match (&self.phase, self.power_menu) {
-            (Phase::Shelf, None) if self.customize.is_some() => Some(slot_ui::SOCKET_SPLIT),
+            (Phase::Shelf, None) if self.customize.is_some() || self.inspect => {
+                Some(slot_ui::SOCKET_SPLIT)
+            }
             (Phase::Shelf, None) if self.socket_look() && self.home.is_some() => {
                 Some(slot_ui::HOME_SPLIT)
             }
@@ -3462,6 +3773,7 @@ impl App {
             }
             .draw(out),
             Phase::Shelf if self.customize.is_some() => self.draw_customize(out),
+            Phase::Shelf if self.inspect => self.draw_inspect(out),
             Phase::Shelf if self.socket_look() => {
                 let screen = self.socket_screen(0.0);
                 screen.draw_backdrop(out);
@@ -3634,6 +3946,20 @@ impl App {
                 faces: &self.settings_faces,
                 options: 2,
                 focus,
+            }
+            .draw(out);
+        }
+        if let Some((list, at)) = self
+            .recent_popup
+            .as_ref()
+            .filter(|_| matches!(self.phase, Phase::Shelf) && self.power_menu.is_none())
+        {
+            let (_, shown, focus) = popup_window(list.len(), *at);
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: shown.max(1),
+                focus: focus.unwrap_or(usize::MAX),
             }
             .draw(out);
         }
@@ -4051,6 +4377,12 @@ impl App {
             return;
         }
         self.left_off = clean.then(|| self.selected_resume()).flatten();
+        if let (Some(root), Some(cart)) = (&self.root, self.shelf().carts.get(self.shelf().index)) {
+            let at = self.wall_secs();
+            if let Err(e) = slot_store::library::note_played(root, cart.platform, &cart.stem, at) {
+                eprintln!("slot: recent: {e}");
+            }
+        }
         let at = self.shelf().index;
         let Some(cart) = self.shelf_mut().carts.get_mut(at).map(|c| {
             c.read_header();
@@ -5271,4 +5603,15 @@ fn password_lines(ssid: &str, keys: &crate::keyboard::Keyboard) -> Vec<(String, 
         false,
     );
     lines
+}
+
+/// The first option a popup list shows, how many it shows, and which of them
+/// the cursor is on.
+fn popup_window(len: usize, at: usize) -> (usize, usize, Option<usize>) {
+    if len == 0 {
+        return (0, 0, None);
+    }
+    let shown = len.min(slot_ui::POPUP_OPTIONS);
+    let first = at.saturating_sub(shown - 1).min(len - shown);
+    (first, shown, Some(at - first))
 }

@@ -9,7 +9,7 @@ use slot_input::{Action, Btn};
 use slot_store::{read_slot_state, write_slot_state, Shader, SlotState};
 use slot_ui::{
     edge, Draw, Icon, QuickMenuFaces, QuickRow, QuickValue, TexId, MENU_PAD, OUT_W, QUICK_EDGE,
-    QUICK_PITCH, QUICK_TOP,
+    QUICK_PITCH, QUICK_SPLIT, QUICK_TOP,
 };
 use tempfile::TempDir;
 
@@ -576,7 +576,7 @@ fn labels_start_and_values_end_thirty_two_pixels_in() {
     open_at(&mut a, QuickRow::FastForward);
     let out = frame(&a);
     let right = OUT_W as f32 - QUICK_EDGE;
-    for row in QuickRow::GAME {
+    for row in &QuickRow::GAME[..slot_ui::QUICK_VISIBLE] {
         let [x, ..] = placed(&out, 100 + row.index()).expect("a label was not drawn");
         assert_eq!(x + MENU_PAD as f32, QUICK_EDGE, "{row:?}'s label");
     }
@@ -763,4 +763,39 @@ fn file_transfer_needs_wifi_and_is_never_left_on_from_the_menu_alone() {
         a.take_message().map(|m| m.0),
         Some("Turn on Wi-Fi first".to_string())
     );
+}
+
+#[test]
+fn a_long_page_scrolls_rather_than_running_under_the_legend() {
+    for page in [
+        &QuickRow::MAIN[..],
+        &QuickRow::SCREEN[..],
+        &QuickRow::GAME[..],
+        &QuickRow::LIGHTS[..],
+        &QuickRow::NETWORK[..],
+    ] {
+        let (_d, mut a, _) = on_carousel();
+        fake_faces(&mut a);
+        open_at(&mut a, page[0]);
+        for &row in page {
+            assert_eq!(a.quick_menu(), Some(row));
+            let out = frame(&a);
+            let labels: Vec<_> = page
+                .iter()
+                .filter_map(|r| placed(&out, 100 + r.index()).map(|p| (*r, p)))
+                .collect();
+            assert!(
+                labels.iter().any(|(r, _)| *r == row),
+                "{row:?} is selected but not on screen"
+            );
+            assert!(labels.len() <= slot_ui::QUICK_VISIBLE);
+            for (r, [_, y, _, h]) in labels {
+                assert!(
+                    y + h <= QUICK_SPLIT,
+                    "{r:?} runs under the legend at {y} with {row:?} selected"
+                );
+            }
+            press(&mut a, Btn::Down);
+        }
+    }
 }

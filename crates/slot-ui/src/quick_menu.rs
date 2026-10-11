@@ -448,6 +448,9 @@ impl QuickValue {
 pub const QUICK_PITCH: f32 = 52.0;
 pub const QUICK_TOP: f32 = (OUT_H as f32 - QUICK_PITCH * QuickRow::MAIN.len() as f32) / 2.0;
 pub const QUICK_EDGE: f32 = 32.0;
+/// The most rows a page shows at once. Below the legend split the frame is
+/// drawn differently, so a longer page scrolls instead of running into it.
+pub const QUICK_VISIBLE: usize = QuickRow::MAIN.len();
 const BAR_INSET: f32 = 4.0;
 const TYPE_DROP: f32 = 4.0;
 const CARET_GAP: f32 = 14.0;
@@ -551,7 +554,7 @@ impl QuickMenu<'_> {
         });
         out.push(Draw::Rect {
             x: 0.0,
-            y: row_top(self.row) + BAR_INSET,
+            y: row_top(self.row, window(self.row).0) + BAR_INSET,
             w: OUT_W as f32,
             h: QUICK_PITCH - 2.0 * BAR_INSET,
             colour: edge(),
@@ -560,8 +563,9 @@ impl QuickMenu<'_> {
             return;
         };
         let (right, pad) = (OUT_W as f32 - QUICK_EDGE, MENU_PAD as f32);
-        for &row in self.row.page() {
-            let y = row_top(row) + TYPE_DROP;
+        let (first, shown) = window(self.row);
+        for &row in &self.row.page()[first..first + shown] {
+            let y = row_top(row, first) + TYPE_DROP;
             let lit = row == self.row;
             if let Some(&(tex, w, h)) = faces.labels.get(row.index()) {
                 push(out, tex, QUICK_EDGE - pad, y, w, h);
@@ -594,9 +598,19 @@ impl QuickMenu<'_> {
     }
 }
 
-fn row_top(row: QuickRow) -> f32 {
-    let top = (OUT_H as f32 - QUICK_PITCH * row.page().len() as f32) / 2.0;
-    top + QUICK_PITCH * row.position() as f32
+/// The first row of the selected row's page on screen and how many show,
+/// scrolled just far enough that the selection is in view.
+pub fn window(row: QuickRow) -> (usize, usize) {
+    let len = row.page().len();
+    let shown = len.min(QUICK_VISIBLE);
+    let first = row.position().saturating_sub(shown - 1).min(len - shown);
+    (first, shown)
+}
+
+fn row_top(row: QuickRow, first: usize) -> f32 {
+    let shown = row.page().len().min(QUICK_VISIBLE);
+    let top = (OUT_H as f32 - QUICK_PITCH * shown as f32) / 2.0;
+    top + QUICK_PITCH * (row.position() - first) as f32
 }
 
 fn push(out: &mut Vec<Draw>, tex: TexId, x: f32, y: f32, w: u32, h: u32) {

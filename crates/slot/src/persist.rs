@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use slot_store::{atomic_write, read_slot_state, write_slot_state, Core, Platform, StateRing};
+use slot_store::{
+    atomic_write, read_slot_state, write_slot_state, Core, Platform, SaveFormat, StateRing,
+};
 
 pub trait Snapshot {
     fn state(&self) -> Option<Vec<u8>>;
@@ -25,11 +27,31 @@ pub fn flush(
     state: Option<&[u8]>,
     sav: Option<&[u8]>,
 ) -> std::io::Result<()> {
+    flush_as(
+        root,
+        platform,
+        core,
+        stem,
+        state,
+        sav,
+        SaveFormat::default(),
+    )
+}
+
+pub fn flush_as(
+    root: &Path,
+    platform: Platform,
+    core: Core,
+    stem: &str,
+    state: Option<&[u8]>,
+    sav: Option<&[u8]>,
+    format: SaveFormat,
+) -> std::io::Result<()> {
     if let Some(state) = state {
         StateRing::new(root, platform, core, stem).write_resume(state)?;
     }
     if let Some(sav) = sav {
-        write_sav(root, platform, stem, sav)?;
+        write_sav_as(root, platform, stem, sav, format)?;
     }
     Ok(())
 }
@@ -42,50 +64,107 @@ pub fn eject(
     state: Option<&[u8]>,
     sav: Option<&[u8]>,
 ) -> std::io::Result<()> {
-    flush(root, platform, core, stem, state, sav)?;
+    eject_as(
+        root,
+        platform,
+        core,
+        stem,
+        state,
+        sav,
+        SaveFormat::default(),
+    )
+}
+
+pub fn eject_as(
+    root: &Path,
+    platform: Platform,
+    core: Core,
+    stem: &str,
+    state: Option<&[u8]>,
+    sav: Option<&[u8]>,
+    format: SaveFormat,
+) -> std::io::Result<()> {
+    flush_as(root, platform, core, stem, state, sav, format)?;
     let mut slot = read_slot_state(root);
     slot.cart = None;
     slot.cart_platform = None;
     write_slot_state(root, &slot)
 }
 
-/// Battery saves are written the way RetroArch writes them: the cartridge RAM
-/// as `<game>.srm` and, for carts with a clock, the clock as `<game>.rtc`.
-/// The core hands both over as one blob, RAM first.
 pub fn write_sav(root: &Path, platform: Platform, stem: &str, sav: &[u8]) -> std::io::Result<bool> {
-    if read_sav(root, platform, stem).as_deref() == Some(sav) {
+    write_sav_as(root, platform, stem, sav, SaveFormat::default())
+}
+
+/// Writes a battery save in the chosen format: RetroArch's `<game>.srm` with
+/// a clock in `<game>.rtc`, or slot's `<game>.sav` with the clock on the end.
+/// The core hands both over as one blob, RAM first. Files in the other
+/// format are moved aside to `.bak`, so the two can never disagree.
+pub fn write_sav_as(
+    root: &Path,
+    platform: Platform,
+    stem: &str,
+    sav: &[u8],
+    format: SaveFormat,
+) -> std::io::Result<bool> {
+    let dir = crate::root::saves_dir(root).join(platform.dir_name());
+    let file = |ext: &str| dir.join(format!("{stem}.{ext}"));
+    let current = file(main_ext(format)).is_file();
+    if current && read_sav(root, platform, stem).as_deref() == Some(sav) {
         return Ok(false);
     }
-    let dir = crate::root::saves_dir(root).join(platform.dir_name());
     std::fs::create_dir_all(&dir)?;
-    let (ram, rtc) = split_rtc(sav);
-    atomic_write(&dir.join(format!("{stem}.{SRM}")), ram)?;
-    let rtc_path = dir.join(format!("{stem}.{RTC}"));
-    if rtc.is_empty() {
-        if rtc_path.exists() {
-            std::fs::remove_file(&rtc_path)?;
+    match format {
+        SaveFormat::RetroArch => {
+            let (ram, rtc) = split_rtc(sav);
+            atomic_write(&file(SRM), ram)?;
+            if rtc.is_empty() {
+                if file(RTC).exists() {
+                    std::fs::remove_file(file(RTC))?;
+                }
+            } else {
+                atomic_write(&file(RTC), rtc)?;
+            }
         }
-    } else {
-        atomic_write(&rtc_path, rtc)?;
+        SaveFormat::Slot => atomic_write(&file(SAV), sav)?,
     }
-    let old = dir.join(format!("{stem}.{SAV}"));
-    if old.is_file() {
-        std::fs::rename(&old, dir.join(format!("{stem}.{SAV}.bak")))?;
+    let others: &[&str] = match format {
+        SaveFormat::RetroArch => &[SAV],
+        SaveFormat::Slot => &[SRM, RTC],
+    };
+    for ext in others {
+        if file(ext).is_file() {
+            std::fs::rename(file(ext), dir.join(format!("{stem}.{ext}.bak")))?;
+        }
     }
     Ok(true)
 }
 
-/// The `.srm` (with its `.rtc` after it, if there is one), or else a `.sav`
-/// from before saves were written RetroArch's way.
+fn main_ext(format: SaveFormat) -> &'static str {
+    match format {
+        SaveFormat::RetroArch => SRM,
+        SaveFormat::Slot => SAV,
+    }
+}
+
+/// Whichever save is on the card: an `.srm` (with its `.rtc` after it) or a
+/// `.sav`. If both are there, say one copied over from another device, the
+/// newer one wins.
 pub fn read_sav(root: &Path, platform: Platform, stem: &str) -> Option<Vec<u8>> {
     let dir = crate::root::saves_dir(root).join(platform.dir_name());
-    if let Ok(mut ram) = std::fs::read(dir.join(format!("{stem}.{SRM}"))) {
-        if let Ok(rtc) = std::fs::read(dir.join(format!("{stem}.{RTC}"))) {
+    let file = |ext: &str| dir.join(format!("{stem}.{ext}"));
+    let modified = |ext: &str| std::fs::metadata(file(ext)).and_then(|m| m.modified()).ok();
+    let srm = || {
+        let mut ram = std::fs::read(file(SRM)).ok()?;
+        if let Ok(rtc) = std::fs::read(file(RTC)) {
             ram.extend_from_slice(&rtc);
         }
-        return Some(ram);
+        Some(ram)
+    };
+    let sav = || std::fs::read(file(SAV)).ok();
+    match (modified(SRM), modified(SAV)) {
+        (Some(a), Some(b)) if b > a => sav().or_else(srm),
+        _ => srm().or_else(sav),
     }
-    std::fs::read(dir.join(format!("{stem}.{SAV}"))).ok()
 }
 
 const SRM: &str = "srm";

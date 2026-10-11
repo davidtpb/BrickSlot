@@ -208,6 +208,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             wifi: false,
             syncthing: false,
             achievements: false,
+            save_format: slot_store::SaveFormat::RetroArch,
         }
     );
 }
@@ -422,6 +423,7 @@ fn the_light_settings_round_trip() {
         wifi: true,
         syncthing: true,
         achievements: true,
+        save_format: slot_store::SaveFormat::Slot,
         ..SlotState::default()
     };
     write_slot_state(d.path(), &s).unwrap();

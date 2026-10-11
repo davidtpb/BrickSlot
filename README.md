@@ -82,11 +82,16 @@ What changes on TrimUI hardware:
 
 ## Saves
 
-In-game (battery) saves are written the way RetroArch writes them:
-`Saves/GBA/<game>.srm`, plus `<game>.rtc` for Game Boy carts with a clock. RetroArch,
-NextUI and other RetroArch-based firmware can load them, and theirs load here. A `.sav`
-from an older slot is still read, and is renamed to `.sav.bak` the first time the game
-saves again.
+Quick menu > Gameplay > **Save Format** picks how in-game (battery) saves are written:
+
+- **RetroArch (.srm)**, the default: `Saves/GBA/<game>.srm`, plus `<game>.rtc` for Game
+  Boy carts with a clock. RetroArch, NextUI and other RetroArch-based firmware load these,
+  and theirs load here.
+- **slot (.sav)**: one `<game>.sav` with the clock on the end, as the original slot writes.
+
+Either way both kinds are read. If a game has both, say one copied over from another
+device, the newer file wins. Switching the setting converts each game the next time it
+saves, and the files in the old format are kept as `.bak`.
 
 ## Extras borrowed from NextUI and NX Redux
 

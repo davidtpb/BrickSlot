@@ -717,3 +717,24 @@ fn retroachievements_needs_wifi_and_goes_when_wifi_does() {
     assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::Off));
     assert_eq!(a.quick_value(QuickRow::Achievements), Some(QuickValue::Off));
 }
+
+#[test]
+fn save_format_flips_between_retroarch_and_slot_and_is_remembered() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::SaveFormat);
+    assert_eq!(
+        a.quick_value(QuickRow::SaveFormat),
+        Some(QuickValue::RetroArch)
+    );
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::SaveFormat), Some(QuickValue::Slot));
+    assert_eq!(
+        read_slot_state(d.path()).save_format,
+        slot_store::SaveFormat::Slot
+    );
+    press(&mut a, Btn::Left);
+    assert_eq!(
+        a.quick_value(QuickRow::SaveFormat),
+        Some(QuickValue::RetroArch)
+    );
+}

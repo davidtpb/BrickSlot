@@ -31,10 +31,11 @@ pub enum QuickRow {
     Wifi,
     Syncthing,
     Achievements,
+    SaveFormat,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 25] = [
+    pub const ALL: [QuickRow; 26] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -60,6 +61,7 @@ impl QuickRow {
         QuickRow::Wifi,
         QuickRow::Syncthing,
         QuickRow::Achievements,
+        QuickRow::SaveFormat,
     ];
 
     pub const MAIN: [QuickRow; 6] = [
@@ -80,13 +82,14 @@ impl QuickRow {
         QuickRow::GbPalettes,
     ];
 
-    pub const GAME: [QuickRow; 6] = [
+    pub const GAME: [QuickRow; 7] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Rewind,
         QuickRow::Turbo,
         QuickRow::Rumble,
         QuickRow::EjectSave,
+        QuickRow::SaveFormat,
     ];
 
     pub const LIGHTS: [QuickRow; 4] = [
@@ -121,7 +124,8 @@ impl QuickRow {
             | QuickRow::Rewind
             | QuickRow::Turbo
             | QuickRow::Rumble
-            | QuickRow::EjectSave => &QuickRow::GAME,
+            | QuickRow::EjectSave
+            | QuickRow::SaveFormat => &QuickRow::GAME,
             _ => &QuickRow::MAIN,
         }
     }
@@ -177,6 +181,7 @@ impl QuickRow {
             QuickRow::Wifi => "Wi-Fi",
             QuickRow::Syncthing => "Syncthing",
             QuickRow::Achievements => "RetroAchievements",
+            QuickRow::SaveFormat => "Save Format",
         }
     }
 
@@ -243,6 +248,8 @@ pub enum QuickValue {
     Level7,
     Level8,
     Level9,
+    RetroArch,
+    Slot,
 }
 
 impl QuickValue {
@@ -259,7 +266,7 @@ impl QuickValue {
         QuickValue::Level9,
     ];
 
-    pub const ALL: [QuickValue; 38] = [
+    pub const ALL: [QuickValue; 40] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -298,6 +305,8 @@ impl QuickValue {
         QuickValue::Level7,
         QuickValue::Level8,
         QuickValue::Level9,
+        QuickValue::RetroArch,
+        QuickValue::Slot,
     ];
 
     pub fn index(self) -> usize {
@@ -344,6 +353,8 @@ impl QuickValue {
             QuickValue::Level7 => "7",
             QuickValue::Level8 => "8",
             QuickValue::Level9 => "9",
+            QuickValue::RetroArch => "RetroArch (.srm)",
+            QuickValue::Slot => "slot (.sav)",
         }
     }
 

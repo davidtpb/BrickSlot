@@ -46,6 +46,38 @@ pub struct SlotState {
     pub wifi: bool,
     pub syncthing: bool,
     pub achievements: bool,
+    pub save_format: SaveFormat,
+}
+
+/// How battery saves are written: RetroArch's `.srm` with the clock in a
+/// `.rtc` beside it, or slot's own `.sav` with the clock on the end.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum SaveFormat {
+    #[default]
+    RetroArch,
+    Slot,
+}
+
+impl SaveFormat {
+    pub fn name(self) -> &'static str {
+        match self {
+            SaveFormat::RetroArch => "retroarch",
+            SaveFormat::Slot => "slot",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<SaveFormat> {
+        [SaveFormat::RetroArch, SaveFormat::Slot]
+            .into_iter()
+            .find(|f| f.name() == name)
+    }
+
+    pub fn other(self) -> SaveFormat {
+        match self {
+            SaveFormat::RetroArch => SaveFormat::Slot,
+            SaveFormat::Slot => SaveFormat::RetroArch,
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -125,6 +157,7 @@ impl Default for SlotState {
             wifi: false,
             syncthing: false,
             achievements: false,
+            save_format: SaveFormat::RetroArch,
         }
     }
 }
@@ -143,7 +176,7 @@ pub fn read_slot_state(root: &Path) -> SlotState {
 
 pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     let text = format!(
-        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\n",
+        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\nsave_format={}\n",
         s.cart.as_deref().unwrap_or(""),
         s.cart_platform.map_or(String::new(), platform_key),
         s.brightness,
@@ -171,7 +204,8 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.light_level.name(),
         s.wifi as u8,
         s.syncthing as u8,
-        s.achievements as u8
+        s.achievements as u8,
+        s.save_format.name()
     );
     atomic_write(&state_path(root), text.as_bytes())
 }
@@ -205,6 +239,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut wifi = None;
     let mut syncthing = None;
     let mut achievements = None;
+    let mut save_format = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let Some((key, value)) = line.split_once('=') else {
             continue;
@@ -237,6 +272,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "wifi" => wifi = flag(value),
             "syncthing" => syncthing = flag(value),
             "achievements" => achievements = flag(value),
+            "save_format" => save_format = SaveFormat::parse(value),
             "shader_gb" => shader_gb = Shader::parse(value).filter(|s| Shader::GB.contains(s)),
             _ => {}
         }
@@ -272,6 +308,7 @@ fn parse(text: &str) -> Option<SlotState> {
         wifi: wifi.unwrap_or(fallback.wifi),
         syncthing: syncthing.unwrap_or(fallback.syncthing),
         achievements: achievements.unwrap_or(fallback.achievements),
+        save_format: save_format.unwrap_or(fallback.save_format),
     })
 }
 

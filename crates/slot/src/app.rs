@@ -9,8 +9,8 @@ use slot_power::{Battery, Charge, LedState, LidPolicy, Lights, LightsEffect, Lig
 use slot_retro::LinkChannel;
 use slot_store::{
     format_stamp, read_slot_state, scan, write_slot_state, Cart, Core, GbPalette, LightColour,
-    LightEffect, LightLevel, LightMode, Platform, Shader, SlotState, StateEntry, StateRing, Theme,
-    BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX, VOLUME_MAX,
+    LightEffect, LightLevel, LightMode, Platform, SaveFormat, Shader, SlotState, StateEntry,
+    StateRing, Theme, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX, VOLUME_MAX,
 };
 use slot_ui::{
     board_from, board_zoom, draw_backdrop, draw_empty_slot, draw_footer, draw_slot_name,
@@ -696,6 +696,10 @@ impl App {
             QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
             QuickRow::Syncthing => Some(QuickValue::flag(self.state.syncthing)),
             QuickRow::Achievements => Some(QuickValue::flag(self.state.achievements)),
+            QuickRow::SaveFormat => Some(match self.state.save_format {
+                SaveFormat::RetroArch => QuickValue::RetroArch,
+                SaveFormat::Slot => QuickValue::Slot,
+            }),
             QuickRow::LightMode => Some(match self.state.light_mode {
                 LightMode::Battery => QuickValue::Battery,
                 LightMode::Colour => QuickValue::Colour,
@@ -1449,6 +1453,7 @@ impl App {
             | QuickRow::Wifi
             | QuickRow::Syncthing
             | QuickRow::Achievements
+            | QuickRow::SaveFormat
             | QuickRow::Rumble => {}
         }
     }
@@ -1526,6 +1531,7 @@ impl App {
                     self.net.send(NetJob::WifiDown);
                 }
             }
+            QuickRow::SaveFormat => s.save_format = s.save_format.other(),
             QuickRow::Achievements => {
                 s.achievements = !s.achievements;
                 crate::cheevos::enable(s.achievements);
@@ -2797,13 +2803,14 @@ impl App {
         };
         let (state, sav) = trusted_write(snapshot.as_ref(), state, "eject");
         let state = state.filter(|_| self.state.eject_save);
-        match persist::eject(
+        match persist::eject_as(
             root,
             self.platform,
             self.core,
             stem,
             state.as_deref(),
             sav.as_deref(),
+            self.state.save_format,
         ) {
             Ok(()) => {
                 self.state.cart = None;
@@ -3323,15 +3330,17 @@ impl App {
         let (state, sav) = trusted_write(snapshot.as_ref(), state, "autosave");
         let (root, platform, core, cart) =
             (root.clone(), self.platform, self.core, cart.to_owned());
+        let format = self.state.save_format;
         let failing = self.card_failing.clone();
         let write = move || {
-            let written = persist::flush(
+            let written = persist::flush_as(
                 &root,
                 platform,
                 core,
                 &cart,
                 state.as_deref(),
                 sav.as_deref(),
+                format,
             );
             if let Err(e) = &written {
                 eprintln!("slot: autosave: {e}");
@@ -3359,13 +3368,14 @@ impl App {
             return;
         };
         let (state, sav) = trusted_write(snapshot.as_ref(), state, "flush");
-        let written = persist::flush(
+        let written = persist::flush_as(
             root,
             self.platform,
             self.core,
             cart,
             state.as_deref(),
             sav.as_deref(),
+            self.state.save_format,
         );
         if let Err(e) = &written {
             eprintln!("slot: flush: {e}");

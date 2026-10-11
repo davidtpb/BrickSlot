@@ -106,6 +106,66 @@ pub fn write_sav_as(
     sav: &[u8],
     format: SaveFormat,
 ) -> std::io::Result<bool> {
+    let wrote = write_sav_files(root, platform, stem, sav, format)?;
+    if let Err(e) = note_save(root, platform, stem) {
+        eprintln!("slot: save: could not note {stem}'s save: {e}");
+    }
+    Ok(wrote)
+}
+
+/// Where slot notes how each save looked when it last wrote or checked it,
+/// so a save put on the card from elsewhere can be told apart.
+fn mark_path(root: &Path, platform: Platform, stem: &str) -> std::path::PathBuf {
+    root.join("Config")
+        .join("save-marks")
+        .join(platform.dir_name())
+        .join(format!("{stem}.mark"))
+}
+
+/// The size and time of every save file the game has on the card.
+fn save_fingerprint(root: &Path, platform: Platform, stem: &str) -> String {
+    let dir = crate::root::saves_dir(root).join(platform.dir_name());
+    let mut out = String::new();
+    for ext in [SRM, RTC, SAV] {
+        let Ok(meta) = std::fs::metadata(dir.join(format!("{stem}.{ext}"))) else {
+            continue;
+        };
+        let when = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
+        out.push_str(&format!("{ext} {} {when}\n", meta.len()));
+    }
+    out
+}
+
+/// Notes the game's save as slot now leaves it.
+pub fn note_save(root: &Path, platform: Platform, stem: &str) -> std::io::Result<()> {
+    let path = mark_path(root, platform, stem);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    atomic_write(&path, save_fingerprint(root, platform, stem).as_bytes())
+}
+
+/// Whether the game's save on the card has changed since slot last wrote
+/// it: copied over from another device, or put back from a backup. A game
+/// slot has never noted reads as unchanged.
+pub fn save_replaced(root: &Path, platform: Platform, stem: &str) -> bool {
+    match std::fs::read_to_string(mark_path(root, platform, stem)) {
+        Ok(noted) => noted != save_fingerprint(root, platform, stem),
+        Err(_) => false,
+    }
+}
+
+fn write_sav_files(
+    root: &Path,
+    platform: Platform,
+    stem: &str,
+    sav: &[u8],
+    format: SaveFormat,
+) -> std::io::Result<bool> {
     let dir = crate::root::saves_dir(root).join(platform.dir_name());
     let file = |ext: &str| dir.join(format!("{stem}.{ext}"));
     let current = file(main_ext(format)).is_file();

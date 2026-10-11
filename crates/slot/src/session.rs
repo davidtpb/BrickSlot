@@ -445,9 +445,14 @@ impl Session {
         self.app
             .set_video_mode(crate::video_mode::video_mode_for(&self.root, stem));
         self.app.set_link_loaded(serial);
-        let resume = (!self.app.starting_clean())
+        let mut resume = (!self.app.starting_clean())
             .then(|| persist::read_resume(&self.root, platform, core, stem))
             .flatten();
+        if resume.is_some() && persist::save_replaced(&self.root, platform, stem) {
+            eprintln!("slot: launch: {stem}'s save changed on the card, starting from it");
+            self.app.say("Loaded the save on the card", "");
+            resume = None;
+        }
         launch("resume state read");
         let player = self.app.link_player();
         let palette = crate::core::palette_for(self.app.gb_palette(), platform, &rom, player);

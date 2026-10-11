@@ -165,3 +165,49 @@ fn menu_and_y_open_the_panel_where_there_is_no_home_button() {
     a.apply(Action::HomePanel);
     assert!(!a.home_open());
 }
+
+#[test]
+fn restart_asks_twice_then_puts_the_game_back_fresh() {
+    let d = tmp_root_with_carts(&["Fusion", "Zero Mission"]);
+    let mut a = app_playing_in(d.path(), "Fusion");
+    press(&mut a, Btn::Home);
+    walk_to(&mut a, HomeTile::Restart);
+    press(&mut a, Btn::A);
+    assert!(a.home_open(), "one press restarted the game");
+    let i = HomeTile::ALL
+        .iter()
+        .position(|t| *t == HomeTile::Restart)
+        .unwrap();
+    assert_eq!(
+        a.home_lines().unwrap()[slot_ui::home_tile_state_slot(i)].0,
+        "Press A again"
+    );
+    press(&mut a, Btn::A);
+    assert!(!a.home_open());
+    assert!(matches!(a.phase(), Phase::Ejecting { .. }));
+    for _ in 0..600 {
+        a.update(1.0 / 60.0);
+        if matches!(a.phase(), Phase::Inserting { .. }) {
+            break;
+        }
+    }
+    assert!(
+        matches!(a.phase(), Phase::Inserting { .. }),
+        "the game did not go back in: {:?}",
+        a.phase()
+    );
+    assert!(
+        a.starting_clean(),
+        "the game went back in from where it was"
+    );
+}
+
+#[test]
+fn restart_on_the_shelf_does_nothing_but_say_so() {
+    let (_d, mut a) = shelf_of(&["Fusion", "Mother 3"]);
+    press(&mut a, Btn::Home);
+    walk_to(&mut a, HomeTile::Restart);
+    press(&mut a, Btn::A);
+    press(&mut a, Btn::A);
+    assert!(matches!(a.phase(), Phase::Shelf));
+}

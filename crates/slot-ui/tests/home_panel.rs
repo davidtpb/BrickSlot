@@ -17,7 +17,7 @@ fn rects(out: &[Draw]) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         .collect()
 }
 
-fn draw(panel: HomePanel, on: [bool; 6], levels: [f32; 2]) -> Vec<Draw> {
+fn draw(panel: HomePanel, on: [bool; HomeTile::ALL.len()], levels: [f32; 2]) -> Vec<Draw> {
     let mut out = Vec::new();
     HomeScreen {
         faces: &[],
@@ -88,7 +88,7 @@ fn the_cursor_wraps_along_the_tiles_and_through_the_rows() {
 
 #[test]
 fn a_switched_on_tile_is_lit() {
-    let mut on = [false; 6];
+    let mut on = [false; HomeTile::ALL.len()];
     on[3] = true;
     let out = draw(HomePanel::new(), on, [0.5, 0.5]);
     let (x, y, w, h) = tile_rect(3);
@@ -103,7 +103,7 @@ fn a_switched_on_tile_is_lit() {
 
 #[test]
 fn a_slider_fills_to_its_level() {
-    let out = draw(HomePanel::new(), [false; 6], [0.5, 0.0]);
+    let out = draw(HomePanel::new(), [false; HomeTile::ALL.len()], [0.5, 0.0]);
     let (x, y, w, h) = track_rect(0);
     assert!(rects(&out)
         .iter()
@@ -121,7 +121,7 @@ fn a_slider_fills_to_its_level() {
 fn the_focused_tile_is_framed() {
     let mut p = HomePanel::new();
     p.step(true);
-    let out = draw(p, [false; 6], [0.0, 0.0]);
+    let out = draw(p, [false; HomeTile::ALL.len()], [0.0, 0.0]);
     let (x, y, _, _) = tile_rect(1);
     assert!(
         rects(&out)

@@ -101,6 +101,7 @@ saves, and the files in the old format are kept as `.bak`.
 
 These live in the quick menu (tap MENU on the shelf).
 
+- **Saves put on the card**: a save copied in from another device or a backup is noticed when the game goes in, which then starts from it instead of where it was left. **Restart** on the Home panel (press A twice) does the same by hand.
 - **Customize** (**X** on the shelf): pick the selected game's cart material (Default, Opaque, Clear, Glitter) and colour from a grid, seen on the cart as you go. B closes and keeps it in `Config/cart_shell.txt`.
 - **Clock** (Settings > Screen > Clock): 24-hour or 12-hour time with AM/PM.
 - **Socket style** (Settings > Screen > Style): a light, dotted carousel after the Socket frontend, with the selected cart swaying in 3D between greyed neighbours, the game's name on a pill and the controls along the bottom. Set in Inter (SIL Open Font License, `crates/slot-ui/assets/Inter-SemiBold.ttf.OFL.txt`).

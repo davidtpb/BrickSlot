@@ -862,6 +862,24 @@ mod tests {
     }
 
     #[test]
+    fn every_screens_split_falls_between_the_dots() {
+        let b = socket_backdrop();
+        let at = |x: u32, y: u32| b.rgba[((y * b.w + x) * 4) as usize];
+        for (name, split) in [
+            ("shelf", SOCKET_SPLIT),
+            ("settings", crate::socket_menu::SETTINGS_SPLIT),
+            ("search", crate::search::SEARCH_SPLIT),
+            ("home", crate::home_panel::HOME_SPLIT),
+        ] {
+            let y = split as u32;
+            assert!(
+                (1..OUT_W).all(|x| at(x, y).abs_diff(at(x - 1, y)) <= 1),
+                "the {name} split at {y} runs through a row of dots, which would stretch into stripes"
+            );
+        }
+    }
+
+    #[test]
     fn empty_text_draws_nothing() {
         assert_eq!(socket_pill_face(SOCKET_CLOCK, "", true).w, 0);
     }

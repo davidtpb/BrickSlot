@@ -1719,6 +1719,7 @@ impl App {
             .map(|(_, _, opens)| slot_ui::Card { opens: *opens })
             .collect();
         slot_ui::SocketSettings {
+            backdrop: self.socket_backdrop,
             chrome: &self.socket_chrome,
             faces: &self.settings_faces,
             sides: QuickRow::MAIN.len(),
@@ -3564,6 +3565,7 @@ impl App {
                 pick: (!self.search.hits.is_empty()).then_some(self.search.pick),
                 picked_ms: self.now().saturating_sub(self.search_picked_at),
                 light: self.socket_look(),
+                backdrop: self.socket_backdrop,
             }
             .draw(out),
             Phase::Password { keys, .. } => slot_ui::SearchScreen {
@@ -3573,16 +3575,27 @@ impl App {
                 pick: Some(1),
                 picked_ms: 0,
                 light: true,
+                backdrop: self.socket_backdrop.filter(|_| self.socket_look()),
             }
             .draw(out),
             Phase::Networks { .. } => {
-                out.push(Draw::Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    w: OUT_W as f32,
-                    h: OUT_H as f32,
-                    colour: [0.2, 0.2, 0.2, 1.0],
-                });
+                match self.socket_backdrop.filter(|_| self.socket_look()) {
+                    Some(tex) => out.push(Draw::Tex {
+                        x: 0.0,
+                        y: 0.0,
+                        w: OUT_W as f32,
+                        h: OUT_H as f32,
+                        tex,
+                        alpha: 1.0,
+                    }),
+                    None => out.push(Draw::Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: OUT_W as f32,
+                        h: OUT_H as f32,
+                        colour: [0.2, 0.2, 0.2, 1.0],
+                    }),
+                }
                 let (_, shown, focus) = self.networks_window();
                 slot_ui::SocketPopup {
                     chrome: &self.socket_chrome,

@@ -56,9 +56,11 @@ impl Chrome {
 }
 
 const GROUND: [f32; 4] = [0.2, 0.2, 0.2, 1.0];
+/// How much of the card covers the backdrop's dots.
+const CARD_VEIL: f32 = 0.35;
 const CARD: [u8; 3] = [220, 220, 220];
 const REST: [u8; 3] = [236, 236, 236];
-const LIT: [u8; 3] = [200, 200, 200];
+const LIT: [u8; 3] = [172, 172, 172];
 const FOCUS: [u8; 3] = [189, 189, 189];
 const OUTLINE: [u8; 3] = [30, 30, 30];
 const KNOB: [u8; 3] = [20, 20, 20];
@@ -272,6 +274,8 @@ pub struct Card {
 }
 
 pub struct SocketSettings<'a> {
+    /// The shelf's dotted backdrop, drawn behind the card.
+    pub backdrop: Option<TexId>,
     pub chrome: &'a [(TexId, u32, u32)],
     pub faces: &'a [Option<(TexId, u32, u32)>],
     /// The categories down the left, which is lit and whether the cursor
@@ -330,14 +334,39 @@ fn face_w(faces: &[Option<(TexId, u32, u32)>], slot: usize) -> f32 {
 
 impl SocketSettings<'_> {
     pub fn draw(&self, out: &mut Vec<Draw>) {
-        out.push(Draw::Rect {
-            x: 0.0,
-            y: 0.0,
-            w: OUT_W as f32,
-            h: OUT_H as f32,
-            colour: GROUND,
-        });
-        chrome_at(self.chrome, Chrome::Card, CARD_X, CARD_Y, out);
+        match self.backdrop {
+            Some(tex) => out.push(Draw::Tex {
+                x: 0.0,
+                y: 0.0,
+                w: OUT_W as f32,
+                h: OUT_H as f32,
+                tex,
+                alpha: 1.0,
+            }),
+            None => out.push(Draw::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: OUT_W as f32,
+                h: OUT_H as f32,
+                colour: GROUND,
+            }),
+        }
+        // On the shelf's backdrop the card is a light veil, so the dots show
+        // through it and every screen reads as one surface.
+        if let Some(&(tex, w, h)) = self.chrome.get(Chrome::Card.index()) {
+            out.push(Draw::Tex {
+                x: CARD_X,
+                y: CARD_Y,
+                w: w as f32,
+                h: h as f32,
+                tex,
+                alpha: if self.backdrop.is_some() {
+                    CARD_VEIL
+                } else {
+                    1.0
+                },
+            });
+        }
         for i in 0..self.sides.min(ITEMS) {
             let y = item_top(i);
             let piece = match (self.side_lit == Some(i), self.side_focus) {
@@ -517,6 +546,7 @@ mod tests {
     fn the_split_row_is_plain_in_every_column() {
         let mut out = Vec::new();
         SocketSettings {
+            backdrop: None,
             chrome: &[],
             faces: &[],
             sides: ITEMS,

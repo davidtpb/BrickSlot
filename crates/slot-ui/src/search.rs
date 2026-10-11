@@ -43,7 +43,7 @@ const BAR_INSET: f32 = 3.0;
 
 /// Where a taller screen opens the search up in the Socket style: between
 /// the keys and the legend.
-pub const SEARCH_SPLIT: f32 = 424.0;
+pub const SEARCH_SPLIT: f32 = 420.0;
 
 /// The widest a result is ever drawn, however long the game's name.
 const HIT_MAX_W: f32 = 2048.0;
@@ -127,6 +127,8 @@ pub struct SearchScreen<'a> {
     pub picked_ms: u64,
     /// Drawn light, for the Socket style.
     pub light: bool,
+    /// The Socket shelf's backdrop, drawn behind a light screen.
+    pub backdrop: Option<TexId>,
 }
 
 /// The face for one slot of the search screen in the Socket style.
@@ -170,16 +172,26 @@ impl SearchScreen<'_> {
     }
 
     pub fn draw(&self, out: &mut Vec<Draw>) {
-        out.push(Draw::Rect {
-            x: 0.0,
-            y: 0.0,
-            w: OUT_W as f32,
-            h: OUT_H as f32,
-            colour: match self.light {
-                true => [0.86, 0.86, 0.86, 1.0],
-                false => opening(),
-            },
-        });
+        match self.backdrop.filter(|_| self.light) {
+            Some(tex) => out.push(Draw::Tex {
+                x: 0.0,
+                y: 0.0,
+                w: OUT_W as f32,
+                h: OUT_H as f32,
+                tex,
+                alpha: 1.0,
+            }),
+            None => out.push(Draw::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: OUT_W as f32,
+                h: OUT_H as f32,
+                colour: match self.light {
+                    true => [0.86, 0.86, 0.86, 1.0],
+                    false => opening(),
+                },
+            }),
+        }
         let bar = match self.light {
             true => [0.97, 0.97, 0.97, 1.0],
             false => edge(),

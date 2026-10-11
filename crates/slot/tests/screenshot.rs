@@ -29,14 +29,14 @@ fn size_of(png_bytes: &[u8]) -> (u32, u32) {
 }
 
 #[test]
-fn select_and_x_take_a_screenshot() {
+fn menu_and_a_take_a_screenshot_without_reaching_the_game_or_the_menu() {
     let mut g = Gestures::new();
-    assert!(g.feed(Down(Btn::Select), 0).is_empty());
-    assert_eq!(g.feed(Down(Btn::X), 50), vec![Action::Screenshot]);
-    assert!(
-        g.feed(Up(Btn::X), 80).is_empty(),
-        "X reached the game as turbo"
-    );
+    assert!(g.feed(Down(Btn::Menu), 0).is_empty());
+    assert_eq!(g.feed(Down(Btn::A), 50), vec![Action::Screenshot]);
+    assert!(g.feed(Up(Btn::A), 80).is_empty(), "A reached the game");
+    assert!(g.feed(Up(Btn::Menu), 120).is_empty(), "the menu opened too");
+    assert!(g.tick(5_000).is_empty(), "the hold ejected the cart");
+    assert_eq!(g.feed(Down(Btn::A), 6_000), vec![Action::GbaDown(Btn::A)]);
 }
 
 #[test]

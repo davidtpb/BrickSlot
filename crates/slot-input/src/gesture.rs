@@ -71,6 +71,7 @@ pub struct Gestures {
     menu_last_tap: Option<Millis>,
     menu_eject_fired: bool,
     menu_held: bool,
+    menu_swallow_a: bool,
     power_down_at: Option<Millis>,
     power_hold_fired: bool,
     vol_up_at: Option<Millis>,
@@ -168,6 +169,12 @@ impl Gestures {
             self.chord_held |= bit;
             return vec![action];
         }
+        if b == Btn::A && self.menu_held {
+            self.menu_down_at = None;
+            self.menu_last_tap = None;
+            self.menu_swallow_a = true;
+            return vec![Action::Screenshot];
+        }
         match b {
             Btn::Select => self.select_down(now),
             Btn::Menu => self.menu_down(now),
@@ -194,6 +201,9 @@ impl Gestures {
                 self.chord_held &= !bit;
                 return Vec::new();
             }
+        }
+        if b == Btn::A && std::mem::take(&mut self.menu_swallow_a) {
+            return Vec::new();
         }
         match b {
             Btn::Select => self.select_up(now),
@@ -433,7 +443,6 @@ fn chord(b: Btn) -> Option<(u16, Action)> {
         Btn::B => (1024, Action::ShaderPrev),
         Btn::VolUp => (2048, Action::MuteToggle),
         Btn::VolDown => (4096, Action::MuteToggle),
-        Btn::X => (8192, Action::Screenshot),
         _ => return None,
     })
 }

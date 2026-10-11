@@ -228,9 +228,11 @@ pub const UNPLUG_HOLD_MS: Millis = 420;
 
 pub const PLAY_GAP_MS: Millis = 1000;
 
-/// The power press that woke the handheld from deep sleep arrives too; it
-/// must not put it straight back to sleep.
-pub const WAKE_GRACE_MS: Millis = 1500;
+/// The power press that woke the handheld from deep sleep arrives too, and
+/// its release can come well after the resume; up to its release (or this
+/// long, if the release never shows) power presses are ignored, so it does
+/// not put the handheld straight back to sleep.
+pub const WAKE_GRACE_MS: Millis = 5000;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum CheevosLogin {
@@ -1320,6 +1322,9 @@ impl App {
             Action::PowerPress | Action::PowerTap | Action::PowerHold | Action::PowerOff
         );
         if power_key && self.now() < self.power_quiet_until {
+            if matches!(action, Action::PowerTap | Action::PowerOff) {
+                self.power_quiet_until = 0;
+            }
             return;
         }
         if self.power_menu.is_some() {
@@ -3121,13 +3126,18 @@ impl App {
             eprintln!("slot: deep sleep at {:.1} ms", crate::boot_time::ms());
             let slept = self.power.as_mut().is_some_and(|p| p.deep_sleep());
             if slept {
-                eprintln!("slot: back from deep sleep");
-                self.power_quiet_until = self.now() + WAKE_GRACE_MS;
-                self.wake();
-                return;
+                return self.resumed();
             }
         }
         self.begin_power_off();
+    }
+
+    /// Back from deep sleep: the screen comes on, and the press that woke
+    /// the handheld is not taken as a new one.
+    pub fn resumed(&mut self) {
+        eprintln!("slot: back from deep sleep");
+        self.power_quiet_until = self.now() + WAKE_GRACE_MS;
+        self.wake();
     }
 
     fn power_press(&mut self) {

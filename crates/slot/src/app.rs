@@ -315,6 +315,7 @@ pub struct App {
     messages: std::collections::VecDeque<(String, String)>,
     search: crate::search::Search,
     search_faces: Vec<Option<(TexId, u32, u32)>>,
+    search_picked_at: Millis,
     net: crate::net::Net,
     cheevos_login: CheevosLogin,
     clock_asked: bool,
@@ -450,6 +451,7 @@ impl App {
             messages: std::collections::VecDeque::new(),
             search: crate::search::Search::default(),
             search_faces: Vec::new(),
+            search_picked_at: 0,
             net: crate::net::Net::idle(),
             cheevos_login: CheevosLogin::Waiting,
             clock_asked: false,
@@ -1443,6 +1445,7 @@ impl App {
     }
 
     fn refresh_search(&mut self) {
+        self.search_picked_at = self.now();
         let stems: Vec<(Platform, Vec<String>)> = self
             .shelves
             .iter()
@@ -1480,10 +1483,12 @@ impl App {
             }
             Action::GbaDown(Btn::L1) => {
                 self.search.pick_by(-1);
+                self.search_picked_at = self.now();
                 false
             }
             Action::GbaDown(Btn::R1) => {
                 self.search.pick_by(1);
+                self.search_picked_at = self.now();
                 false
             }
             Action::GbaDown(Btn::Start) => {
@@ -2561,6 +2566,7 @@ impl App {
                 row: self.search.row,
                 col: self.search.col,
                 pick: (!self.search.hits.is_empty()).then_some(self.search.pick),
+                picked_ms: self.now().saturating_sub(self.search_picked_at),
             }
             .draw(out),
         }

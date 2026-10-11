@@ -42,6 +42,19 @@ pub enum Draw {
     Shot {
         tex: TexId,
     },
+    /// A horizontal slice of a texture, from `u0` to `u1` across its width
+    /// (0 to 1), stretched over the rectangle. Lets text wider than its box
+    /// be cut at the box's edge and slid through it.
+    Part {
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        tex: TexId,
+        alpha: f32,
+        u0: f32,
+        u1: f32,
+    },
 }
 
 pub struct Sprites {
@@ -51,6 +64,7 @@ pub struct Sprites {
     u_rect: gl::types::GLint,
     u_colour: gl::types::GLint,
     u_turn: gl::types::GLint,
+    u_span: gl::types::GLint,
 }
 
 impl Sprites {
@@ -64,7 +78,7 @@ impl Sprites {
             gl::RGBA,
             Some(&[255u8; 4]),
         );
-        let (u_rect, u_colour, u_turn);
+        let (u_rect, u_colour, u_turn, u_span);
         unsafe {
             gl::UseProgram(prog);
             gl::Uniform1i(crate::gl::uniform_location(prog, "u_tex"), 0);
@@ -76,6 +90,7 @@ impl Sprites {
             u_rect = crate::gl::uniform_location(prog, "u_rect");
             u_colour = crate::gl::uniform_location(prog, "u_colour");
             u_turn = crate::gl::uniform_location(prog, "u_turn");
+            u_span = crate::gl::uniform_location(prog, "u_span");
         }
         Ok(Sprites {
             prog,
@@ -84,6 +99,7 @@ impl Sprites {
             u_rect,
             u_colour,
             u_turn,
+            u_span,
         })
     }
 
@@ -137,8 +153,25 @@ impl Sprites {
             gl::ActiveTexture(gl::TEXTURE0);
         }
         for item in items {
+            let mut span = (0.0, 1.0);
             let (x, y, w, h, tex, colour, turn) = match *item {
                 Draw::Rect { x, y, w, h, colour } => (x, y, w, h, self.white, colour, 0.0),
+                Draw::Part {
+                    x,
+                    y,
+                    w,
+                    h,
+                    tex,
+                    alpha,
+                    u0,
+                    u1,
+                } => match self.textures.get(tex.0) {
+                    Some(t) => {
+                        span = (u0, u1 - u0);
+                        (x, y, w, h, *t, [1.0, 1.0, 1.0, alpha], 0.0)
+                    }
+                    None => continue,
+                },
                 Draw::Tex {
                     x,
                     y,
@@ -173,6 +206,7 @@ impl Sprites {
                 gl::BindTexture(gl::TEXTURE_2D, tex);
                 gl::Uniform4f(self.u_rect, x, y, w, h);
                 gl::Uniform2f(self.u_turn, cos, sin);
+                gl::Uniform2f(self.u_span, span.0, span.1);
                 gl::Uniform4f(self.u_colour, colour[0], colour[1], colour[2], colour[3]);
             }
             quad.draw();

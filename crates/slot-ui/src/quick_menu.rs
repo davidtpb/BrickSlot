@@ -20,10 +20,17 @@ pub enum QuickRow {
     Turbo,
     Rewind,
     GbPalettes,
+    Lights,
+    LightMode,
+    LightColour,
+    LightEffect,
+    LightLevel,
+    Brightness,
+    Warmth,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 14] = [
+    pub const ALL: [QuickRow; 21] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -38,16 +45,26 @@ impl QuickRow {
         QuickRow::Turbo,
         QuickRow::Rewind,
         QuickRow::GbPalettes,
+        QuickRow::Lights,
+        QuickRow::LightMode,
+        QuickRow::LightColour,
+        QuickRow::LightEffect,
+        QuickRow::LightLevel,
+        QuickRow::Brightness,
+        QuickRow::Warmth,
     ];
 
-    pub const MAIN: [QuickRow; 4] = [
+    pub const MAIN: [QuickRow; 5] = [
         QuickRow::Screen,
         QuickRow::Game,
+        QuickRow::Lights,
         QuickRow::DateTime,
         QuickRow::About,
     ];
 
-    pub const SCREEN: [QuickRow; 4] = [
+    pub const SCREEN: [QuickRow; 6] = [
+        QuickRow::Brightness,
+        QuickRow::Warmth,
         QuickRow::GbaShader,
         QuickRow::GbShader,
         QuickRow::ColourCorrection,
@@ -63,16 +80,29 @@ impl QuickRow {
         QuickRow::EjectSave,
     ];
 
+    pub const LIGHTS: [QuickRow; 4] = [
+        QuickRow::LightMode,
+        QuickRow::LightColour,
+        QuickRow::LightEffect,
+        QuickRow::LightLevel,
+    ];
+
     pub fn index(self) -> usize {
         self as usize
     }
 
     pub fn page(self) -> &'static [QuickRow] {
         match self {
-            QuickRow::GbaShader
+            QuickRow::Brightness
+            | QuickRow::Warmth
+            | QuickRow::GbaShader
             | QuickRow::GbShader
             | QuickRow::ColourCorrection
             | QuickRow::GbPalettes => &QuickRow::SCREEN,
+            QuickRow::LightMode
+            | QuickRow::LightColour
+            | QuickRow::LightEffect
+            | QuickRow::LightLevel => &QuickRow::LIGHTS,
             QuickRow::FastForward
             | QuickRow::FastForwardSound
             | QuickRow::Rewind
@@ -85,8 +115,9 @@ impl QuickRow {
 
     pub fn parent(self) -> Option<QuickRow> {
         match self.page()[0] {
-            QuickRow::GbaShader => Some(QuickRow::Screen),
+            QuickRow::Brightness => Some(QuickRow::Screen),
             QuickRow::FastForward => Some(QuickRow::Game),
+            QuickRow::LightMode => Some(QuickRow::Lights),
             _ => None,
         }
     }
@@ -95,6 +126,7 @@ impl QuickRow {
         match self {
             QuickRow::Screen => Some(QuickRow::SCREEN[0]),
             QuickRow::Game => Some(QuickRow::GAME[0]),
+            QuickRow::Lights => Some(QuickRow::LIGHTS[0]),
             _ => None,
         }
     }
@@ -119,13 +151,24 @@ impl QuickRow {
             QuickRow::Turbo => "Turbo Buttons",
             QuickRow::Rewind => "Rewind",
             QuickRow::GbPalettes => "GB Palettes",
+            QuickRow::Lights => "Lights",
+            QuickRow::LightMode => "Lights",
+            QuickRow::LightColour => "Light Color",
+            QuickRow::LightEffect => "Light Effect",
+            QuickRow::LightLevel => "Light Brightness",
+            QuickRow::Brightness => "Brightness",
+            QuickRow::Warmth => "Warmth",
         }
     }
 
     pub fn opens(self) -> bool {
         matches!(
             self,
-            QuickRow::DateTime | QuickRow::About | QuickRow::Screen | QuickRow::Game
+            QuickRow::DateTime
+                | QuickRow::About
+                | QuickRow::Screen
+                | QuickRow::Game
+                | QuickRow::Lights
         )
     }
 
@@ -152,10 +195,51 @@ pub enum QuickValue {
     Grid,
     Dot,
     Simpletex,
+    Battery,
+    Colour,
+    White,
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Cyan,
+    Blue,
+    Purple,
+    Pink,
+    Static,
+    Breathe,
+    Blink,
+    Rainbow,
+    Low,
+    Medium,
+    High,
+    Level0,
+    Level1,
+    Level2,
+    Level3,
+    Level4,
+    Level5,
+    Level6,
+    Level7,
+    Level8,
+    Level9,
 }
 
 impl QuickValue {
-    pub const ALL: [QuickValue; 10] = [
+    pub const LEVELS: [QuickValue; 10] = [
+        QuickValue::Level0,
+        QuickValue::Level1,
+        QuickValue::Level2,
+        QuickValue::Level3,
+        QuickValue::Level4,
+        QuickValue::Level5,
+        QuickValue::Level6,
+        QuickValue::Level7,
+        QuickValue::Level8,
+        QuickValue::Level9,
+    ];
+
+    pub const ALL: [QuickValue; 38] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -166,6 +250,34 @@ impl QuickValue {
         QuickValue::Grid,
         QuickValue::Dot,
         QuickValue::Simpletex,
+        QuickValue::Battery,
+        QuickValue::Colour,
+        QuickValue::White,
+        QuickValue::Red,
+        QuickValue::Orange,
+        QuickValue::Yellow,
+        QuickValue::Green,
+        QuickValue::Cyan,
+        QuickValue::Blue,
+        QuickValue::Purple,
+        QuickValue::Pink,
+        QuickValue::Static,
+        QuickValue::Breathe,
+        QuickValue::Blink,
+        QuickValue::Rainbow,
+        QuickValue::Low,
+        QuickValue::Medium,
+        QuickValue::High,
+        QuickValue::Level0,
+        QuickValue::Level1,
+        QuickValue::Level2,
+        QuickValue::Level3,
+        QuickValue::Level4,
+        QuickValue::Level5,
+        QuickValue::Level6,
+        QuickValue::Level7,
+        QuickValue::Level8,
+        QuickValue::Level9,
     ];
 
     pub fn index(self) -> usize {
@@ -184,6 +296,34 @@ impl QuickValue {
             QuickValue::Grid => "Grid",
             QuickValue::Dot => "Dot",
             QuickValue::Simpletex => "Simpletex",
+            QuickValue::Battery => "Battery",
+            QuickValue::Colour => "Color",
+            QuickValue::White => "White",
+            QuickValue::Red => "Red",
+            QuickValue::Orange => "Orange",
+            QuickValue::Yellow => "Yellow",
+            QuickValue::Green => "Green",
+            QuickValue::Cyan => "Cyan",
+            QuickValue::Blue => "Blue",
+            QuickValue::Purple => "Purple",
+            QuickValue::Pink => "Pink",
+            QuickValue::Static => "Static",
+            QuickValue::Breathe => "Breathe",
+            QuickValue::Blink => "Blink",
+            QuickValue::Rainbow => "Rainbow",
+            QuickValue::Low => "Low",
+            QuickValue::Medium => "Medium",
+            QuickValue::High => "High",
+            QuickValue::Level0 => "0",
+            QuickValue::Level1 => "1",
+            QuickValue::Level2 => "2",
+            QuickValue::Level3 => "3",
+            QuickValue::Level4 => "4",
+            QuickValue::Level5 => "5",
+            QuickValue::Level6 => "6",
+            QuickValue::Level7 => "7",
+            QuickValue::Level8 => "8",
+            QuickValue::Level9 => "9",
         }
     }
 
@@ -195,6 +335,10 @@ impl QuickValue {
             6 => Some(QuickValue::Speed6),
             _ => None,
         }
+    }
+
+    pub fn level(n: u8) -> QuickValue {
+        QuickValue::LEVELS[usize::from(n.min(9))]
     }
 
     pub fn flag(on: bool) -> QuickValue {

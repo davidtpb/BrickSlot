@@ -37,6 +37,42 @@ pub enum LedState {
     Charged,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum LightsMode {
+    #[default]
+    Battery,
+    Colour,
+    Off,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum LightsEffect {
+    #[default]
+    Static,
+    Breathe,
+    Blink,
+    Rainbow,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct Lights {
+    pub mode: LightsMode,
+    pub rgb: u32,
+    pub effect: LightsEffect,
+    pub percent: u8,
+}
+
+impl Default for Lights {
+    fn default() -> Self {
+        Lights {
+            mode: LightsMode::Battery,
+            rgb: 0xFFFFFF,
+            effect: LightsEffect::Static,
+            percent: 50,
+        }
+    }
+}
+
 pub trait Platform: Send {
     fn set_backlight(&mut self, step: u8);
     fn battery(&self) -> Option<Battery>;
@@ -52,6 +88,8 @@ pub trait Platform: Send {
     fn relink_adb(&mut self) -> bool {
         false
     }
+
+    fn set_lights(&mut self, _lights: Lights) {}
 
     fn headphones(&self) -> bool {
         false

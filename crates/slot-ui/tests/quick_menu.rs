@@ -79,11 +79,13 @@ fn the_fast_forward_row_offers_the_four_ceilings_the_card_can_hold() {
 fn the_rows_run_in_the_order_the_user_chose() {
     assert_eq!(
         QuickRow::MAIN.map(QuickRow::label),
-        ["Screen", "Gameplay", "Date & Time", "About"]
+        ["Screen", "Gameplay", "Lights", "Date & Time", "About"]
     );
     assert_eq!(
         QuickRow::SCREEN.map(QuickRow::label),
         [
+            "Brightness",
+            "Warmth",
             "GBA Shader",
             "GB / GBC Shader",
             "Color Correction",
@@ -108,13 +110,19 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::Screen,
             QuickRow::DateTime,
             QuickRow::About,
-            QuickRow::Game
+            QuickRow::Game,
+            QuickRow::Lights
         ]
+    );
+    assert_eq!(
+        QuickRow::LIGHTS.map(QuickRow::label),
+        ["Lights", "Light Color", "Light Effect", "Light Brightness"]
     );
     for page in [
         &QuickRow::MAIN[..],
         &QuickRow::SCREEN[..],
         &QuickRow::GAME[..],
+        &QuickRow::LIGHTS[..],
     ] {
         for &row in page {
             assert_eq!(row.page(), page, "{row:?}");
@@ -125,7 +133,10 @@ fn the_rows_run_in_the_order_the_user_chose() {
 #[test]
 fn the_values_read_as_the_menu_prints_them() {
     assert_eq!(
-        QuickValue::ALL.map(QuickValue::text),
+        QuickValue::ALL[..10]
+            .iter()
+            .map(|v| v.text())
+            .collect::<Vec<_>>(),
         [
             "2×",
             "3×",
@@ -139,6 +150,11 @@ fn the_values_read_as_the_menu_prints_them() {
             "Simpletex"
         ]
     );
+    for (i, v) in QuickValue::ALL.iter().enumerate() {
+        assert_eq!(v.index(), i, "{v:?} is out of place in ALL");
+    }
+    assert_eq!(QuickValue::level(7).text(), "7");
+    assert_eq!(QuickValue::level(30), QuickValue::Level9);
     assert_eq!(QuickValue::flag(true), QuickValue::On);
     assert_eq!(QuickValue::flag(false), QuickValue::Off);
 }

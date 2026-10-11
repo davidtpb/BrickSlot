@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use slot_power::{Board, DevicePlatform, LedState, Platform};
+use slot_power::{Board, DevicePlatform, LedState, Lights, LightsEffect, LightsMode, Platform};
 use tempfile::TempDir;
 
 fn brick_pro_tree() -> (TempDir, TempDir) {
@@ -102,4 +102,48 @@ fn without_dev_disp_a_backlight_class_still_dims_the_panel() {
     let mut p = brick_pro(&sys, &dev);
     p.set_backlight(9);
     assert_eq!(read(&sys, "class/backlight/backlight0/brightness"), "255");
+}
+
+#[test]
+fn colour_mode_lights_every_zone_and_off_darkens_them_all() {
+    let (sys, dev) = brick_pro_tree();
+    let mut p = brick_pro(&sys, &dev);
+    p.set_led(LedState::Running);
+    p.set_lights(Lights {
+        mode: LightsMode::Colour,
+        rgb: 0x8A2BE2,
+        effect: LightsEffect::Breathe,
+        percent: 100,
+    });
+    for zone in ["m", "lr", "f1", "f2", "rear"] {
+        assert_eq!(
+            read(&sys, &format!("class/led_anim/effect_rgb_hex_{zone}")),
+            "8A2BE2"
+        );
+        assert_eq!(read(&sys, &format!("class/led_anim/effect_{zone}")), "2");
+        assert_eq!(
+            read(&sys, &format!("class/led_anim/effect_cycles_{zone}")),
+            "-1"
+        );
+    }
+    for scale in [
+        "max_scale",
+        "max_scale_lr",
+        "max_scale_f1f2",
+        "max_scale_rear",
+    ] {
+        assert_eq!(read(&sys, &format!("class/led_anim/{scale}")), "100");
+    }
+    p.set_lights(Lights {
+        mode: LightsMode::Off,
+        ..Lights::default()
+    });
+    for scale in [
+        "max_scale",
+        "max_scale_lr",
+        "max_scale_f1f2",
+        "max_scale_rear",
+    ] {
+        assert_eq!(read(&sys, &format!("class/led_anim/{scale}")), "0");
+    }
 }

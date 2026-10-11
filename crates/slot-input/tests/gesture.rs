@@ -534,3 +534,16 @@ fn select_and_either_volume_key_mutes_for_a_volume_wheel_with_no_chord() {
         );
     }
 }
+
+#[test]
+fn menu_held_with_volume_steps_brightness_and_neither_ejects_nor_opens_the_menu() {
+    let mut g = Gestures::new();
+    assert!(g.feed(Down(Menu), 0).is_empty());
+    assert_eq!(g.feed(Down(VolUp), 100), vec![BrightnessUp]);
+    assert!(g.feed(Up(VolUp), 150).is_empty());
+    assert_eq!(g.feed(Down(VolDown), 300), vec![BrightnessDown]);
+    assert!(g.feed(Up(VolDown), 350).is_empty());
+    assert!(g.tick(MENU_HOLD_MS + 500).is_empty(), "the chord ejected");
+    assert!(g.feed(Up(Menu), MENU_HOLD_MS + 600).is_empty());
+    assert_eq!(g.feed(Down(VolUp), MENU_HOLD_MS + 700), vec![VolumeUp]);
+}

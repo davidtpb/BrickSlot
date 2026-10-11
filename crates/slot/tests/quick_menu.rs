@@ -118,6 +118,7 @@ fn up_and_down_move_the_bar_and_wrap_at_the_ends() {
     for want in [
         QuickRow::Screen,
         QuickRow::Game,
+        QuickRow::Lights,
         QuickRow::DateTime,
         QuickRow::About,
         QuickRow::Screen,
@@ -240,12 +241,14 @@ fn screen_opens_a_page_of_its_own_and_b_comes_back_to_it() {
     let (_d, mut a, _) = on_carousel();
     open_at(&mut a, QuickRow::Screen);
     press(&mut a, Btn::A);
-    assert_eq!(a.quick_menu(), Some(QuickRow::GbaShader));
+    assert_eq!(a.quick_menu(), Some(QuickRow::Brightness));
     for want in [
+        QuickRow::Warmth,
+        QuickRow::GbaShader,
         QuickRow::GbShader,
         QuickRow::ColourCorrection,
         QuickRow::GbPalettes,
-        QuickRow::GbaShader,
+        QuickRow::Brightness,
     ] {
         press(&mut a, Btn::Down);
         assert_eq!(
@@ -624,4 +627,47 @@ fn gb_palettes_flips_on_either_arrow_and_saves() {
             Some(QuickValue::flag(want))
         );
     }
+}
+
+#[test]
+fn the_lights_page_steps_its_settings_and_saves_them() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::LightMode);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::LightMode), Some(QuickValue::Colour));
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Left);
+    assert_eq!(a.quick_value(QuickRow::LightColour), Some(QuickValue::Pink));
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Right);
+    assert_eq!(
+        a.quick_value(QuickRow::LightEffect),
+        Some(QuickValue::Breathe)
+    );
+    let saved = read_slot_state(d.path());
+    assert_eq!(saved.light_mode, slot_store::LightMode::Colour);
+    assert_eq!(saved.light_colour, slot_store::LightColour::Pink);
+    assert_eq!(saved.light_effect, slot_store::LightEffect::Breathe);
+    let lights = a.lights();
+    assert_eq!(lights.mode, slot_power::LightsMode::Colour);
+    assert_eq!(lights.rgb, 0xFF69B4);
+    press(&mut a, Btn::B);
+    assert_eq!(a.quick_menu(), Some(QuickRow::Lights));
+}
+
+#[test]
+fn brightness_and_warmth_rows_step_the_same_levels_as_the_shortcuts() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Brightness);
+    let was = a.brightness();
+    press(&mut a, Btn::Right);
+    assert_eq!(a.brightness(), was + 1);
+    assert_eq!(
+        a.quick_value(QuickRow::Brightness),
+        Some(QuickValue::level(was + 1))
+    );
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.blue_light(), 1);
+    assert_eq!(read_slot_state(d.path()).blue_light, 1);
 }

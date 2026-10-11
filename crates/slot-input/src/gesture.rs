@@ -69,6 +69,7 @@ pub struct Gestures {
     menu_down_at: Option<Millis>,
     menu_last_tap: Option<Millis>,
     menu_eject_fired: bool,
+    menu_held: bool,
     power_down_at: Option<Millis>,
     power_hold_fired: bool,
     vol_up_at: Option<Millis>,
@@ -270,6 +271,7 @@ impl Gestures {
     }
 
     fn menu_down(&mut self, now: Millis) -> Vec<Action> {
+        self.menu_held = true;
         if self.chording(now) {
             self.mark_chorded();
             self.menu_down_at = None;
@@ -289,6 +291,7 @@ impl Gestures {
     }
 
     fn menu_up(&mut self, now: Millis) -> Vec<Action> {
+        self.menu_held = false;
         let Some(d) = self.menu_down_at.take() else {
             return Vec::new();
         };
@@ -314,6 +317,14 @@ impl Gestures {
     }
 
     fn volume_press(&mut self, b: Btn, now: Millis) -> Vec<Action> {
+        if self.menu_held {
+            self.menu_down_at = None;
+            self.menu_last_tap = None;
+            return vec![match b {
+                Btn::VolUp => Action::BrightnessUp,
+                _ => Action::BrightnessDown,
+            }];
+        }
         let (mine, other, action) = match b {
             Btn::VolUp => (&mut self.vol_up_at, self.vol_down_at, Action::VolumeUp),
             _ => (&mut self.vol_down_at, self.vol_up_at, Action::VolumeDown),

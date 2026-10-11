@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::{Battery, Charge, LedState, LidPolicy, Platform};
+use crate::{Battery, Charge, LedState, LidPolicy, Lights, Platform};
 
 pub struct Power {
     platform: Box<dyn Platform>,
@@ -44,6 +44,10 @@ impl Power {
 
     pub fn set_led(&mut self, state: LedState) {
         self.platform.set_led(state)
+    }
+
+    pub fn set_lights(&mut self, lights: Lights) {
+        self.platform.set_lights(lights);
     }
 
     pub fn set_rumble(&mut self, strength: u16) {

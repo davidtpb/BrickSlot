@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use slot_gfx::{OUT_H, OUT_W};
 use slot_input::{Action, Btn, MUTE_CHORD_MS};
-use slot_power::{Battery, Charge, LedState, LidPolicy, Power};
+use slot_power::{Battery, Charge, LedState, LidPolicy, Lights, LightsEffect, LightsMode, Power};
 use slot_retro::LinkChannel;
 use slot_store::{
-    format_stamp, read_slot_state, scan, write_slot_state, Cart, Core, GbPalette, Platform, Shader,
-    SlotState, StateEntry, StateRing, Theme, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX,
-    VOLUME_MAX,
+    format_stamp, read_slot_state, scan, write_slot_state, Cart, Core, GbPalette, LightColour,
+    LightEffect, LightLevel, LightMode, Platform, Shader, SlotState, StateEntry, StateRing, Theme,
+    BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX, VOLUME_MAX,
 };
 use slot_ui::{
     board_from, board_zoom, draw_backdrop, draw_empty_slot, draw_footer, draw_slot_name,
@@ -660,7 +660,40 @@ impl App {
             QuickRow::EjectSave => Some(QuickValue::flag(self.state.eject_save)),
             QuickRow::Turbo => Some(QuickValue::flag(self.state.turbo)),
             QuickRow::Rewind => Some(QuickValue::flag(self.state.rewind)),
-            QuickRow::DateTime | QuickRow::About | QuickRow::Screen | QuickRow::Game => None,
+            QuickRow::Brightness => Some(QuickValue::level(self.state.brightness)),
+            QuickRow::Warmth => Some(QuickValue::level(self.state.blue_light)),
+            QuickRow::LightMode => Some(match self.state.light_mode {
+                LightMode::Battery => QuickValue::Battery,
+                LightMode::Colour => QuickValue::Colour,
+                LightMode::Off => QuickValue::Off,
+            }),
+            QuickRow::LightColour => Some(match self.state.light_colour {
+                LightColour::White => QuickValue::White,
+                LightColour::Red => QuickValue::Red,
+                LightColour::Orange => QuickValue::Orange,
+                LightColour::Yellow => QuickValue::Yellow,
+                LightColour::Green => QuickValue::Green,
+                LightColour::Cyan => QuickValue::Cyan,
+                LightColour::Blue => QuickValue::Blue,
+                LightColour::Purple => QuickValue::Purple,
+                LightColour::Pink => QuickValue::Pink,
+            }),
+            QuickRow::LightEffect => Some(match self.state.light_effect {
+                LightEffect::Static => QuickValue::Static,
+                LightEffect::Breathe => QuickValue::Breathe,
+                LightEffect::Blink => QuickValue::Blink,
+                LightEffect::Rainbow => QuickValue::Rainbow,
+            }),
+            QuickRow::LightLevel => Some(match self.state.light_level {
+                LightLevel::Low => QuickValue::Low,
+                LightLevel::Medium => QuickValue::Medium,
+                LightLevel::High => QuickValue::High,
+            }),
+            QuickRow::DateTime
+            | QuickRow::About
+            | QuickRow::Screen
+            | QuickRow::Game
+            | QuickRow::Lights => None,
         }
     }
 
@@ -1016,10 +1049,30 @@ impl App {
         if matches!(self.phase, Phase::SetClock { .. }) || secs < CLOCK_FLOOR {
             self.phase = clock_screen(secs, 0, false);
         }
+        power.set_lights(self.lights());
         self.power = Some(power);
         self.battery_at = self.now();
         self.charge_at = self.now();
         self.last_led = None;
+    }
+
+    pub fn lights(&self) -> Lights {
+        let s = &self.state;
+        Lights {
+            mode: match s.light_mode {
+                LightMode::Battery => LightsMode::Battery,
+                LightMode::Colour => LightsMode::Colour,
+                LightMode::Off => LightsMode::Off,
+            },
+            rgb: s.light_colour.rgb(),
+            effect: match s.light_effect {
+                LightEffect::Static => LightsEffect::Static,
+                LightEffect::Breathe => LightsEffect::Breathe,
+                LightEffect::Blink => LightsEffect::Blink,
+                LightEffect::Rainbow => LightsEffect::Rainbow,
+            },
+            percent: s.light_level.percent(),
+        }
     }
 
     pub fn set_rumble(&mut self, strength: u16) {
@@ -1338,7 +1391,7 @@ impl App {
                 self.phase = clock_screen(self.utc_secs(), self.state.utc_offset_min, true);
             }
             QuickRow::About => self.phase = Phase::About,
-            QuickRow::Screen | QuickRow::Game => {
+            QuickRow::Screen | QuickRow::Game | QuickRow::Lights => {
                 if let Some(row) = row.child() {
                     self.phase = Phase::QuickMenu { row };
                 }
@@ -1352,6 +1405,12 @@ impl App {
             | QuickRow::GbaShader
             | QuickRow::GbShader
             | QuickRow::GbPalettes
+            | QuickRow::Brightness
+            | QuickRow::Warmth
+            | QuickRow::LightMode
+            | QuickRow::LightColour
+            | QuickRow::LightEffect
+            | QuickRow::LightLevel
             | QuickRow::Rumble => {}
         }
     }
@@ -1390,7 +1449,44 @@ impl App {
             QuickRow::Turbo => s.turbo = !s.turbo,
             QuickRow::Rewind => s.rewind = !s.rewind,
             QuickRow::GbPalettes => s.gb_palettes = !s.gb_palettes,
-            QuickRow::DateTime | QuickRow::About | QuickRow::Screen | QuickRow::Game => return,
+            QuickRow::Brightness => {
+                let to = match right {
+                    true => up(s.brightness, 1, BRIGHTNESS_MAX),
+                    false => s.brightness.saturating_sub(1),
+                };
+                if to == s.brightness {
+                    return;
+                }
+                s.brightness = to;
+                if let Some(power) = &mut self.power {
+                    power.set_backlight(to);
+                }
+            }
+            QuickRow::Warmth => {
+                let to = match right {
+                    true => up(s.blue_light, 1, BLUE_LIGHT_MAX),
+                    false => s.blue_light.saturating_sub(1),
+                };
+                if to == s.blue_light {
+                    return;
+                }
+                s.blue_light = to;
+            }
+            QuickRow::LightMode => s.light_mode = s.light_mode.step(right),
+            QuickRow::LightColour => s.light_colour = s.light_colour.step(right),
+            QuickRow::LightEffect => s.light_effect = s.light_effect.step(right),
+            QuickRow::LightLevel => s.light_level = s.light_level.step(right),
+            QuickRow::DateTime
+            | QuickRow::About
+            | QuickRow::Screen
+            | QuickRow::Game
+            | QuickRow::Lights => return,
+        }
+        if QuickRow::LIGHTS.contains(&row) {
+            let lights = self.lights();
+            if let Some(power) = &mut self.power {
+                power.set_lights(lights);
+            }
         }
         self.persist();
     }

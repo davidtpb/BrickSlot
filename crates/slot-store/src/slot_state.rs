@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::atomic::atomic_write;
 use crate::gb_palette::GbPalette;
+use crate::lights::{LightColour, LightEffect, LightLevel, LightMode};
 use crate::platform::Platform;
 
 pub const BRIGHTNESS_MAX: u8 = 9;
@@ -38,6 +39,10 @@ pub struct SlotState {
     pub rewind: bool,
     pub gb_palettes: bool,
     pub gb_palette: GbPalette,
+    pub light_mode: LightMode,
+    pub light_colour: LightColour,
+    pub light_effect: LightEffect,
+    pub light_level: LightLevel,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -110,6 +115,10 @@ impl Default for SlotState {
             rewind: true,
             gb_palettes: false,
             gb_palette: GbPalette::DEFAULT,
+            light_mode: LightMode::Battery,
+            light_colour: LightColour::White,
+            light_effect: LightEffect::Static,
+            light_level: LightLevel::Medium,
         }
     }
 }
@@ -128,7 +137,7 @@ pub fn read_slot_state(root: &Path) -> SlotState {
 
 pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     let text = format!(
-        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\n",
+        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\n",
         s.cart.as_deref().unwrap_or(""),
         s.cart_platform.map_or(String::new(), platform_key),
         s.brightness,
@@ -149,7 +158,11 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.turbo as u8,
         s.rewind as u8,
         s.gb_palettes as u8,
-        s.gb_palette.core_name()
+        s.gb_palette.core_name(),
+        s.light_mode.name(),
+        s.light_colour.name(),
+        s.light_effect.name(),
+        s.light_level.name()
     );
     atomic_write(&state_path(root), text.as_bytes())
 }
@@ -176,6 +189,10 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut rewind = None;
     let mut gb_palettes = None;
     let mut gb_palette = None;
+    let mut light_mode = None;
+    let mut light_colour = None;
+    let mut light_effect = None;
+    let mut light_level = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let Some((key, value)) = line.split_once('=') else {
             continue;
@@ -201,6 +218,10 @@ fn parse(text: &str) -> Option<SlotState> {
             "rewind" => rewind = flag(value),
             "gb_palettes" => gb_palettes = flag(value),
             "gb_palette" => gb_palette = GbPalette::parse(value),
+            "light_mode" => light_mode = LightMode::parse(value),
+            "light_colour" => light_colour = LightColour::parse(value),
+            "light_effect" => light_effect = LightEffect::parse(value),
+            "light_level" => light_level = LightLevel::parse(value),
             "shader_gb" => shader_gb = Shader::parse(value).filter(|s| Shader::GB.contains(s)),
             _ => {}
         }
@@ -229,6 +250,10 @@ fn parse(text: &str) -> Option<SlotState> {
         rewind: rewind.unwrap_or(fallback.rewind),
         gb_palettes: gb_palettes.unwrap_or(fallback.gb_palettes),
         gb_palette: gb_palette.unwrap_or(fallback.gb_palette),
+        light_mode: light_mode.unwrap_or(fallback.light_mode),
+        light_colour: light_colour.unwrap_or(fallback.light_colour),
+        light_effect: light_effect.unwrap_or(fallback.light_effect),
+        light_level: light_level.unwrap_or(fallback.light_level),
     })
 }
 

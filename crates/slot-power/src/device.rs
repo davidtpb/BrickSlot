@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::{Battery, Charge, LedState, Platform};
+use crate::{Battery, Charge, LedState, Lights, LightsEffect, LightsMode, Platform};
 
 const TOP_STEP: u32 = 9;
 
@@ -140,6 +140,8 @@ pub struct DevicePlatform {
     motor: Option<Motor>,
     led: Option<Led>,
     board: Board,
+    lights: Lights,
+    led_state: Option<LedState>,
 }
 
 impl DevicePlatform {
@@ -195,6 +197,8 @@ impl DevicePlatform {
             motor,
             led,
             board,
+            lights: Lights::default(),
+            led_state: None,
         }
     }
 
@@ -227,6 +231,8 @@ impl DevicePlatform {
             motor,
             led,
             board,
+            lights: Lights::default(),
+            led_state: None,
         }
     }
 
@@ -494,8 +500,39 @@ impl Drop for Motor {
     }
 }
 
-const ANIM_STATIC: u32 = 4;
-const ANIM_SCALE: u32 = 30;
+const ANIM_ZONES: [(&str, &str); 4] = [
+    ("m", "max_scale"),
+    ("lr", "max_scale_lr"),
+    ("f1", "max_scale_f1f2"),
+    ("rear", "max_scale_rear"),
+];
+
+const ANIM_BATTERY_MAX: u8 = 30;
+
+fn battery_colour(state: LedState) -> Option<u32> {
+    match state {
+        LedState::Off | LedState::Running => None,
+        LedState::Low => Some(0xFF0000),
+        LedState::Charging => Some(0xFF8C00),
+        LedState::Charged => Some(0x00FF00),
+    }
+}
+
+fn anim_zone(dir: &Path, zone: &str, rgb: u32, effect: LightsEffect) {
+    let (id, ms) = match effect {
+        LightsEffect::Static => (4, 1000),
+        LightsEffect::Breathe => (2, 2000),
+        LightsEffect::Blink => (5, 1000),
+        LightsEffect::Rainbow => (8, 3000),
+    };
+    let write = |name: String, body: String| {
+        let _ = fs::write(dir.join(name), body);
+    };
+    write(format!("effect_rgb_hex_{zone}"), format!("{rgb:06X}\n"));
+    write(format!("effect_duration_{zone}"), format!("{ms}\n"));
+    write(format!("effect_cycles_{zone}"), "-1\n".to_string());
+    write(format!("effect_{zone}"), format!("{id}\n"));
+}
 
 fn disp_brightness(node: &Path, value: u32) -> std::io::Result<()> {
     let disp = fs::OpenOptions::new().read(true).write(true).open(node)?;
@@ -603,41 +640,72 @@ impl Platform for DevicePlatform {
     }
 
     fn set_led(&mut self, state: LedState) {
+        self.led_state = Some(state);
         let Some(led) = &self.led else {
             return;
         };
+        let lights = self.lights;
+        let shown = match (lights.mode, state) {
+            (_, LedState::Off) | (LightsMode::Off, _) => None,
+            (LightsMode::Colour, _) => Some((lights.rgb, lights.effect, lights.percent)),
+            (LightsMode::Battery, state) => battery_colour(state).map(|rgb| {
+                let percent = lights.percent.min(ANIM_BATTERY_MAX);
+                (rgb, LightsEffect::Static, percent)
+            }),
+        };
         match led {
             Led::Multi(dir) => {
-                let (r, g, b) = match state {
-                    LedState::Off => (0, 0, 0),
-                    LedState::Running | LedState::Charged => (0, 255, 0),
-                    LedState::Low => (255, 0, 0),
-                    LedState::Charging => (255, 140, 0),
+                let rgb = match lights.mode {
+                    LightsMode::Battery => match state {
+                        LedState::Off => 0,
+                        LedState::Running | LedState::Charged => 0x00FF00,
+                        LedState::Low => 0xFF0000,
+                        LedState::Charging => 0xFF8C00,
+                    },
+                    _ => shown.map_or(0, |(rgb, _, _)| rgb),
                 };
+                let (r, g, b) = ((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
                 let _ = fs::write(dir.join("multi_intensity"), format!("{r} {g} {b}\n"));
                 let _ = fs::write(dir.join("brightness"), "255\n");
             }
             Led::Mono { dir, max } => {
-                let on = !matches!(state, LedState::Off | LedState::Low);
+                let on = match lights.mode {
+                    LightsMode::Battery => !matches!(state, LedState::Off | LedState::Low),
+                    _ => shown.is_some(),
+                };
                 let value = if on { *max } else { 0 };
                 let _ = fs::write(dir.join("brightness"), format!("{value}\n"));
             }
             Led::Anim(dir) => {
-                let rgb = match state {
-                    LedState::Off | LedState::Running => None,
-                    LedState::Low => Some("FF0000"),
-                    LedState::Charging => Some("FF8C00"),
-                    LedState::Charged => Some("00FF00"),
+                let lit = match (lights.mode, shown) {
+                    (_, None) => 0,
+                    (LightsMode::Colour, _) => ANIM_ZONES.len(),
+                    _ => 1,
                 };
-                let Some(rgb) = rgb else {
-                    let _ = fs::write(dir.join("max_scale"), "0\n");
+                for (_, scale) in &ANIM_ZONES[lit..] {
+                    let _ = fs::write(dir.join(scale), "0\n");
+                }
+                let Some((rgb, effect, percent)) = shown else {
                     return;
                 };
-                let _ = fs::write(dir.join("effect_rgb_hex_m"), format!("{rgb}\n"));
-                let _ = fs::write(dir.join("effect_duration_m"), "1000\n");
-                let _ = fs::write(dir.join("effect_m"), format!("{ANIM_STATIC}\n"));
-                let _ = fs::write(dir.join("max_scale"), format!("{ANIM_SCALE}\n"));
+                for (zone, scale) in &ANIM_ZONES[..lit] {
+                    anim_zone(dir, zone, rgb, effect);
+                    if *zone == "f1" {
+                        anim_zone(dir, "f2", rgb, effect);
+                    }
+                    let _ = fs::write(dir.join(scale), format!("{percent}\n"));
+                }
             }
+        }
+    }
+
+    fn set_lights(&mut self, lights: Lights) {
+        if self.lights == lights {
+            return;
+        }
+        self.lights = lights;
+        if let Some(state) = self.led_state {
+            self.set_led(state);
         }
     }
 

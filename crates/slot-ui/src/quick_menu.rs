@@ -35,10 +35,11 @@ pub enum QuickRow {
     AutoTime,
     Search,
     Performance,
+    Labels,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 29] = [
+    pub const ALL: [QuickRow; 30] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -68,6 +69,7 @@ impl QuickRow {
         QuickRow::AutoTime,
         QuickRow::Search,
         QuickRow::Performance,
+        QuickRow::Labels,
     ];
 
     pub const MAIN: [QuickRow; 7] = [
@@ -107,11 +109,12 @@ impl QuickRow {
         QuickRow::LightLevel,
     ];
 
-    pub const NETWORK: [QuickRow; 4] = [
+    pub const NETWORK: [QuickRow; 5] = [
         QuickRow::Wifi,
         QuickRow::AutoTime,
         QuickRow::Syncthing,
         QuickRow::Achievements,
+        QuickRow::Labels,
     ];
 
     pub fn index(self) -> usize {
@@ -130,9 +133,11 @@ impl QuickRow {
             | QuickRow::LightColour
             | QuickRow::LightEffect
             | QuickRow::LightLevel => &QuickRow::LIGHTS,
-            QuickRow::Wifi | QuickRow::AutoTime | QuickRow::Syncthing | QuickRow::Achievements => {
-                &QuickRow::NETWORK
-            }
+            QuickRow::Wifi
+            | QuickRow::AutoTime
+            | QuickRow::Syncthing
+            | QuickRow::Achievements
+            | QuickRow::Labels => &QuickRow::NETWORK,
             QuickRow::FastForward
             | QuickRow::FastForwardSound
             | QuickRow::Rewind
@@ -200,6 +205,7 @@ impl QuickRow {
             QuickRow::AutoTime => "Set Time Automatically",
             QuickRow::Search => "Search Games",
             QuickRow::Performance => "Performance",
+            QuickRow::Labels => "Download Labels",
         }
     }
 
@@ -213,6 +219,7 @@ impl QuickRow {
                 | QuickRow::Lights
                 | QuickRow::Network
                 | QuickRow::Search
+                | QuickRow::Labels
         )
     }
 

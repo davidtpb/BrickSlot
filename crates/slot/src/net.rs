@@ -3,13 +3,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum NetJob {
     WifiUp,
     WifiDown,
     SyncthingStart,
     SyncthingStop,
     SyncClock,
+    Labels(Vec<crate::labels::Wanted>),
 }
 
 pub const SYNCTHING_PORT: u16 = 8384;
@@ -60,7 +61,7 @@ impl Net {
     }
 
     pub fn send(&mut self, job: NetJob) {
-        self.sent.push(job);
+        self.sent.push(job.clone());
         if let Some(jobs) = &self.jobs {
             let _ = jobs.send(job);
         }
@@ -224,6 +225,16 @@ fn work(
             }
             NetJob::SyncthingStop => {
                 run(root, "syncthing.sh", "stop");
+            }
+            NetJob::Labels(wanted) => {
+                let tally = crate::labels::fetch_all(&wanted, crate::labels::http_get);
+                say(
+                    "Labels downloaded",
+                    format!(
+                        "{} found, {} not found. Restart to see them",
+                        tally.found, tally.missing
+                    ),
+                );
             }
             NetJob::SyncClock => match network_time() {
                 Some(secs) => {

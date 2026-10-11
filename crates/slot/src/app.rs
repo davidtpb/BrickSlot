@@ -774,7 +774,8 @@ impl App {
             | QuickRow::Game
             | QuickRow::Lights
             | QuickRow::Network
-            | QuickRow::Search => None,
+            | QuickRow::Search
+            | QuickRow::Labels => None,
         }
     }
 
@@ -1477,6 +1478,37 @@ impl App {
         }
     }
 
+    fn download_labels(&mut self) {
+        if !self.net.online() {
+            return self.say("Turn on Wi-Fi first", "Network > Wi-Fi");
+        }
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let wanted: Vec<crate::labels::Wanted> = self
+            .shelves
+            .iter()
+            .flat_map(|(_, s)| s.carts.iter())
+            .filter(|c| c.label.is_none())
+            .map(|c| crate::labels::Wanted {
+                platform: c.platform,
+                stem: c.stem.clone(),
+                dest: root
+                    .join("Labels")
+                    .join(c.platform.dir_name())
+                    .join(format!("{}.png", c.stem)),
+            })
+            .collect();
+        if wanted.is_empty() {
+            return self.say("Every game has a label", "");
+        }
+        self.say(
+            "Downloading labels",
+            format!("{} games without one", wanted.len()),
+        );
+        self.net.send(NetJob::Labels(wanted));
+    }
+
     fn open_search(&mut self) {
         self.shelf_mut().release_hold();
         self.play_held = None;
@@ -1635,6 +1667,7 @@ impl App {
             }
             QuickRow::About => self.phase = Phase::About,
             QuickRow::Search => self.open_search(),
+            QuickRow::Labels => self.download_labels(),
             QuickRow::Screen | QuickRow::Game | QuickRow::Lights | QuickRow::Network => {
                 if let Some(row) = row.child() {
                     self.phase = Phase::QuickMenu { row };
@@ -1774,7 +1807,8 @@ impl App {
             | QuickRow::Game
             | QuickRow::Lights
             | QuickRow::Network
-            | QuickRow::Search => return,
+            | QuickRow::Search
+            | QuickRow::Labels => return,
         }
         if QuickRow::LIGHTS.contains(&row) {
             let lights = self.lights();

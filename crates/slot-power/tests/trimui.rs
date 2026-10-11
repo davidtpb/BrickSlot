@@ -213,3 +213,60 @@ fn an_anbernic_still_powers_off_instead_of_deep_sleeping() {
     let p = DevicePlatform::probe(sys.path(), PathBuf::from("/mnt/sdcard"));
     assert!(!p.can_deep_sleep());
 }
+
+#[test]
+fn the_new_effects_draw_what_their_names_say() {
+    use slot_power::effect_colour as at;
+    let red = |c: u32| c >> 16;
+    let green = |c: u32| (c >> 8) & 0xFF;
+    let blue = |c: u32| c & 0xFF;
+    // Rainbow Wave puts each light at its own spot on the wheel.
+    let wave: Vec<u32> = (0..4)
+        .map(|z| at(LightsEffect::RainbowWave, 0, 0, z, 0))
+        .collect();
+    assert_eq!(wave[0], 0xFF0000);
+    assert!(wave.windows(2).all(|w| w[0] != w[1]), "{wave:06X?}");
+    // Ocean stays blue-green, never red.
+    for ms in (0..6000).step_by(250) {
+        let c = at(LightsEffect::Ocean, 0, ms, 0, 0);
+        assert!(red(c) < 0x20 && blue(c) > 0x60, "{c:06X} at {ms}");
+    }
+    // Fire stays red-orange-yellow, never blue.
+    for noise in [0u32, 0x1234_5678, 0xFFFF_FFFF, 0x00FF_00FF] {
+        let c = at(LightsEffect::Fire, 0, 0, 0, noise);
+        assert!(
+            red(c) > 0x80 && blue(c) == 0 && green(c) <= red(c),
+            "{c:06X}"
+        );
+    }
+    // Police: neighbouring lights flash opposite colours, then swap.
+    let (a, b) = (
+        at(LightsEffect::Police, 0, 10, 0, 0),
+        at(LightsEffect::Police, 0, 10, 1, 0),
+    );
+    assert_eq!((a, b), (0xFF0000, 0x0030FF));
+    assert_eq!(at(LightsEffect::Police, 0, 410, 0, 0), 0x0030FF);
+    // Heartbeat beats in the chosen colour: bright on the beat, dim between.
+    let beat = at(LightsEffect::Heartbeat, 0x00FF00, 120, 0, 0);
+    let rest = at(LightsEffect::Heartbeat, 0x00FF00, 900, 0, 0);
+    assert!(green(beat) > 0xF0 && green(rest) < 0x30 && red(beat) == 0);
+}
+
+#[test]
+fn the_new_effects_play_over_a_static_light() {
+    let (sys, dev) = brick_pro_tree();
+    let mut p = brick_pro(&sys, &dev);
+    p.set_led(LedState::Running);
+    p.set_lights(Lights {
+        mode: LightsMode::Colour,
+        rgb: 0xFFFFFF,
+        effect: LightsEffect::Aurora,
+        percent: 50,
+    });
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert_eq!(read(&sys, "class/led_anim/effect_m"), "4");
+    let m = read(&sys, "class/led_anim/effect_rgb_hex_m");
+    let lr = read(&sys, "class/led_anim/effect_rgb_hex_lr");
+    assert_ne!(m, "FFFFFF", "Aurora never drew");
+    assert_ne!(m, lr, "the lights are not offset along the palette");
+}

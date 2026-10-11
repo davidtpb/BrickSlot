@@ -105,7 +105,8 @@ These live in the quick menu (tap MENU on the shelf).
   (D-pad to move, A to type, B to delete). Matching games from every shelf are listed as
   you type, ignoring accents and capitals. L/R picks one and START takes you to its cart.
 - **Lights** (TrimUI): show the battery state on the top bar, light every zone in one
-  colour, or turn them all off. Color, effect (Static, Breathe, Blink, Rainbow) and
+  colour, or turn them all off. Color, effect (Static, Breathe, Blink, Rainbow, Rainbow
+  Wave, Fire, Ocean, Aurora, Sunset, Candy, Police, Heartbeat) and
   brightness each have a row. On Anbernics with an RGB LED, Color sets it too.
 - **Screen > Brightness / Warmth**: the same levels as SELECT + D-pad. MENU held with
   VOL+ / VOL- also steps brightness, as on NextUI.

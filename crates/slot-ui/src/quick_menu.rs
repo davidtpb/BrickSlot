@@ -264,6 +264,14 @@ pub enum QuickValue {
     Level9,
     RetroArch,
     Slot,
+    RainbowWave,
+    Fire,
+    Ocean,
+    Aurora,
+    Sunset,
+    Candy,
+    Police,
+    Heartbeat,
 }
 
 impl QuickValue {
@@ -280,7 +288,7 @@ impl QuickValue {
         QuickValue::Level9,
     ];
 
-    pub const ALL: [QuickValue; 40] = [
+    pub const ALL: [QuickValue; 48] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -321,6 +329,14 @@ impl QuickValue {
         QuickValue::Level9,
         QuickValue::RetroArch,
         QuickValue::Slot,
+        QuickValue::RainbowWave,
+        QuickValue::Fire,
+        QuickValue::Ocean,
+        QuickValue::Aurora,
+        QuickValue::Sunset,
+        QuickValue::Candy,
+        QuickValue::Police,
+        QuickValue::Heartbeat,
     ];
 
     pub fn index(self) -> usize {
@@ -369,6 +385,14 @@ impl QuickValue {
             QuickValue::Level9 => "9",
             QuickValue::RetroArch => "RetroArch (.srm)",
             QuickValue::Slot => "slot (.sav)",
+            QuickValue::RainbowWave => "Rainbow Wave",
+            QuickValue::Fire => "Fire",
+            QuickValue::Ocean => "Ocean",
+            QuickValue::Aurora => "Aurora",
+            QuickValue::Sunset => "Sunset",
+            QuickValue::Candy => "Candy",
+            QuickValue::Police => "Police",
+            QuickValue::Heartbeat => "Heartbeat",
         }
     }
 

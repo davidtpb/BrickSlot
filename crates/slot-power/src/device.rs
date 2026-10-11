@@ -525,43 +525,121 @@ fn battery_colour(state: LedState) -> Option<u32> {
     }
 }
 
-const RAINBOW_TICK: Duration = Duration::from_millis(120);
+const ANIMATION_TICK: Duration = Duration::from_millis(80);
 
-/// Degrees the hue moves each tick: a full turn in about six seconds.
-const RAINBOW_STEP: f32 = 7.0;
-
-/// Cycles the lit zones round the colour wheel until the flag it hands back
-/// is set. The light driver only fades between two colours, so the turning
-/// is done here.
-fn spawn_rainbow(dir: PathBuf, lit: usize) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+/// Plays an effect the light driver cannot: every tick each lit zone gets
+/// the colour `effect_colour` gives it, until the flag handed back is set.
+fn spawn_animation(
+    dir: PathBuf,
+    lit: usize,
+    effect: LightsEffect,
+    base: u32,
+) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
     use std::sync::atomic::{AtomicBool, Ordering};
     let stop = std::sync::Arc::new(AtomicBool::new(false));
     let flag = stop.clone();
     let spawned = std::thread::Builder::new()
-        .name("slot-rainbow".into())
+        .name("slot-lights".into())
         .spawn(move || {
-            let mut hue = 0.0f32;
+            let began = std::time::Instant::now();
+            let mut seed = 0x2545_F491_u32;
+            let mut shown = [u32::MAX; ANIM_ZONES.len()];
             while !flag.load(Ordering::Relaxed) {
-                let rgb = hue_rgb(hue);
-                for (zone, _) in &ANIM_ZONES[..lit] {
-                    let _ = fs::write(
-                        dir.join(format!("effect_rgb_hex_{zone}")),
-                        format!("{rgb:06X}\n"),
-                    );
-                    let _ = fs::write(dir.join(format!("effect_{zone}")), "4\n");
-                    if *zone == "f1" {
-                        let _ = fs::write(dir.join("effect_rgb_hex_f2"), format!("{rgb:06X}\n"));
-                        let _ = fs::write(dir.join("effect_f2"), "4\n");
+                let ms = began.elapsed().as_millis() as u64;
+                for (i, (zone, _)) in ANIM_ZONES[..lit].iter().enumerate() {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    let rgb = effect_colour(effect, base, ms, i, seed);
+                    if shown[i] == rgb {
+                        continue;
+                    }
+                    shown[i] = rgb;
+                    let zones: &[&str] = if *zone == "f1" {
+                        &["f1", "f2"]
+                    } else {
+                        &[zone]
+                    };
+                    for z in zones {
+                        let _ = fs::write(
+                            dir.join(format!("effect_rgb_hex_{z}")),
+                            format!("{rgb:06X}\n"),
+                        );
+                        let _ = fs::write(dir.join(format!("effect_{z}")), "4\n");
                     }
                 }
-                hue = (hue + RAINBOW_STEP) % 360.0;
-                std::thread::sleep(RAINBOW_TICK);
+                std::thread::sleep(ANIMATION_TICK);
             }
         });
     if let Err(e) = spawned {
-        eprintln!("slot: rainbow: {e}");
+        eprintln!("slot: lights: {e}");
     }
     stop
+}
+
+const OCEAN: [u32; 3] = [0x0030FF, 0x00C8FF, 0x00FFB0];
+const AURORA: [u32; 3] = [0x00FF60, 0x00D8FF, 0x9B30FF];
+const SUNSET: [u32; 3] = [0xFF6A00, 0xFF2D6F, 0x8E2DE2];
+const CANDY: [u32; 3] = [0xFF4FB8, 0x3FE0FF, 0xFFE14F];
+
+/// The colour of lit zone `zone` (0 top bar, 1 sides, 2 FN keys, 3 rear)
+/// `ms` into `effect`. `noise` is fresh randomness for flickering effects.
+pub fn effect_colour(effect: LightsEffect, base: u32, ms: u64, zone: usize, noise: u32) -> u32 {
+    let zone_f = zone as f32;
+    match effect {
+        LightsEffect::Rainbow => hue_rgb(ms as f32 * 0.06),
+        LightsEffect::RainbowWave => hue_rgb(ms as f32 * 0.06 + zone_f * 90.0),
+        LightsEffect::Ocean => palette(&OCEAN, 6000.0, ms as f32 + zone_f * 900.0),
+        LightsEffect::Aurora => palette(&AURORA, 7000.0, ms as f32 + zone_f * 1200.0),
+        LightsEffect::Sunset => palette(&SUNSET, 6000.0, ms as f32 + zone_f * 900.0),
+        LightsEffect::Candy => palette(&CANDY, 4500.0, ms as f32 + zone_f * 700.0),
+        LightsEffect::Fire => {
+            let heat = (noise & 0xFF) as f32 / 255.0;
+            let glow = 0.55 + 0.45 * ((noise >> 8) & 0xFF) as f32 / 255.0;
+            scale(mix(0xFF1800, 0xFFB000, heat), glow)
+        }
+        LightsEffect::Police => {
+            let half = (ms / 400).is_multiple_of(2);
+            let flash = (ms % 400) < 300 && (ms % 100) < 70;
+            match (flash, half == zone.is_multiple_of(2)) {
+                (false, _) => 0,
+                (true, true) => 0xFF0000,
+                (true, false) => 0x0030FF,
+            }
+        }
+        LightsEffect::Heartbeat => {
+            let t = (ms % 1200) as f32;
+            let beat = |at: f32| {
+                let d = (t - at) / 90.0;
+                (-d * d).exp()
+            };
+            scale(base, 0.12 + 0.88 * beat(120.0).max(0.8 * beat(380.0)))
+        }
+        LightsEffect::Static | LightsEffect::Breathe | LightsEffect::Blink => base,
+    }
+}
+
+/// Smoothly round a looping list of colours, one full lap per `period` ms.
+fn palette(colours: &[u32], period: f32, ms: f32) -> u32 {
+    let n = colours.len();
+    let pos = (ms.rem_euclid(period) / period) * n as f32;
+    let i = pos as usize % n;
+    let t = pos.fract();
+    let t = t * t * (3.0 - 2.0 * t);
+    mix(colours[i], colours[(i + 1) % n], t)
+}
+
+fn mix(a: u32, b: u32, t: f32) -> u32 {
+    let ch = |c: u32, shift: u32| ((c >> shift) & 0xFF) as f32;
+    let one = |shift: u32| {
+        let v = ch(a, shift) + (ch(b, shift) - ch(a, shift)) * t.clamp(0.0, 1.0);
+        (v.round() as u32).min(255) << shift
+    };
+    one(16) | one(8) | one(0)
+}
+
+fn scale(c: u32, by: f32) -> u32 {
+    mix(0, c, by)
 }
 
 /// A fully saturated, full brightness colour at `hue` degrees, as 0xRRGGBB.
@@ -606,9 +684,9 @@ fn anim_zone(dir: &Path, zone: &str, rgb: u32, effect: LightsEffect) {
         LightsEffect::Static => (4, 1000),
         LightsEffect::Breathe => (2, 2000),
         LightsEffect::Blink => (5, 1000),
-        // The Brick's driver has no rainbow of its own; spawn_rainbow walks
-        // the colour wheel over a static light instead.
-        LightsEffect::Rainbow => (4, 1000),
+        // The Brick's driver has none of these; spawn_animation draws them
+        // over a static light instead.
+        _ => (4, 1000),
     };
     let write = |name: String, body: String| {
         let _ = fs::write(dir.join(name), body);
@@ -782,9 +860,9 @@ impl Platform for DevicePlatform {
                 let Some((rgb, effect, percent)) = shown else {
                     return;
                 };
-                let shown_effect = match effect {
-                    LightsEffect::Rainbow => LightsEffect::Static,
-                    other => other,
+                let shown_effect = match effect.animated() {
+                    true => LightsEffect::Static,
+                    false => effect,
                 };
                 for (zone, scale) in &ANIM_ZONES[..lit] {
                     anim_zone(dir, zone, rgb, shown_effect);
@@ -793,8 +871,8 @@ impl Platform for DevicePlatform {
                     }
                     let _ = fs::write(dir.join(scale), format!("{percent}\n"));
                 }
-                if effect == LightsEffect::Rainbow {
-                    self.rainbow = Some(spawn_rainbow(dir.clone(), lit));
+                if effect.animated() {
+                    self.rainbow = Some(spawn_animation(dir.clone(), lit, effect, rgb));
                 }
             }
         }

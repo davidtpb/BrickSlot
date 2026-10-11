@@ -108,14 +108,30 @@ pub enum LightEffect {
     Breathe,
     Blink,
     Rainbow,
+    RainbowWave,
+    Fire,
+    Ocean,
+    Aurora,
+    Sunset,
+    Candy,
+    Police,
+    Heartbeat,
 }
 
 impl LightEffect {
-    pub const ALL: [LightEffect; 4] = [
+    pub const ALL: [LightEffect; 12] = [
         LightEffect::Static,
         LightEffect::Breathe,
         LightEffect::Blink,
         LightEffect::Rainbow,
+        LightEffect::RainbowWave,
+        LightEffect::Fire,
+        LightEffect::Ocean,
+        LightEffect::Aurora,
+        LightEffect::Sunset,
+        LightEffect::Candy,
+        LightEffect::Police,
+        LightEffect::Heartbeat,
     ];
 
     pub fn name(self) -> &'static str {
@@ -124,6 +140,14 @@ impl LightEffect {
             LightEffect::Breathe => "breathe",
             LightEffect::Blink => "blink",
             LightEffect::Rainbow => "rainbow",
+            LightEffect::RainbowWave => "rainbow_wave",
+            LightEffect::Fire => "fire",
+            LightEffect::Ocean => "ocean",
+            LightEffect::Aurora => "aurora",
+            LightEffect::Sunset => "sunset",
+            LightEffect::Candy => "candy",
+            LightEffect::Police => "police",
+            LightEffect::Heartbeat => "heartbeat",
         }
     }
 

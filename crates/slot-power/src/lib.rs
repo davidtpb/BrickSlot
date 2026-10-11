@@ -4,8 +4,8 @@ mod power;
 mod sim;
 
 pub use device::{
-    has_bit, hue_rgb, motor_change, read_only, read_only_in, record_first_frame, rumble_node,
-    trace_first_frame, uptime_seconds, Board, DevicePlatform, BOARD_VAR,
+    effect_colour, has_bit, hue_rgb, motor_change, read_only, read_only_in, record_first_frame,
+    rumble_node, trace_first_frame, uptime_seconds, Board, DevicePlatform, BOARD_VAR,
 };
 pub use motor::Motor;
 pub use power::Power;
@@ -52,6 +52,24 @@ pub enum LightsEffect {
     Breathe,
     Blink,
     Rainbow,
+    RainbowWave,
+    Fire,
+    Ocean,
+    Aurora,
+    Sunset,
+    Candy,
+    Police,
+    Heartbeat,
+}
+
+impl LightsEffect {
+    /// Drawn by slot over a static light, rather than by the light driver.
+    pub fn animated(self) -> bool {
+        !matches!(
+            self,
+            LightsEffect::Static | LightsEffect::Breathe | LightsEffect::Blink
+        )
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

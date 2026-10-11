@@ -12,6 +12,98 @@ pub const SW_LID: u16 = 0x00;
 pub const EV_ABS: u16 = 0x03;
 pub const ABS_HAT0X: u16 = 0x10;
 pub const ABS_HAT0Y: u16 = 0x11;
+pub const ABS_Z: u16 = 0x02;
+pub const ABS_RZ: u16 = 0x05;
+
+pub const KEYMAP_VAR: &str = "SLOT_KEYMAP";
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum Keymap {
+    #[default]
+    Anbernic,
+    TrimUi,
+}
+
+impl Keymap {
+    pub fn parse(s: &str) -> Option<Keymap> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "anbernic" | "h700" => Some(Keymap::Anbernic),
+            "trimui" | "tg5040" | "brick" | "brickpro" => Some(Keymap::TrimUi),
+            _ => None,
+        }
+    }
+
+    pub fn for_device(name: &str, forced: Option<&str>) -> Keymap {
+        if let Some(keymap) = forced.and_then(Keymap::parse) {
+            return keymap;
+        }
+        if name.to_ascii_lowercase().contains("trimui") {
+            Keymap::TrimUi
+        } else {
+            Keymap::Anbernic
+        }
+    }
+
+    pub fn btn(self, code: u16) -> Option<Btn> {
+        match self {
+            Keymap::Anbernic => code_to_btn(code),
+            Keymap::TrimUi => trimui_code_to_btn(code),
+        }
+    }
+
+    pub fn to_raw(self, ev: Ev) -> Option<RawEvent> {
+        let btn = match ev.kind {
+            EV_KEY => self.btn(ev.code)?,
+            EV_SW if ev.code == SW_LID => Btn::Lid,
+            _ => return None,
+        };
+        match ev.value {
+            0 => Some(RawEvent::Up(btn)),
+            1 => Some(RawEvent::Down(btn)),
+            _ => None,
+        }
+    }
+}
+
+pub struct Triggers {
+    at: i32,
+    l2: bool,
+    r2: bool,
+}
+
+impl Default for Triggers {
+    fn default() -> Self {
+        Triggers::new(1)
+    }
+}
+
+impl Triggers {
+    pub fn new(at: i32) -> Self {
+        Triggers {
+            at: at.max(1),
+            l2: false,
+            r2: false,
+        }
+    }
+
+    pub fn feed(&mut self, ev: Ev) -> Option<RawEvent> {
+        let (held, btn) = match ev.code {
+            ABS_Z => (&mut self.l2, Btn::L2),
+            ABS_RZ => (&mut self.r2, Btn::R2),
+            _ => return None,
+        };
+        let now = ev.value >= self.at;
+        if now == *held {
+            return None;
+        }
+        *held = now;
+        Some(if now {
+            RawEvent::Down(btn)
+        } else {
+            RawEvent::Up(btn)
+        })
+    }
+}
 
 #[derive(Default)]
 pub struct Hat {
@@ -92,9 +184,29 @@ pub fn code_to_btn(code: u16) -> Option<Btn> {
     })
 }
 
-const WANTED: [u16; 15] = [
-    0x130, 0x131, 0x132, 0x133, 0x134, 0x135, 0x136, 0x137, 0x138, 0x13a, 0x13b, 0x162, 115, 114,
-    116,
+pub fn trimui_code_to_btn(code: u16) -> Option<Btn> {
+    Some(match code {
+        0x130 => Btn::B,
+        0x131 => Btn::A,
+        0x133 => Btn::Y,
+        0x134 => Btn::X,
+        0x136 => Btn::L1,
+        0x137 => Btn::R1,
+        0x138 => Btn::L2,
+        0x139 => Btn::R2,
+        0x13a => Btn::Select,
+        0x13b => Btn::Start,
+        0x13c => Btn::Menu,
+        115 => Btn::VolUp,
+        114 => Btn::VolDown,
+        116 => Btn::Power,
+        _ => return None,
+    })
+}
+
+const WANTED: [u16; 16] = [
+    0x130, 0x131, 0x132, 0x133, 0x134, 0x135, 0x136, 0x137, 0x138, 0x13a, 0x13b, 0x13c, 0x162, 115,
+    114, 116,
 ];
 
 pub use slot_power::has_bit;

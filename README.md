@@ -50,10 +50,36 @@ Release notes can be found in the [changelog](CHANGELOG.md).
 | Anbernic RG35XXSP  | Yes                        | 1.5.0         |
 | Anbernic 35XX Plus | Yes                        | 1.5.0         |
 | Anbernic RG28XX    | Yes                        | 1.6.0         |
+| TrimUI Brick Pro   | Untested port              | Unreleased    |
+| TrimUI Brick       | Untested port              | Unreleased    |
 
 RG28XX support was contributed by [GamerAnim](https://github.com/GamerAnim). Its panel is mounted
 portrait, so slot turns the picture onto it. If it comes out upside down, add `export SLOT_ROTATE=ccw`
 to `System/launch_frontend.sh`.
+
+## TrimUI Brick Pro
+
+The Brick Pro (and the original Brick) run on TrimUI's stock firmware, the same way
+MinUI and NextUI do: the stock OS runs `/mnt/SDCARD/.tmp_update/updater` at boot when it
+exists, and slot's updater takes over from there.
+
+1. Build the card tree with `task dist:trimui` (needs Docker on a non-arm64 host).
+2. Copy everything in `dist-trimui/`, including the hidden `.tmp_update` folder, to the
+   root of the Brick Pro's SD card. ROMs go in `Games/GBA`, `Games/GB` and `Games/GBC`.
+3. Boot the device. To go back to stock, delete `.tmp_update` from the card.
+
+What changes on TrimUI hardware:
+
+- Buttons come from TrimUI's own `trimui_inputd` pad, which numbers its buttons
+  differently from the Anbernics, and sends L2/R2 as analog triggers. slot spots the pad by
+  name; `export SLOT_KEYMAP=anbernic` in the updater turns that off.
+- The backlight is driven through `/dev/disp`, rumble through GPIO 227 (held to 2.5V on
+  the Brick Pro, as NextUI does), and the battery LED colours the top light bar.
+- The card is `/mnt/SDCARD`, and slot leaves the boot logo alone.
+- The 1024x768 panel is 4:3, so the same 640x480 bezel art fits it.
+
+If slot exits on its own three times in a row within a minute of starting, the updater
+powers the device off instead of looping. Check `slot.log` and `slot-session.log` on the card.
 
 If you have one of the untested devices, or have tried slot on a device not listed,
 please [open an issue on GitHub](https://github.com/BrandonKowalski/slot/issues) and let me know how it went.

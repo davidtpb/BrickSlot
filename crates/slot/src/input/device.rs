@@ -7,7 +7,8 @@ use std::time::Instant;
 use slot_input::{Btn, InputSource, Millis, RawEvent};
 
 use super::evdev::{
-    decode, device_name, pick_devices, to_raw, Ev, Hat, EVENT_BYTES, EV_ABS, EV_KEY, EV_SYN,
+    decode, device_name, pick_devices, Ev, Hat, Keymap, Triggers, ABS_Z, EVENT_BYTES, EV_ABS,
+    EV_KEY, EV_SYN, KEYMAP_VAR,
 };
 use super::trace;
 
@@ -36,11 +37,13 @@ impl DeviceInput {
 
     fn open_traced(dev: &Path, sys: &Path, trace: Option<Arc<Trace>>) -> Self {
         let pending: Arc<Mutex<Vec<RawEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let forced = std::env::var(KEYMAP_VAR).ok();
         for node in pick_devices(dev, sys) {
+            let device = device_name(sys, &node);
+            let keymap = Keymap::for_device(&device, forced.as_deref());
             eprintln!(
-                "slot: input {} ({})",
+                "slot: input {} ({device}, {keymap:?} buttons)",
                 node.display(),
-                device_name(sys, &node)
             );
             quicken_poll(sys, &node);
             let queue = pending.clone();
@@ -48,7 +51,7 @@ impl DeviceInput {
             let trace = trace.clone();
             let spawned = std::thread::Builder::new()
                 .name(format!("slot-input-{name}"))
-                .spawn(move || read_node(&node, &queue, trace.as_deref()));
+                .spawn(move || read_node(&node, keymap, &queue, trace.as_deref()));
             if let Err(e) = spawned {
                 eprintln!("slot: input {name}: {e}");
             }
@@ -86,7 +89,24 @@ fn quicken_poll(sys: &Path, node: &Path) {
     }
 }
 
-fn read_node(node: &Path, queue: &Mutex<Vec<RawEvent>>, trace: Option<&Trace>) {
+const EVIOCGABS_Z: std::ffi::c_ulong = 0x8018_4540 + ABS_Z as std::ffi::c_ulong;
+
+extern "C" {
+    fn ioctl(fd: i32, request: std::ffi::c_ulong, ...) -> i32;
+}
+
+fn trigger_threshold(file: &File) -> i32 {
+    use std::os::unix::io::AsRawFd;
+    let mut info = [0i32; 6];
+    let rc = unsafe { ioctl(file.as_raw_fd(), EVIOCGABS_Z, info.as_mut_ptr()) };
+    let (min, max) = (info[1], info[2]);
+    if rc < 0 || max <= min {
+        return 1;
+    }
+    min + (max - min) / 2
+}
+
+fn read_node(node: &Path, keymap: Keymap, queue: &Mutex<Vec<RawEvent>>, trace: Option<&Trace>) {
     let label = node
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -99,6 +119,10 @@ fn read_node(node: &Path, queue: &Mutex<Vec<RawEvent>>, trace: Option<&Trace>) {
             return;
         }
     };
+    let mut triggers = Triggers::new(match keymap {
+        Keymap::TrimUi => trigger_threshold(&file),
+        Keymap::Anbernic => 1,
+    });
     let mut buf = [0u8; EVENT_BYTES * 16];
     loop {
         let read = match file.read(&mut buf) {
@@ -113,14 +137,18 @@ fn read_node(node: &Path, queue: &Mutex<Vec<RawEvent>>, trace: Option<&Trace>) {
         let mut events = Vec::new();
         for ev in buf[..read].chunks_exact(EVENT_BYTES).filter_map(decode) {
             if let Some(trace) = trace {
-                trace.event(&label, ev);
+                trace.event(&label, ev, keymap);
             }
             if (ev.kind == EV_KEY && ev.value == 1) || (ev.kind == EV_ABS && ev.value != 0) {
                 crate::latency::read();
             }
             match ev.kind {
+                EV_ABS if keymap == Keymap::TrimUi => {
+                    events.extend(hat.feed(ev));
+                    events.extend(triggers.feed(ev));
+                }
                 EV_ABS => events.extend(hat.feed(ev)),
-                _ => events.extend(to_raw(ev)),
+                _ => events.extend(keymap.to_raw(ev)),
             }
         }
         if events.is_empty() {
@@ -159,11 +187,11 @@ impl Trace {
         }))
     }
 
-    fn event(&self, node: &str, ev: Ev) {
+    fn event(&self, node: &str, ev: Ev, keymap: Keymap) {
         if ev.kind == EV_SYN {
             return;
         }
-        let line = trace::event_line(node, self.began.elapsed().as_millis(), ev);
+        let line = trace::keyed_event_line(node, self.began.elapsed().as_millis(), ev, keymap);
         let mut out = self.out.lock().unwrap_or_else(|e| e.into_inner());
         let _ = writeln!(out, "{line}");
         let _ = out.flush();

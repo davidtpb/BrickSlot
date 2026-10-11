@@ -4,9 +4,11 @@ use std::time::{Duration, Instant};
 use slot::frontend::Frontend;
 use slot::input::DeviceInput;
 use slot_gfx::{Compositor, FbdevSurface, Surface};
-use slot_power::{trace_first_frame, DevicePlatform};
+use slot_power::{trace_first_frame, Board, DevicePlatform};
 
 const CARD: &str = "/mnt/sdcard";
+
+const TRIMUI_CARD: &str = "/mnt/SDCARD";
 
 const MIN_FRAME: Duration = Duration::from_millis(12);
 
@@ -71,10 +73,12 @@ pub fn run() {
     let audio = std::thread::Builder::new()
         .name("slot-audio-open".into())
         .spawn(slot::audio::opened_sink);
+    let board = Board::detect();
+    eprintln!("slot: board {board:?}");
     let root = std::env::var_os("SLOT_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(CARD));
-    let mut surface = match FbdevSurface::new() {
+        .unwrap_or_else(|| PathBuf::from(if board.is_trimui() { TRIMUI_CARD } else { CARD }));
+    let mut surface = match FbdevSurface::with_window(!board.is_trimui()) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("slot: {e}");
@@ -106,7 +110,12 @@ pub fn run() {
             return;
         }
     }
-    let platform = DevicePlatform::new(root.clone());
+    let platform = DevicePlatform::probe_board(
+        std::path::Path::new("/sys"),
+        std::path::Path::new("/dev"),
+        root.clone(),
+        board,
+    );
     eprintln!("slot: {}", platform.report());
     platform.trace_boot();
     slot::boot_time::mark("platform");
@@ -123,10 +132,12 @@ pub fn run() {
     slot::boot_time::mark("bezel");
     let mut input = DeviceInput::open(&root);
     slot::boot_time::mark("input");
-    let card = root.clone();
-    let _ = std::thread::Builder::new()
-        .name("slot-bootlogo".into())
-        .spawn(move || slot::bootlogo::refresh(&card));
+    if !board.is_trimui() {
+        let card = root.clone();
+        let _ = std::thread::Builder::new()
+            .name("slot-bootlogo".into())
+            .spawn(move || slot::bootlogo::refresh(&card));
+    }
     let mut drawn = false;
     frontend.drive_emulator();
     let mut pacer = Pacer::new();

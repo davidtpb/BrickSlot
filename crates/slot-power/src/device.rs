@@ -61,14 +61,73 @@ const EVIOCSFF: c_ulong = 0x4030_4580;
 
 const DISPDBG_MAX: u32 = 255;
 
+const DISP_MAX: u32 = 255;
+const DISP_LCD_SET_BRIGHTNESS: c_ulong = 0x102;
+
+const TRIMUI_MOTOR_GPIO: &str = "class/gpio/gpio227/value";
+const TRIMUI_MOTOR_VOLTAGE: &str = "class/motor/voltage";
+const TRIMUI_LED_ANIM: &str = "class/led_anim";
+
+pub const BOARD_VAR: &str = "SLOT_DEVICE";
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum Board {
+    #[default]
+    Anbernic,
+    TrimUiBrick,
+    TrimUiBrickPro,
+    TrimUiSmartPro,
+}
+
+impl Board {
+    pub fn detect() -> Board {
+        let device = std::env::var(BOARD_VAR).ok();
+        let cpuinfo = fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+        Board::from_hints(device.as_deref(), &cpuinfo)
+    }
+
+    pub fn from_hints(device: Option<&str>, cpuinfo: &str) -> Board {
+        let named = device.map(|d| d.trim().to_ascii_lowercase());
+        match named.as_deref() {
+            Some("brickpro" | "brick-pro" | "tg4040") => return Board::TrimUiBrickPro,
+            Some("brick" | "tg3040") => return Board::TrimUiBrick,
+            Some("smartpro" | "smart-pro" | "tg5040") => return Board::TrimUiSmartPro,
+            Some("anbernic" | "h700") => return Board::Anbernic,
+            _ => {}
+        }
+        if cpuinfo.contains("TG4040") {
+            Board::TrimUiBrickPro
+        } else if cpuinfo.contains("TG3040") {
+            Board::TrimUiBrick
+        } else if cpuinfo.contains("TG5040") {
+            Board::TrimUiSmartPro
+        } else {
+            Board::Anbernic
+        }
+    }
+
+    pub fn is_trimui(self) -> bool {
+        self != Board::Anbernic
+    }
+
+    fn motor_volts(self) -> u32 {
+        match self {
+            Board::TrimUiBrickPro => 2_500_000,
+            _ => 3_300_000,
+        }
+    }
+}
+
 enum Backlight {
     Class(PathBuf),
     Dispdbg(PathBuf),
+    Disp(PathBuf),
 }
 
 enum Led {
     Multi(PathBuf),
     Mono { dir: PathBuf, max: u32 },
+    Anim(PathBuf),
 }
 
 pub struct DevicePlatform {
@@ -80,14 +139,22 @@ pub struct DevicePlatform {
     rtc: Option<PathBuf>,
     motor: Option<Motor>,
     led: Option<Led>,
+    board: Board,
 }
 
 impl DevicePlatform {
     pub fn new(root: PathBuf) -> Self {
-        DevicePlatform::probe(Path::new("/sys"), root)
+        DevicePlatform::probe_board(Path::new("/sys"), Path::new("/dev"), root, Board::detect())
     }
 
     pub fn probe(sysfs: &Path, root: PathBuf) -> Self {
+        DevicePlatform::probe_board(sysfs, Path::new("/dev"), root, Board::Anbernic)
+    }
+
+    pub fn probe_board(sysfs: &Path, dev: &Path, root: PathBuf, board: Board) -> Self {
+        if board.is_trimui() {
+            return DevicePlatform::probe_trimui(sysfs, dev, root, board);
+        }
         let class = first_dir(&sysfs.join("class/backlight"), |d| {
             d.join("brightness").is_file()
         });
@@ -127,7 +194,44 @@ impl DevicePlatform {
             rtc,
             motor,
             led,
+            board,
         }
+    }
+
+    fn probe_trimui(sysfs: &Path, dev: &Path, root: PathBuf, board: Board) -> Self {
+        let disp = dev.join("disp");
+        let backlight = if disp.exists() {
+            Some(Backlight::Disp(disp))
+        } else {
+            first_dir(&sysfs.join("class/backlight"), |d| {
+                d.join("brightness").is_file()
+            })
+            .map(Backlight::Class)
+        };
+        let max_brightness = match &backlight {
+            Some(Backlight::Class(dir)) => {
+                read_number(&dir.join("max_brightness")).unwrap_or(DISP_MAX)
+            }
+            _ => DISP_MAX,
+        };
+        let motor = Motor::open(sysfs).or_else(|| Motor::gpio(sysfs, board));
+        let anim = sysfs.join(TRIMUI_LED_ANIM);
+        let led = anim.join("max_scale").is_file().then_some(Led::Anim(anim));
+        DevicePlatform {
+            root,
+            sysfs: sysfs.to_path_buf(),
+            backlight,
+            max_brightness,
+            battery: first_dir(&sysfs.join("class/power_supply"), is_battery),
+            rtc: first_dir(&sysfs.join("class/rtc"), |_| true),
+            motor,
+            led,
+            board,
+        }
+    }
+
+    pub fn board(&self) -> Board {
+        self.board
     }
 
     fn breadcrumb(&self, line: &str) {
@@ -159,6 +263,7 @@ impl DevicePlatform {
         let backlight = match &self.backlight {
             Some(Backlight::Class(dir)) => leaf(dir),
             Some(Backlight::Dispdbg(_)) => "dispdbg".to_string(),
+            Some(Backlight::Disp(_)) => "disp".to_string(),
             None => "no backlight".to_string(),
         };
         let motor = match &self.motor {
@@ -166,7 +271,8 @@ impl DevicePlatform {
             None => "no motor".to_string(),
         };
         format!(
-            "backlight {} (0 to {}), battery {}, {}, {motor}",
+            "{:?}: backlight {} (0 to {}), battery {}, {}, {motor}",
+            self.board,
             backlight,
             self.max_brightness,
             name(&self.battery, "no battery"),
@@ -209,10 +315,21 @@ pub fn motor_change(strength: u16, running: bool) -> Option<bool> {
 }
 
 struct Motor {
-    node: fs::File,
+    drive: Drive,
     name: String,
-    id: i16,
     running: bool,
+}
+
+enum Drive {
+    Ff {
+        node: fs::File,
+        id: i16,
+    },
+    Gpio {
+        value: PathBuf,
+        voltage: PathBuf,
+        volts: u32,
+    },
 }
 
 #[repr(C)]
@@ -299,37 +416,72 @@ impl Motor {
             return None;
         };
         Some(Motor {
-            node,
+            drive: Drive::Ff { node, id },
             name,
-            id,
+            running: false,
+        })
+    }
+
+    fn gpio(sysfs: &Path, board: Board) -> Option<Motor> {
+        let value = sysfs.join(TRIMUI_MOTOR_GPIO);
+        if !value.is_file() {
+            return None;
+        }
+        Some(Motor {
+            drive: Drive::Gpio {
+                value,
+                voltage: sysfs.join(TRIMUI_MOTOR_VOLTAGE),
+                volts: board.motor_volts(),
+            },
+            name: "gpio227".to_string(),
             running: false,
         })
     }
 
     fn play(&mut self, on: bool) {
-        if on {
-            match upload(&self.node, self.id).or_else(|| upload(&self.node, -1)) {
-                Some(id) => self.id = id,
-                None => eprintln!(
-                    "slot: rumble {}: {}",
-                    self.name,
-                    std::io::Error::last_os_error()
-                ),
+        match &mut self.drive {
+            Drive::Ff { node, id } => {
+                if on {
+                    match upload(node, *id).or_else(|| upload(node, -1)) {
+                        Some(new) => *id = new,
+                        None => eprintln!(
+                            "slot: rumble {}: {}",
+                            self.name,
+                            std::io::Error::last_os_error()
+                        ),
+                    }
+                }
+                let ev = FfEvent {
+                    sec: 0,
+                    usec: 0,
+                    kind: EV_FF,
+                    code: *id as u16,
+                    value: i32::from(on),
+                };
+                let bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        &ev as *const FfEvent as *const u8,
+                        size_of::<FfEvent>(),
+                    )
+                };
+                match (&*node).write_all(bytes) {
+                    Ok(()) => self.running = on,
+                    Err(e) => eprintln!("slot: rumble: {e}"),
+                }
             }
-        }
-        let ev = FfEvent {
-            sec: 0,
-            usec: 0,
-            kind: EV_FF,
-            code: self.id as u16,
-            value: i32::from(on),
-        };
-        let bytes = unsafe {
-            std::slice::from_raw_parts(&ev as *const FfEvent as *const u8, size_of::<FfEvent>())
-        };
-        match (&self.node).write_all(bytes) {
-            Ok(()) => self.running = on,
-            Err(e) => eprintln!("slot: rumble: {e}"),
+            Drive::Gpio {
+                value,
+                voltage,
+                volts,
+            } => {
+                if on && voltage.is_file() {
+                    let _ = fs::write(&*voltage, volts.to_string());
+                }
+                match fs::write(&*value, if on { "1" } else { "0" }) {
+                    Ok(()) => self.running = on,
+                    Err(e) => eprintln!("slot: rumble {}: {e}", value.display()),
+                }
+            }
         }
     }
 }
@@ -340,6 +492,25 @@ impl Drop for Motor {
             self.play(false);
         }
     }
+}
+
+const ANIM_STATIC: u32 = 4;
+const ANIM_SCALE: u32 = 30;
+
+fn disp_brightness(node: &Path, value: u32) -> std::io::Result<()> {
+    let disp = fs::OpenOptions::new().read(true).write(true).open(node)?;
+    let mut param: [c_ulong; 4] = [0, c_ulong::from(value), 0, 0];
+    let rc = unsafe {
+        ioctl(
+            disp.as_raw_fd(),
+            DISP_LCD_SET_BRIGHTNESS,
+            param.as_mut_ptr() as *mut c_void,
+        )
+    };
+    if rc < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 fn first_dir(parent: &Path, keep: impl Fn(&Path) -> bool) -> Option<PathBuf> {
@@ -408,6 +579,11 @@ impl Platform for DevicePlatform {
                 write(dir.join("param"), value.to_string());
                 write(dir.join("start"), "1".to_string());
             }
+            Backlight::Disp(node) => {
+                if let Err(e) = disp_brightness(node, value) {
+                    eprintln!("slot: {}: {e}", node.display());
+                }
+            }
         }
     }
 
@@ -445,6 +621,22 @@ impl Platform for DevicePlatform {
                 let on = !matches!(state, LedState::Off | LedState::Low);
                 let value = if on { *max } else { 0 };
                 let _ = fs::write(dir.join("brightness"), format!("{value}\n"));
+            }
+            Led::Anim(dir) => {
+                let rgb = match state {
+                    LedState::Off | LedState::Running => None,
+                    LedState::Low => Some("FF0000"),
+                    LedState::Charging => Some("FF8C00"),
+                    LedState::Charged => Some("00FF00"),
+                };
+                let Some(rgb) = rgb else {
+                    let _ = fs::write(dir.join("max_scale"), "0\n");
+                    return;
+                };
+                let _ = fs::write(dir.join("effect_rgb_hex_m"), format!("{rgb}\n"));
+                let _ = fs::write(dir.join("effect_duration_m"), "1000\n");
+                let _ = fs::write(dir.join("effect_m"), format!("{ANIM_STATIC}\n"));
+                let _ = fs::write(dir.join("max_scale"), format!("{ANIM_SCALE}\n"));
             }
         }
     }

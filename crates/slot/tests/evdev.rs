@@ -330,3 +330,63 @@ fn a_hat_axis_is_traced_as_the_axis_it_is() {
     assert!(line.contains("hat0y"), "{line}");
     assert!(!line.contains("ignored"), "{line}");
 }
+
+#[test]
+fn a_trimui_pad_is_recognised_by_its_name() {
+    use slot::input::evdev::Keymap;
+    assert_eq!(Keymap::for_device("TRIMUI Player1", None), Keymap::TrimUi);
+    assert_eq!(Keymap::for_device("H700 Gamepad", None), Keymap::Anbernic);
+    assert_eq!(
+        Keymap::for_device("H700 Gamepad", Some("trimui")),
+        Keymap::TrimUi
+    );
+    assert_eq!(
+        Keymap::for_device("TRIMUI Player1", Some("anbernic")),
+        Keymap::Anbernic
+    );
+    assert_eq!(
+        Keymap::for_device("TRIMUI Player1", Some("nonsense")),
+        Keymap::TrimUi
+    );
+}
+
+#[test]
+fn the_trimui_face_buttons_land_where_they_are_printed() {
+    use slot::input::evdev::Keymap;
+    let expected = [
+        (0x130, Btn::B),
+        (0x131, Btn::A),
+        (0x133, Btn::Y),
+        (0x134, Btn::X),
+        (0x136, Btn::L1),
+        (0x137, Btn::R1),
+        (0x13a, Btn::Select),
+        (0x13b, Btn::Start),
+        (0x13c, Btn::Menu),
+        (115, Btn::VolUp),
+        (114, Btn::VolDown),
+        (116, Btn::Power),
+    ];
+    for (code, want) in expected {
+        assert_eq!(Keymap::TrimUi.btn(code), Some(want), "code {code:#x}");
+    }
+    let down = decode(&packet(EV_KEY, 0x131, 1)).and_then(|ev| Keymap::TrimUi.to_raw(ev));
+    assert_eq!(down, Some(RawEvent::Down(Btn::A)));
+}
+
+#[test]
+fn trimui_triggers_press_past_half_travel_and_release_below_it() {
+    use slot::input::evdev::{Ev, Triggers, ABS_RZ, ABS_Z, EV_ABS};
+    let ev = |code, value| Ev {
+        kind: EV_ABS,
+        code,
+        value,
+    };
+    let mut t = Triggers::new(128);
+    assert_eq!(t.feed(ev(ABS_Z, 40)), None);
+    assert_eq!(t.feed(ev(ABS_Z, 255)), Some(RawEvent::Down(Btn::L2)));
+    assert_eq!(t.feed(ev(ABS_Z, 200)), None);
+    assert_eq!(t.feed(ev(ABS_Z, 0)), Some(RawEvent::Up(Btn::L2)));
+    assert_eq!(t.feed(ev(ABS_RZ, 255)), Some(RawEvent::Down(Btn::R2)));
+    assert_eq!(t.feed(ev(0x10, 1)), None, "a hat is not a trigger");
+}

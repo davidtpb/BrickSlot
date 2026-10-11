@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use super::evdev::{
-    code_to_btn, device_name, pick_devices, Ev, ABS_HAT0X, ABS_HAT0Y, EV_ABS, EV_KEY, EV_SW, SW_LID,
+    device_name, pick_devices, Ev, Keymap, ABS_HAT0X, ABS_HAT0Y, ABS_RZ, ABS_Z, EV_ABS, EV_KEY,
+    EV_SW, SW_LID,
 };
 
 pub const TRACE_VAR: &str = "SLOT_TRACE_INPUT";
@@ -54,11 +55,19 @@ pub fn survey(dev: &Path, sys: &Path) -> Vec<String> {
 }
 
 pub fn event_line(node: &str, ms: u128, ev: Ev) -> String {
+    keyed_event_line(node, ms, ev, Keymap::Anbernic)
+}
+
+pub fn keyed_event_line(node: &str, ms: u128, ev: Ev, keymap: Keymap) -> String {
     let btn = match ev.kind {
-        EV_KEY => code_to_btn(ev.code).map_or_else(|| "unmapped".to_string(), |b| format!("{b:?}")),
+        EV_KEY => keymap
+            .btn(ev.code)
+            .map_or_else(|| "unmapped".to_string(), |b| format!("{b:?}")),
         EV_SW if ev.code == SW_LID => "Lid".to_string(),
         EV_ABS if ev.code == ABS_HAT0X => "hat0x".to_string(),
         EV_ABS if ev.code == ABS_HAT0Y => "hat0y".to_string(),
+        EV_ABS if keymap == Keymap::TrimUi && ev.code == ABS_Z => "L2".to_string(),
+        EV_ABS if keymap == Keymap::TrimUi && ev.code == ABS_RZ => "R2".to_string(),
         _ => "ignored".to_string(),
     };
     format!(

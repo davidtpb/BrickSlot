@@ -98,3 +98,52 @@ fn style_in_the_screen_settings_switches_the_look_and_keeps_it() {
     press(&mut a, Btn::Right);
     assert!(!a.socket_look());
 }
+
+#[test]
+fn socket_settings_put_the_categories_left_and_the_page_right() {
+    let (_d, mut a) = shelf_with(Look::Socket);
+    a.apply(Action::QuickMenu);
+    assert_eq!(a.frame_split(), Some(slot_ui::SETTINGS_SPLIT));
+    let lines = a.settings_lines().expect("socket settings");
+    assert_eq!(lines[slot_ui::side_slot(0)].0, "Search");
+    assert_eq!(lines[slot_ui::side_slot(2)].0, "Gameplay");
+    assert!(lines[slot_ui::SETTINGS_CLOSE].0.ends_with("Close"));
+    while a.quick_menu() != Some(slot_ui::QuickRow::Game) {
+        press(&mut a, Btn::Down);
+    }
+    let lines = a.settings_lines().unwrap();
+    assert_eq!(lines[slot_ui::caption_slot(0)].0, "Fast Forward");
+    assert!(lines[slot_ui::side_slot(2)].1, "the category is not lit");
+    press(&mut a, Btn::A);
+    let lines = a.settings_lines().unwrap();
+    assert!(lines[slot_ui::SETTINGS_CLOSE].0.ends_with("Back"));
+    assert!(
+        lines[slot_ui::value_slot(0)].1,
+        "the first setting is not under the cursor"
+    );
+    assert!(lines[slot_ui::SETTINGS_HINT].0.ends_with("Change"));
+}
+
+#[test]
+fn the_power_menu_is_a_popup_in_the_socket_style() {
+    let (_d, mut a) = shelf_with(Look::Socket);
+    a.apply(Action::PowerHold);
+    assert!(a.power_menu().is_some());
+    let lines = a.settings_lines().expect("popup text");
+    assert_eq!(lines[slot_ui::POPUP_TITLE_SLOT].0, "Power");
+    assert_eq!(lines[slot_ui::option_slot(1)].0, "Power Off");
+    let mut out = Vec::new();
+    a.draw(&mut out);
+    assert!(
+        out.iter().any(|d| matches!(d, Draw::Rect { colour, .. } if colour[3] > 0.5 && colour[0] == 0.0 && colour[3] < 1.0)),
+        "nothing dims what lies under the popup"
+    );
+}
+
+#[test]
+fn the_classic_style_keeps_its_own_settings() {
+    let (_d, mut a) = shelf_with(Look::Classic);
+    a.apply(Action::QuickMenu);
+    assert!(a.settings_lines().is_none());
+    assert_eq!(a.frame_split(), Some(slot_ui::QUICK_SPLIT));
+}

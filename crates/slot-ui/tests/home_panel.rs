@@ -24,6 +24,7 @@ fn draw(panel: HomePanel, on: [bool; 6], levels: [f32; 2]) -> Vec<Draw> {
         panel,
         on,
         levels,
+        light: false,
     }
     .draw(&mut out);
     out

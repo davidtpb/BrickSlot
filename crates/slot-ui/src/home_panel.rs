@@ -130,6 +130,30 @@ const LEGEND_H: u32 = 36;
 
 const FRAME: f32 = 3.0;
 
+/// Where a taller screen opens the panel up in the Socket style: below the
+/// legend, across the card's plain foot.
+pub const HOME_SPLIT: f32 = 430.0;
+
+/// The face for one slot of the panel in the Socket style: dark Inter on
+/// the light card.
+pub fn home_face_light(slot: usize, label: &str, lit: bool) -> UndoFace {
+    use crate::socket::{inter_fit_face, INK_DARK};
+    let ink = if lit { INK_DARK } else { [96, 96, 96] };
+    let card_w = CARD_W - 2.0 * INSET;
+    let (px, min, h, w, ink) = match slot {
+        HOME_TITLE => (24.0, 15.0, TITLE_H, card_w - 120.0, INK_DARK),
+        HOME_CLOCK => (22.0, 15.0, TITLE_H, 110.0, INK_DARK),
+        HOME_LEGEND => (16.0, 11.0, LEGEND_H, card_w, [96, 96, 96]),
+        s if s < TILE_STATE0 => (17.0, 11.0, TILE_NAME_H, TILE_W - 8.0, INK_DARK),
+        s if s < SLIDER_NAME0 => (15.0, 10.0, TILE_STATE_H, TILE_W - 8.0, ink),
+        s if s < SLIDER_VALUE0 => (19.0, 13.0, 40, SLIDER_NAME_W - 10.0, ink),
+        s if s < STAT_NAME0 => (18.0, 12.0, 40, SLIDER_VALUE_W, INK_DARK),
+        s if s < STAT_VALUE0 => (14.0, 10.0, STAT_NAME_H, STAT_W - 8.0, [96, 96, 96]),
+        _ => (21.0, 12.0, STAT_VALUE_H, STAT_W - 8.0, INK_DARK),
+    };
+    inter_fit_face(label, px, min, h, ink, w)
+}
+
 /// The face for one slot of the panel, lit where it reads as on.
 pub fn home_face(slot: usize, label: &str, lit: bool) -> UndoFace {
     let ink = if lit { MENU_INK } else { DIM_INK };
@@ -227,19 +251,49 @@ pub struct HomeScreen<'a> {
     pub on: [bool; 6],
     /// Brightness and volume, each from 0 to 1.
     pub levels: [f32; 2],
+    /// Drawn light, for the Socket style.
+    pub light: bool,
+}
+
+struct Palette {
+    card: [f32; 4],
+    tile: [f32; 4],
+    row: [f32; 4],
+    on: [f32; 4],
+    frame: [f32; 4],
+}
+
+pub const SOCKET_ON: [f32; 4] = [0.14, 0.64, 0.47, 1.0];
+
+fn palette(light: bool) -> Palette {
+    match light {
+        true => Palette {
+            card: [0.86, 0.86, 0.86, 1.0],
+            tile: [0.93, 0.93, 0.93, 1.0],
+            row: [0.74, 0.74, 0.74, 1.0],
+            on: SOCKET_ON,
+            frame: [0.12, 0.12, 0.12, 1.0],
+        },
+        false => Palette {
+            card: opening(),
+            tile: recess(),
+            row: edge(),
+            on: HOME_ACCENT,
+            frame: [
+                MENU_INK[0] as f32 / 255.0,
+                MENU_INK[1] as f32 / 255.0,
+                MENU_INK[2] as f32 / 255.0,
+                1.0,
+            ],
+        },
+    }
 }
 
 fn rect(out: &mut Vec<Draw>, (x, y, w, h): (f32, f32, f32, f32), colour: [f32; 4]) {
     out.push(Draw::Rect { x, y, w, h, colour });
 }
 
-fn frame(out: &mut Vec<Draw>, (x, y, w, h): (f32, f32, f32, f32)) {
-    let ink = [
-        MENU_INK[0] as f32 / 255.0,
-        MENU_INK[1] as f32 / 255.0,
-        MENU_INK[2] as f32 / 255.0,
-        1.0,
-    ];
+fn frame(out: &mut Vec<Draw>, (x, y, w, h): (f32, f32, f32, f32), ink: [f32; 4]) {
     let (x, y, w, h) = (x - FRAME, y - FRAME, w + 2.0 * FRAME, h + 2.0 * FRAME);
     rect(out, (x, y, w, FRAME), ink);
     rect(out, (x, y + h - FRAME, w, FRAME), ink);
@@ -282,8 +336,9 @@ impl HomeScreen<'_> {
     }
 
     pub fn draw(&self, out: &mut Vec<Draw>) {
+        let pal = palette(self.light);
         rect(out, (0.0, 0.0, OUT_W as f32, OUT_H as f32), SHADE);
-        rect(out, (CARD_X, CARD_Y, CARD_W, CARD_H), opening());
+        rect(out, (CARD_X, CARD_Y, CARD_W, CARD_H), pal.card);
 
         let title = (
             CARD_X + INSET,
@@ -303,10 +358,10 @@ impl HomeScreen<'_> {
         let focus = self.panel.focus();
         for (i, tile) in HomeTile::ALL.iter().enumerate() {
             let r = tile_rect(i);
-            let fill = if self.on[i] { HOME_ACCENT } else { recess() };
+            let fill = if self.on[i] { pal.on } else { pal.tile };
             rect(out, r, fill);
             if focus == HomeFocus::Tile(*tile) {
-                frame(out, r);
+                frame(out, r, pal.frame);
             }
             let (x, y, w, _) = r;
             self.put(
@@ -335,7 +390,7 @@ impl HomeScreen<'_> {
                 rect(
                     out,
                     (CARD_X + 6.0, y + 2.0, CARD_W - 12.0, SLIDER_PITCH - 4.0),
-                    edge(),
+                    pal.row,
                 );
             }
             self.put(
@@ -345,11 +400,11 @@ impl HomeScreen<'_> {
                 true,
             );
             let track = track_rect(i);
-            rect(out, track, recess());
+            rect(out, track, pal.tile);
             let level = self.levels[i].clamp(0.0, 1.0);
             if level > 0.0 {
                 let (x, ty, w, h) = track;
-                rect(out, (x, ty, (w * level).round(), h), HOME_ACCENT);
+                rect(out, (x, ty, (w * level).round(), h), pal.on);
             }
             self.put(
                 out,
@@ -361,7 +416,7 @@ impl HomeScreen<'_> {
 
         for i in 0..HOME_STATS {
             let r = stat_rect(i);
-            rect(out, r, recess());
+            rect(out, r, pal.tile);
             let (x, y, w, _) = r;
             self.put(
                 out,

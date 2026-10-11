@@ -40,12 +40,12 @@ pub fn socket_bottom_slot(i: usize) -> usize {
     BOTTOM0 + i
 }
 
-const TOP_Y: f32 = 10.0;
-const TOP_H: u32 = 28;
+pub(crate) const TOP_Y: f32 = 10.0;
+pub(crate) const TOP_H: u32 = 28;
 const NAME_H: u32 = 34;
-const BOTTOM_H: u32 = 32;
-const EDGE: f32 = 12.0;
-const GAP: f32 = 8.0;
+pub(crate) const BOTTOM_H: u32 = 32;
+pub(crate) const EDGE: f32 = 12.0;
+pub(crate) const GAP: f32 = 8.0;
 pub const NAME_Y: f32 = 336.0;
 pub const BOTTOM_Y: f32 = OUT_H as f32 - EDGE - BOTTOM_H as f32;
 
@@ -70,7 +70,7 @@ const ROLL: (f32, f32) = (0.045, 4.2);
 const EYE: f32 = 2.4;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-enum Style {
+pub(crate) enum Style {
     /// White on near-black: the clock and the status.
     Dark,
     /// A shoulder button: a white key on near-black.
@@ -81,6 +81,10 @@ enum Style {
     Grey,
     /// A platform's name, set off when it is the one showing.
     Tab(bool),
+    /// Near-black on red: the way out of the settings.
+    Red,
+    /// Near-black on nothing, for a pill laid on a bar of its own.
+    Bare,
 }
 
 fn style_of(slot: usize, lit: bool) -> Style {
@@ -120,13 +124,16 @@ pub fn socket_pill_face(slot: usize, text: &str, lit: bool) -> UndoFace {
     pill(key, label, style_of(slot, lit), height_of(slot))
 }
 
-const INK_DARK: [u8; 3] = [24, 24, 24];
-const INK_LIGHT: [u8; 3] = [242, 242, 242];
-const INK_DIM: [u8; 3] = [108, 108, 108];
+pub(crate) const INK_DARK: [u8; 3] = [24, 24, 24];
+pub(crate) const INK_LIGHT: [u8; 3] = [242, 242, 242];
+pub(crate) const INK_DIM: [u8; 3] = [108, 108, 108];
 
-fn pill(key: Option<&str>, label: &str, style: Style, h: u32) -> UndoFace {
+pub(crate) fn pill(key: Option<&str>, label: &str, style: Style, h: u32) -> UndoFace {
     let hf = h as f32;
-    let px = (hf * 0.56).round();
+    let px = match style {
+        Style::Bare => 18.0,
+        _ => (hf * 0.56).round(),
+    };
     let pad = (hf * 0.42).round();
     let (bg, ink): (Option<([u8; 3], f32)>, [u8; 3]) = match style {
         Style::Dark | Style::Shoulder => (Some(([44, 44, 44], 1.0)), INK_LIGHT),
@@ -134,6 +141,8 @@ fn pill(key: Option<&str>, label: &str, style: Style, h: u32) -> UndoFace {
         Style::Grey => (Some(([150, 150, 150], 0.9)), INK_DARK),
         Style::Tab(true) => (Some(([204, 204, 204], 0.85)), INK_DARK),
         Style::Tab(false) => (None, INK_DIM),
+        Style::Red => (Some((crate::socket_menu::RED, 1.0)), INK_DARK),
+        Style::Bare => (None, INK_DARK),
     };
     let text_w = run_width(label, px);
     let key_w = match (style, key) {
@@ -235,7 +244,7 @@ impl Status {
     }
 }
 
-fn status_pill(st: &Status, h: u32) -> UndoFace {
+pub(crate) fn status_pill(st: &Status, h: u32) -> UndoFace {
     let hf = h as f32;
     let pad = hf * 0.42;
     let (bw, bh) = (hf * 0.82, hf * 0.42);
@@ -346,6 +355,55 @@ fn font_for(c: char) -> Option<&'static Font> {
     }
 }
 
+/// Text alone, in Inter, `h` high and as wide as it sets.
+pub fn inter_text_face(text: &str, px: f32, h: u32, ink: [u8; 3]) -> UndoFace {
+    if text.is_empty() {
+        return UndoFace {
+            rgba: Vec::new(),
+            w: 0,
+            h: 0,
+        };
+    }
+    let w = (run_width(text, px).ceil() as u32 + 4).max(1);
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    draw_run(&mut rgba, w, h, 2.0, px, text, ink);
+    UndoFace { rgba, w, h }
+}
+
+/// Text in Inter shrunk from `px` toward `min_px` until it fits `max_w`.
+pub fn inter_fit_face(
+    text: &str,
+    px: f32,
+    min_px: f32,
+    h: u32,
+    ink: [u8; 3],
+    max_w: f32,
+) -> UndoFace {
+    let mut at = px;
+    while at > min_px && run_width(text, at) > max_w {
+        at -= 1.0;
+    }
+    inter_text_face(text, at, h, ink)
+}
+
+/// A plain rounded block, for the bar behind a selected row.
+pub fn socket_bar_face(w: u32, h: u32) -> UndoFace {
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    rounded_rect(
+        &mut rgba,
+        w,
+        h,
+        0.0,
+        0.0,
+        w as f32,
+        h as f32,
+        h as f32 * 0.3,
+        [255, 255, 255],
+        1.0,
+    );
+    UndoFace { rgba, w, h }
+}
+
 /// How wide a run of text sets at `px`.
 pub fn run_width(text: &str, px: f32) -> f32 {
     let mut w = 0.0;
@@ -366,7 +424,7 @@ pub fn run_width(text: &str, px: f32) -> f32 {
 }
 
 /// Sets a run of text, its x-height centred in the face's height.
-fn draw_run(dst: &mut [u8], w: u32, h: u32, x: f32, px: f32, text: &str, ink: [u8; 3]) {
+pub(crate) fn draw_run(dst: &mut [u8], w: u32, h: u32, x: f32, px: f32, text: &str, ink: [u8; 3]) {
     let Some(inter) = inter_font() else {
         return;
     };
@@ -417,7 +475,7 @@ fn blend(dst: &mut [u8], w: u32, h: u32, x: i32, y: i32, rgb: [u8; 3], a: f32) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn rounded_rect(
+pub(crate) fn rounded_rect(
     dst: &mut [u8],
     w: u32,
     h: u32,

@@ -41,6 +41,10 @@ const KEYS_X: f32 = (OUT_W as f32 - KEY_W * SEARCH_COLS as f32) / 2.0;
 const LEGEND_Y: f32 = 430.0;
 const BAR_INSET: f32 = 3.0;
 
+/// Where a taller screen opens the search up in the Socket style: between
+/// the keys and the legend.
+pub const SEARCH_SPLIT: f32 = 424.0;
+
 /// The widest a result is ever drawn, however long the game's name.
 const HIT_MAX_W: f32 = 2048.0;
 const HIT_BOX_W: f32 = OUT_W as f32 - 2.0 * QUICK_EDGE;
@@ -121,6 +125,21 @@ pub struct SearchScreen<'a> {
     pub pick: Option<usize>,
     /// Milliseconds since the highlighted result was picked.
     pub picked_ms: u64,
+    /// Drawn light, for the Socket style.
+    pub light: bool,
+}
+
+/// The face for one slot of the search screen in the Socket style.
+pub fn search_face_light(slot: usize, label: &str, lit: bool) -> UndoFace {
+    use crate::socket::{inter_fit_face, inter_text_face, INK_DARK};
+    let ink = if lit { INK_DARK } else { [96, 96, 96] };
+    let line_w = OUT_W as f32 - 2.0 * QUICK_EDGE;
+    match slot {
+        SEARCH_QUERY => inter_fit_face(label, 24.0, 14.0, LINE_H, INK_DARK, line_w),
+        SEARCH_LEGEND => inter_fit_face(label, 16.0, 11.0, LINE_H, [96, 96, 96], line_w),
+        s if s <= SEARCH_HITS => inter_text_face(label, 22.0, LINE_H, ink),
+        _ => inter_fit_face(label, 20.0, 11.0, KEY_H, ink, KEY_W - 6.0),
+    }
 }
 
 impl SearchScreen<'_> {
@@ -156,15 +175,26 @@ impl SearchScreen<'_> {
             y: 0.0,
             w: OUT_W as f32,
             h: OUT_H as f32,
-            colour: opening(),
+            colour: match self.light {
+                true => [0.86, 0.86, 0.86, 1.0],
+                false => opening(),
+            },
         });
+        let bar = match self.light {
+            true => [0.97, 0.97, 0.97, 1.0],
+            false => edge(),
+        };
+        let key_bar = match self.light {
+            true => [0.74, 0.74, 0.74, 1.0],
+            false => edge(),
+        };
         if let Some(i) = self.pick {
             out.push(Draw::Rect {
                 x: 0.0,
                 y: HITS_Y + HIT_PITCH * i as f32 + BAR_INSET,
                 w: OUT_W as f32,
                 h: HIT_PITCH - 2.0 * BAR_INSET,
-                colour: edge(),
+                colour: bar,
             });
         }
         out.push(Draw::Rect {
@@ -172,7 +202,7 @@ impl SearchScreen<'_> {
             y: KEYS_Y + KEY_PITCH * self.row as f32 + BAR_INSET,
             w: KEY_W - 2.0 * BAR_INSET,
             h: KEY_PITCH - 2.0 * BAR_INSET,
-            colour: edge(),
+            colour: key_bar,
         });
         self.put(out, SEARCH_QUERY, QUICK_EDGE, QUERY_Y, None, LINE_H as f32);
         for i in 0..SEARCH_HITS {

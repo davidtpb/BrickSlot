@@ -24,6 +24,7 @@ mod shell;
 mod silhouette;
 mod slot_chrome;
 mod socket;
+mod socket_menu;
 mod sticker;
 pub mod text;
 mod toast;
@@ -48,10 +49,10 @@ pub use clock::{clock_label, date_time_text, hhmm, set_clock_hint_face, ClockPic
 pub use draw::{Draw, TexId, OUT_H, OUT_W};
 pub use footer::{draw_footer, Printed};
 pub use home_panel::{
-    home_face, home_slider_name_slot, home_slider_value_slot, home_stat_name_slot,
+    home_face, home_face_light, home_slider_name_slot, home_slider_value_slot, home_stat_name_slot,
     home_stat_value_slot, home_tile_name_slot, home_tile_state_slot, stat_rect, tile_rect,
     track_rect, HomeFocus, HomePanel, HomeScreen, HomeTile, CARD_H, CARD_W, CARD_X, CARD_Y,
-    HOME_ACCENT, HOME_CLOCK, HOME_LEGEND, HOME_SLOTS, HOME_STATS, HOME_TITLE,
+    HOME_ACCENT, HOME_CLOCK, HOME_LEGEND, HOME_SLOTS, HOME_SPLIT, HOME_STATS, HOME_TITLE,
 };
 pub use hud::{
     badge_at, ff_badge, FfState, Hud, HudKind, LinkBadge, Millis, ALARM_BAND_H, HUD_ICON_PX,
@@ -70,6 +71,7 @@ pub use plate::{
 };
 pub use polaroids::{photo_face, PhotoFace, Polaroids, DOT, LEGEND, PHOTO_H, PHOTO_W};
 pub use power_menu::{menu_face, PowerChoice, MENU_PAD};
+pub use quick_menu::window as quick_window;
 pub use quick_menu::{
     quick_caret_face, quick_label_face, quick_legend_faces, quick_value_face, QuickMenu,
     QuickMenuFaces, QuickRow, QuickValue, QUICK_EDGE, QUICK_PITCH, QUICK_SPLIT, QUICK_TOP,
@@ -78,8 +80,8 @@ pub use quick_menu::{
 pub use rebuild::{rebuild_count_face, rebuild_title_face, RebuildScreen};
 pub use refusal::Refusal;
 pub use search::{
-    scroll_offset, search_face, search_hit_slot, search_key_slot, SearchScreen, SEARCH_HITS,
-    SEARCH_LEGEND, SEARCH_QUERY, SEARCH_SLOTS,
+    scroll_offset, search_face, search_face_light, search_hit_slot, search_key_slot, SearchScreen,
+    SEARCH_HITS, SEARCH_LEGEND, SEARCH_QUERY, SEARCH_SLOTS, SEARCH_SPLIT,
 };
 pub use shelf::{foot_y, rest_y, set_shelf_slack, Shelf};
 pub use shell::{
@@ -93,9 +95,15 @@ pub use slot_chrome::{
     ALERT_PX, LIP_H, MOUTH_H, MOUTH_W,
 };
 pub use socket::{
-    inter_font, run_width, socket_backdrop, socket_bottom_slot, socket_pill_face, socket_tab_slot,
-    sway, tilt, SocketScreen, Status as SocketStatus, KEY_SEP, SOCKET_BOTTOM, SOCKET_CLOCK,
-    SOCKET_L, SOCKET_NAME, SOCKET_R, SOCKET_SLOTS, SOCKET_SPLIT, SOCKET_STATUS, SOCKET_TABS,
+    inter_font, inter_text_face, run_width, socket_backdrop, socket_bar_face, socket_bottom_slot,
+    socket_pill_face, socket_tab_slot, sway, tilt, SocketScreen, Status as SocketStatus, KEY_SEP,
+    SOCKET_BOTTOM, SOCKET_CLOCK, SOCKET_L, SOCKET_NAME, SOCKET_R, SOCKET_SLOTS, SOCKET_SPLIT,
+    SOCKET_STATUS, SOCKET_TABS,
+};
+pub use socket_menu::{
+    caption_slot, chrome_face, item_top, option_slot, settings_face, side_slot, value_slot, Card,
+    Chrome, SocketPopup, SocketSettings, ITEMS as SETTINGS_ITEMS, POPUP_CLOSE_SLOT, POPUP_OPTIONS,
+    POPUP_TITLE_SLOT, SETTINGS_CLOSE, SETTINGS_HINT, SETTINGS_SLOTS, SETTINGS_SPLIT,
 };
 pub use sticker::{
     draw_sticker, head_rows, sticker_face, sticker_lines, StickerFields, COPYRIGHT, CREDITS, DC,

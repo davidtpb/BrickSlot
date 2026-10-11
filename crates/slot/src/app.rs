@@ -256,6 +256,15 @@ enum CheevosLogin {
 pub const PLAY_FLUSH_MS: Millis = 60_000;
 
 #[derive(Debug)]
+struct SettingsModel {
+    side: Option<usize>,
+    on_side: bool,
+    cards: Vec<(String, String, bool)>,
+    focus: Option<usize>,
+    opens: bool,
+}
+
+#[derive(Debug)]
 pub enum Phase {
     SetClock {
         picker: ClockPicker,
@@ -332,6 +341,8 @@ pub struct App {
     search_picked_at: Millis,
     home: Option<slot_ui::HomePanel>,
     socket_backdrop: Option<TexId>,
+    socket_chrome: Vec<(TexId, u32, u32)>,
+    settings_faces: Vec<Option<(TexId, u32, u32)>>,
     socket_faces: Vec<Option<(TexId, u32, u32)>>,
     home_faces: Vec<Option<(TexId, u32, u32)>>,
     home_stats: crate::sysinfo::Stats,
@@ -475,6 +486,8 @@ impl App {
             search_picked_at: 0,
             home: None,
             socket_backdrop: None,
+            socket_chrome: Vec::new(),
+            settings_faces: Vec::new(),
             socket_faces: Vec::new(),
             home_faces: Vec::new(),
             home_stats: crate::sysinfo::Stats::default(),
@@ -1572,6 +1585,129 @@ impl App {
         }
     }
 
+    pub fn wants_socket_chrome(&self) -> bool {
+        self.socket_look() && self.socket_chrome.is_empty()
+    }
+
+    pub fn set_socket_chrome(&mut self, chrome: Vec<(TexId, u32, u32)>) {
+        self.socket_chrome = chrome;
+    }
+
+    pub fn set_settings_faces(&mut self, faces: Vec<Option<(TexId, u32, u32)>>) {
+        self.settings_faces = faces;
+    }
+
+    /// The settings as Socket lays them out for `row`: which category is lit
+    /// and whether the cursor is on it, and the cards on the right with the
+    /// first one showing and the one under the cursor.
+    fn settings_model(&self, row: QuickRow) -> SettingsModel {
+        let main = row.parent().unwrap_or(row);
+        let on_side = row.parent().is_none();
+        let (page, first, focus): (&[QuickRow], usize, Option<usize>) = match on_side {
+            true => match main.child() {
+                Some(child) => (child.page(), 0, None),
+                None => (&[], 0, None),
+            },
+            false => {
+                let (first, _) = slot_ui::quick_window(row);
+                (row.page(), first, Some(row.position() - first))
+            }
+        };
+        let mut cards: Vec<(String, String, bool)> = page
+            .iter()
+            .skip(first)
+            .take(slot_ui::SETTINGS_ITEMS)
+            .map(|r| {
+                let value = match r {
+                    QuickRow::DateTime => Some(slot_ui::date_time_text(self.wall_secs())),
+                    _ => self.quick_value(*r).map(|v| v.text().to_string()),
+                };
+                match value {
+                    Some(v) => (r.label().to_string(), v, r.opens()),
+                    None => (String::new(), r.label().to_string(), true),
+                }
+            })
+            .collect();
+        if page.is_empty() {
+            let about = match main {
+                QuickRow::DateTime => slot_ui::date_time_text(self.wall_secs()),
+                QuickRow::Search => "Find a game by name".to_string(),
+                _ => "brickslot".to_string(),
+            };
+            cards.push((main.label().to_string(), about, true));
+        }
+        SettingsModel {
+            side: QuickRow::MAIN.iter().position(|r| *r == main),
+            on_side,
+            cards,
+            focus,
+            opens: row.opens() || on_side,
+        }
+    }
+
+    fn draw_settings(&self, row: QuickRow, out: &mut Vec<Draw>) {
+        let model = self.settings_model(row);
+        let cards: Vec<slot_ui::Card> = model
+            .cards
+            .iter()
+            .map(|(_, _, opens)| slot_ui::Card { opens: *opens })
+            .collect();
+        slot_ui::SocketSettings {
+            chrome: &self.socket_chrome,
+            faces: &self.settings_faces,
+            sides: QuickRow::MAIN.len(),
+            side_lit: model.side,
+            side_focus: model.on_side,
+            cards: &cards,
+            card_focus: model.focus,
+        }
+        .draw(out);
+    }
+
+    /// The text for every slot of the Socket settings and power popup, while
+    /// either shows.
+    pub fn settings_lines(&self) -> Option<Vec<(String, bool)>> {
+        let row = match self.phase {
+            Phase::QuickMenu { row } => Some(row),
+            _ => None,
+        };
+        if !self.socket_look() || (row.is_none() && self.power_menu.is_none()) {
+            return None;
+        }
+        let key = |k: &str, label: &str| format!("{k}{}{label}", slot_ui::KEY_SEP);
+        let mut lines = vec![(String::new(), false); slot_ui::SETTINGS_SLOTS];
+        if let Some(row) = row {
+            let model = self.settings_model(row);
+            for (i, r) in QuickRow::MAIN.iter().enumerate() {
+                let label = match r {
+                    QuickRow::Game => "Gameplay",
+                    QuickRow::Search => "Search",
+                    _ => r.label(),
+                };
+                lines[slot_ui::side_slot(i)] = (label.to_string(), model.side == Some(i));
+            }
+            for (i, (caption, value, _)) in model.cards.iter().enumerate() {
+                lines[slot_ui::caption_slot(i)] = (caption.clone(), false);
+                lines[slot_ui::value_slot(i)] = (value.clone(), model.focus == Some(i));
+            }
+            let close = if model.on_side { "Close" } else { "Back" };
+            lines[slot_ui::SETTINGS_CLOSE] = (key("B", close), true);
+            let hint = match model.opens {
+                true => key("A", "Open"),
+                false => key("\u{2190}\u{2192}", "Change"),
+            };
+            lines[slot_ui::SETTINGS_HINT] = (hint, true);
+        }
+        if self.power_menu.is_some() {
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Power".into(), true);
+            for (i, c) in PowerChoice::ALL.iter().enumerate() {
+                lines[slot_ui::option_slot(i)] = (c.text().to_string(), true);
+            }
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+        }
+        Some(lines)
+    }
+
     pub fn wants_socket_backdrop(&self) -> bool {
         self.socket_look() && self.socket_backdrop.is_none()
     }
@@ -2425,6 +2561,11 @@ impl App {
 
     pub fn frame_split(&self) -> Option<f32> {
         match (&self.phase, self.power_menu) {
+            (Phase::Shelf, None) if self.socket_look() && self.home.is_some() => {
+                Some(slot_ui::HOME_SPLIT)
+            }
+            (Phase::Search, None) if self.socket_look() => Some(slot_ui::SEARCH_SPLIT),
+            (Phase::QuickMenu { .. }, None) if self.socket_look() => Some(slot_ui::SETTINGS_SPLIT),
             (Phase::QuickMenu { .. }, None) => Some(slot_ui::QUICK_SPLIT),
             (Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }, None)
                 if self.socket_look() =>
@@ -2828,7 +2969,7 @@ impl App {
     }
 
     pub fn draw(&self, out: &mut Vec<Draw>) {
-        if let Some(index) = self.power_menu {
+        if let Some(index) = self.power_menu.filter(|_| !self.socket_look()) {
             self.draw_power_menu(index, out);
             return;
         }
@@ -2873,6 +3014,7 @@ impl App {
                 picker.draw(line, hint, back, out);
                 return;
             }
+            Phase::QuickMenu { row } if self.socket_look() => self.draw_settings(*row, out),
             Phase::QuickMenu { row } => QuickMenu {
                 row: *row,
                 values: QuickRow::ALL.map(|r| self.quick_value(r)),
@@ -2982,6 +3124,7 @@ impl App {
                 col: self.search.col,
                 pick: (!self.search.hits.is_empty()).then_some(self.search.pick),
                 picked_ms: self.now().saturating_sub(self.search_picked_at),
+                light: self.socket_look(),
             }
             .draw(out),
         }
@@ -2990,6 +3133,15 @@ impl App {
         }
         if let Some(menu) = self.game_menu {
             self.draw_game_menu(menu, out);
+        }
+        if let Some(focus) = self.power_menu {
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: PowerChoice::ALL.len(),
+                focus,
+            }
+            .draw(out);
         }
         if let Some(panel) = self.home {
             slot_ui::HomeScreen {
@@ -3003,6 +3155,7 @@ impl App {
                         false => f32::from(self.level()) / f32::from(VOLUME_MAX),
                     },
                 ],
+                light: self.socket_look(),
             }
             .draw(out);
         }

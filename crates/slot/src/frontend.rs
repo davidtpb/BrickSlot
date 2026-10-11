@@ -58,6 +58,9 @@ pub struct Frontend {
     search_texes: Vec<SearchLine>,
     home_texes: Vec<SearchLine>,
     socket_texes: Vec<SearchLine>,
+    settings_texes: Vec<SearchLine>,
+    search_light: Option<bool>,
+    home_light: Option<bool>,
 }
 
 #[derive(Clone, Default)]
@@ -150,6 +153,9 @@ impl Frontend {
             search_texes: Vec::new(),
             home_texes: Vec::new(),
             socket_texes: Vec::new(),
+            settings_texes: Vec::new(),
+            search_light: None,
+            home_light: None,
         }
     }
 
@@ -306,12 +312,16 @@ impl Frontend {
         let Some(lines) = self.session.app().search_lines() else {
             return;
         };
-        if sync_lines(
-            &mut self.search_texes,
-            lines,
-            slot_ui::search_face,
-            compositor,
-        ) {
+        let light = self.session.app().socket_look();
+        let face = match light {
+            true => slot_ui::search_face_light,
+            false => slot_ui::search_face,
+        };
+        if self.search_light != Some(light) {
+            self.search_light = Some(light);
+            self.search_texes.iter_mut().for_each(|l| l.text = None);
+        }
+        if sync_lines(&mut self.search_texes, lines, face, compositor) {
             let faces = self.search_texes.iter().map(|l| l.face).collect();
             self.session.app_mut().set_search_faces(faces);
         }
@@ -323,6 +333,27 @@ impl Frontend {
             let b = slot_ui::socket_backdrop();
             let tex = compositor.create_texture(b.w, b.h, &b.rgba);
             self.session.app_mut().set_socket_backdrop(tex);
+        }
+        if self.session.app().wants_socket_chrome() {
+            let chrome = slot_ui::Chrome::ALL
+                .iter()
+                .map(|c| {
+                    let f = slot_ui::chrome_face(*c);
+                    (compositor.create_texture(f.w, f.h, &f.rgba), f.w, f.h)
+                })
+                .collect();
+            self.session.app_mut().set_socket_chrome(chrome);
+        }
+        if let Some(lines) = self.session.app().settings_lines() {
+            if sync_lines(
+                &mut self.settings_texes,
+                lines,
+                slot_ui::settings_face,
+                compositor,
+            ) {
+                let faces = self.settings_texes.iter().map(|l| l.face).collect();
+                self.session.app_mut().set_settings_faces(faces);
+            }
         }
         let Some(lines) = self.session.app().socket_lines() else {
             return;
@@ -343,7 +374,16 @@ impl Frontend {
         let Some(lines) = self.session.app().home_lines() else {
             return;
         };
-        if sync_lines(&mut self.home_texes, lines, slot_ui::home_face, compositor) {
+        let light = self.session.app().socket_look();
+        let face = match light {
+            true => slot_ui::home_face_light,
+            false => slot_ui::home_face,
+        };
+        if self.home_light != Some(light) {
+            self.home_light = Some(light);
+            self.home_texes.iter_mut().for_each(|l| l.text = None);
+        }
+        if sync_lines(&mut self.home_texes, lines, face, compositor) {
             let faces = self.home_texes.iter().map(|l| l.face).collect();
             self.session.app_mut().set_home_faces(faces);
         }

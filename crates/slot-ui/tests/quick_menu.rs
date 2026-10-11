@@ -130,6 +130,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::Network,
             QuickRow::Search,
             QuickRow::Labels,
+            QuickRow::BtDevices,
             QuickRow::JoinNetwork,
             QuickRow::WifiStatus
         ]

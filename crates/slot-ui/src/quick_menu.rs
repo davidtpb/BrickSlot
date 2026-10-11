@@ -40,6 +40,8 @@ pub enum QuickRow {
     Look,
     Tint,
     MenuSounds,
+    Bluetooth,
+    BtDevices,
     ClockFormat,
     JoinNetwork,
     StartFresh,
@@ -47,7 +49,7 @@ pub enum QuickRow {
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 38] = [
+    pub const ALL: [QuickRow; 40] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -82,6 +84,8 @@ impl QuickRow {
         QuickRow::Look,
         QuickRow::Tint,
         QuickRow::MenuSounds,
+        QuickRow::Bluetooth,
+        QuickRow::BtDevices,
         QuickRow::ClockFormat,
         QuickRow::JoinNetwork,
         QuickRow::StartFresh,
@@ -130,10 +134,12 @@ impl QuickRow {
         QuickRow::LightLevel,
     ];
 
-    pub const NETWORK: [QuickRow; 8] = [
+    pub const NETWORK: [QuickRow; 10] = [
         QuickRow::Wifi,
         QuickRow::WifiStatus,
         QuickRow::JoinNetwork,
+        QuickRow::Bluetooth,
+        QuickRow::BtDevices,
         QuickRow::AutoTime,
         QuickRow::FileTransfer,
         QuickRow::Syncthing,
@@ -167,7 +173,9 @@ impl QuickRow {
             | QuickRow::Labels
             | QuickRow::FileTransfer
             | QuickRow::JoinNetwork
-            | QuickRow::WifiStatus => &QuickRow::NETWORK,
+            | QuickRow::WifiStatus
+            | QuickRow::Bluetooth
+            | QuickRow::BtDevices => &QuickRow::NETWORK,
             QuickRow::FastForward
             | QuickRow::FastForwardSound
             | QuickRow::Rewind
@@ -245,6 +253,8 @@ impl QuickRow {
             QuickRow::JoinNetwork => "Join Network",
             QuickRow::StartFresh => "Start Fresh",
             QuickRow::WifiStatus => "Wi-Fi Status",
+            QuickRow::Bluetooth => "Bluetooth",
+            QuickRow::BtDevices => "Bluetooth Devices",
             QuickRow::FileTransfer => "File Transfer",
         }
     }
@@ -262,6 +272,7 @@ impl QuickRow {
                 | QuickRow::Labels
                 | QuickRow::JoinNetwork
                 | QuickRow::WifiStatus
+                | QuickRow::BtDevices
         )
     }
 

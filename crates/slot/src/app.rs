@@ -311,6 +311,12 @@ pub enum Phase {
         at: usize,
         scanning: bool,
     },
+    /// The Bluetooth devices known and in range, to connect one.
+    Bluetooth {
+        list: Vec<crate::bt::BtDevice>,
+        at: usize,
+        scanning: bool,
+    },
     /// Typing the password for a network.
     Password {
         ssid: String,
@@ -383,6 +389,7 @@ pub struct App {
     home_stats: crate::sysinfo::Stats,
     home_stats_at: Millis,
     net: crate::net::Net,
+    bt: crate::bt::Bt,
     cheevos_login: CheevosLogin,
     clock_asked: bool,
     file_server: Option<crate::fileserver::FileServer>,
@@ -540,6 +547,7 @@ impl App {
             home_stats: crate::sysinfo::Stats::default(),
             home_stats_at: 0,
             net: crate::net::Net::idle(),
+            bt: crate::bt::Bt::idle(),
             cheevos_login: CheevosLogin::Waiting,
             clock_asked: false,
             file_server: None,
@@ -615,6 +623,10 @@ impl App {
         app.favorites = slot_store::library::read_favorites(root);
         app.rebuild_favorites();
         app.net = crate::net::Net::spawn(root);
+        app.bt = crate::bt::Bt::spawn(root);
+        if app.state.bluetooth {
+            app.bt.send(crate::bt::BtJob::Up);
+        }
         if app.state.syncthing {
             app.net.send(NetJob::SyncthingStart);
         } else if app.state.wifi {
@@ -1751,6 +1763,7 @@ impl App {
             },
             Phase::Search => self.search_input(action),
             Phase::Networks { .. } => self.networks_input(action),
+            Phase::Bluetooth { .. } => self.bt_input(action),
             Phase::Password { .. } => self.password_input(action),
             Phase::Inserting { .. } if action == Action::Eject => self.eject(),
             Phase::Playing { .. } => match action {
@@ -1863,7 +1876,7 @@ impl App {
             || self.resume_popup.is_some()
             || self.inspect
             || self.recent_popup.is_some()
-            || matches!(self.phase, Phase::Networks { .. }))
+            || matches!(self.phase, Phase::Networks { .. } | Phase::Bluetooth { .. }))
             && self.socket_chrome.is_empty()
     }
 
@@ -1956,7 +1969,7 @@ impl App {
         let core_popup = self
             .core_popup
             .filter(|_| matches!(self.phase, Phase::Shelf));
-        let networks = matches!(self.phase, Phase::Networks { .. });
+        let networks = matches!(self.phase, Phase::Networks { .. } | Phase::Bluetooth { .. });
         let resume_popup = self
             .resume_popup
             .filter(|_| matches!(self.phase, Phase::Playing { .. }));
@@ -2088,6 +2101,32 @@ impl App {
             lines[slot_ui::option_slot(0)] = ("Load where you left off".into(), true);
             lines[slot_ui::option_slot(1)] = ("Keep playing".into(), true);
             lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+        }
+        if let Phase::Bluetooth { list, at, scanning } = &self.phase {
+            let (first, shown, _) = popup_window(list.len(), *at);
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Bluetooth Devices".into(), true);
+            if *scanning {
+                lines[slot_ui::option_slot(0)] = ("Looking for devices\u{2026}".into(), true);
+            } else if list.is_empty() {
+                lines[slot_ui::option_slot(0)] = ("No devices found".into(), true);
+            }
+            if !*scanning {
+                for (i, d) in list.iter().skip(first).take(shown).enumerate() {
+                    let state = match (d.connected, d.paired) {
+                        (true, _) => "   \u{2713} Connected",
+                        (false, true) => "   Paired",
+                        _ => "",
+                    };
+                    lines[slot_ui::option_slot(i)] = (format!("{}{state}", d.name), true);
+                }
+            }
+            let picked = list.get(*at).filter(|_| !*scanning);
+            let hint = match picked {
+                Some(d) if d.connected => "Close    Y  Scan    X  Forget    A  Disconnect",
+                Some(d) if d.paired => "Close    Y  Scan    X  Forget",
+                _ => "Close    Y  Scan again",
+            };
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", hint), true);
         }
         if let Phase::Networks { list, scanning, .. } = &self.phase {
             let (first, shown, _) = self.networks_window();
@@ -2675,6 +2714,84 @@ impl App {
         }
     }
 
+    fn open_bluetooth(&mut self) {
+        if !self.state.bluetooth {
+            self.state.bluetooth = true;
+            self.persist();
+            self.bt.send(crate::bt::BtJob::Up);
+        }
+        self.bt.send(crate::bt::BtJob::Scan);
+        self.phase = Phase::Bluetooth {
+            list: Vec::new(),
+            at: 0,
+            scanning: true,
+        };
+    }
+
+    /// Puts a device list on the Bluetooth screen, while it is up, keeping
+    /// the cursor on the device it was on.
+    pub fn bt_found(&mut self, found: Vec<crate::bt::BtDevice>) {
+        if let Phase::Bluetooth { list, at, scanning } = &mut self.phase {
+            let was = list.get(*at).map(|d| d.mac.clone());
+            *at = was
+                .and_then(|mac| found.iter().position(|d| d.mac == mac))
+                .unwrap_or(0);
+            *list = found;
+            *scanning = false;
+        }
+    }
+
+    pub fn bt_jobs(&self) -> &[crate::bt::BtJob] {
+        self.bt.sent()
+    }
+
+    fn bt_input(&mut self, action: Action) {
+        use crate::bt::BtJob;
+        let Phase::Bluetooth { list, at, scanning } = &mut self.phase else {
+            return;
+        };
+        let n = list.len();
+        let picked = list.get(*at).cloned().filter(|_| !*scanning);
+        match action {
+            Action::GbaDown(Btn::Up) if n > 0 && !*scanning => *at = (*at + n - 1) % n,
+            Action::GbaDown(Btn::Down) if n > 0 && !*scanning => *at = (*at + 1) % n,
+            Action::GbaDown(Btn::Y) if !*scanning => {
+                *scanning = true;
+                self.bt.send(BtJob::Scan);
+            }
+            Action::GbaDown(Btn::A) => {
+                let Some(d) = picked else {
+                    return;
+                };
+                if d.connected {
+                    self.say(format!("Disconnecting {}", d.name), "");
+                    self.bt.send(BtJob::Disconnect { mac: d.mac });
+                } else {
+                    self.say(
+                        format!("Connecting {}\u{2026}", d.name),
+                        "Keep it in pairing mode",
+                    );
+                    self.bt.send(BtJob::Connect {
+                        mac: d.mac,
+                        name: d.name,
+                    });
+                }
+            }
+            Action::GbaDown(Btn::X) => {
+                if let Some(d) = picked.filter(|d| d.paired) {
+                    self.say(format!("Forgot {}", d.name), "");
+                    self.bt.send(BtJob::Forget { mac: d.mac });
+                }
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::BtDevices,
+                };
+            }
+            _ => {}
+        }
+    }
+
     fn back_to_join(&mut self) {
         self.phase = Phase::QuickMenu {
             row: QuickRow::JoinNetwork,
@@ -2920,6 +3037,7 @@ impl App {
             QuickRow::Search => self.open_search(),
             QuickRow::Labels => self.download_labels(),
             QuickRow::JoinNetwork => self.open_networks(),
+            QuickRow::BtDevices => self.open_bluetooth(),
             QuickRow::WifiStatus => {
                 self.say("Checking Wi-Fi\u{2026}", "");
                 self.net.send(NetJob::Status);
@@ -2933,6 +3051,7 @@ impl App {
             | QuickRow::Look
             | QuickRow::Tint
             | QuickRow::MenuSounds
+            | QuickRow::Bluetooth
             | QuickRow::ClockFormat
             | QuickRow::StartFresh
             | QuickRow::Turbo
@@ -3022,6 +3141,13 @@ impl App {
             QuickRow::LightColour => s.light_colour = s.light_colour.step(right),
             QuickRow::LightEffect => s.light_effect = s.light_effect.step(right),
             QuickRow::LightLevel => s.light_level = s.light_level.step(right),
+            QuickRow::Bluetooth => {
+                s.bluetooth = !s.bluetooth;
+                self.bt.send(match s.bluetooth {
+                    true => crate::bt::BtJob::Up,
+                    false => crate::bt::BtJob::Down,
+                });
+            }
             QuickRow::Wifi => {
                 s.wifi = !s.wifi;
                 if s.wifi {
@@ -3082,6 +3208,7 @@ impl App {
             | QuickRow::Search
             | QuickRow::Labels
             | QuickRow::JoinNetwork
+            | QuickRow::BtDevices
             | QuickRow::WifiStatus => return,
         }
         if QuickRow::LIGHTS.contains(&row) {
@@ -3316,6 +3443,9 @@ impl App {
             if let Some(found) = self.net.networks() {
                 self.networks_found(found);
             }
+        }
+        while let Some(found) = self.bt.devices() {
+            self.bt_found(found);
         }
         if slot_ui::twelve_hour() != self.state.clock_12h {
             slot_ui::set_twelve_hour(self.state.clock_12h);
@@ -3629,6 +3759,9 @@ impl App {
         self.play_hold();
         self.track_play();
         while let Some((title, detail)) = self.net.heard() {
+            self.say(title, detail);
+        }
+        while let Some((title, detail)) = self.bt.heard() {
             self.say(title, detail);
         }
         self.cheevos_tick();
@@ -4014,7 +4147,7 @@ impl App {
                 backdrop: self.socket_backdrop.filter(|_| self.socket_look()),
             }
             .draw(out),
-            Phase::Networks { .. } => {
+            Phase::Networks { .. } | Phase::Bluetooth { .. } => {
                 match self.socket_backdrop.filter(|_| self.socket_look()) {
                     Some(tex) => out.push(Draw::Tex {
                         x: 0.0,
@@ -4032,7 +4165,15 @@ impl App {
                         colour: [0.2, 0.2, 0.2, 1.0],
                     }),
                 }
-                let (_, shown, focus) = self.networks_window();
+                let (_, shown, focus) = match &self.phase {
+                    Phase::Bluetooth {
+                        list,
+                        at,
+                        scanning: false,
+                    } => popup_window(list.len(), *at),
+                    Phase::Bluetooth { .. } => (0, 0, None),
+                    _ => self.networks_window(),
+                };
                 slot_ui::SocketPopup {
                     chrome: &self.socket_chrome,
                     faces: &self.settings_faces,
@@ -5784,6 +5925,7 @@ fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue>
             false => QuickValue::Hour24,
         }),
         QuickRow::MenuSounds => Some(QuickValue::flag(s.menu_sounds)),
+        QuickRow::Bluetooth => Some(QuickValue::flag(s.bluetooth)),
         QuickRow::Tint => Some(match s.tint {
             slot_store::Tint::Default => QuickValue::TintDefault,
             slot_store::Tint::Pastel => QuickValue::TintPastel,
@@ -5841,6 +5983,7 @@ fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue>
         | QuickRow::Search
         | QuickRow::Labels
         | QuickRow::JoinNetwork
+        | QuickRow::BtDevices
         | QuickRow::WifiStatus => None,
     }
 }

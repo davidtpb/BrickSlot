@@ -149,7 +149,7 @@ fn colour_mode_lights_every_zone_and_off_darkens_them_all() {
 }
 
 #[test]
-fn rainbow_uses_the_top_bar_and_side_lights_own_effect() {
+fn rainbow_walks_the_lights_round_the_colour_wheel_and_stops_when_changed() {
     let (sys, dev) = brick_pro_tree();
     let mut p = brick_pro(&sys, &dev);
     p.set_led(LedState::Running);
@@ -159,15 +159,43 @@ fn rainbow_uses_the_top_bar_and_side_lights_own_effect() {
         effect: LightsEffect::Rainbow,
         percent: 50,
     });
-    assert_eq!(read(&sys, "class/led_anim/effect_m"), "16");
-    assert_eq!(read(&sys, "class/led_anim/effect_lr"), "16");
-    assert_eq!(read(&sys, "class/led_anim/effect_f1"), "8");
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let first = read(&sys, "class/led_anim/effect_rgb_hex_m");
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let later = read(&sys, "class/led_anim/effect_rgb_hex_m");
+    assert_ne!(first, later, "the colour never moved");
+    assert_eq!(
+        read(&sys, "class/led_anim/effect_m"),
+        "4",
+        "rainbow rides a static light"
+    );
+    assert_eq!(read(&sys, "class/led_anim/effect_rgb_hex_lr"), later);
+    p.set_lights(Lights {
+        mode: LightsMode::Colour,
+        rgb: 0x0000FF,
+        effect: LightsEffect::Static,
+        percent: 50,
+    });
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(
+        read(&sys, "class/led_anim/effect_rgb_hex_m"),
+        "0000FF",
+        "the rainbow kept going"
+    );
+}
+
+#[test]
+fn the_colour_wheel_lands_on_its_primaries() {
+    assert_eq!(slot_power::hue_rgb(0.0), 0xFF0000);
+    assert_eq!(slot_power::hue_rgb(120.0), 0x00FF00);
+    assert_eq!(slot_power::hue_rgb(240.0), 0x0000FF);
+    assert_eq!(slot_power::hue_rgb(360.0), 0xFF0000);
 }
 
 #[test]
 fn deep_sleep_writes_mem_to_the_kernels_power_state() {
     let (sys, dev) = brick_pro_tree();
-    let mut p = brick_pro(&sys, &dev);
+    let p = brick_pro(&sys, &dev);
     assert!(!p.can_deep_sleep(), "no /sys/power/state, no deep sleep");
     fs::create_dir_all(sys.path().join("power")).unwrap();
     fs::write(sys.path().join("power/state"), "").unwrap();

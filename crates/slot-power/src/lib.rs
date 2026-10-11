@@ -4,7 +4,7 @@ mod power;
 mod sim;
 
 pub use device::{
-    has_bit, motor_change, read_only, read_only_in, record_first_frame, rumble_node,
+    has_bit, hue_rgb, motor_change, read_only, read_only_in, record_first_frame, rumble_node,
     trace_first_frame, uptime_seconds, Board, DevicePlatform, BOARD_VAR,
 };
 pub use motor::Motor;

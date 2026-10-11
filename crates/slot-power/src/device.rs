@@ -144,6 +144,7 @@ pub struct DevicePlatform {
     lights: Lights,
     led_state: Option<LedState>,
     disp_dark: bool,
+    rainbow: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl DevicePlatform {
@@ -202,6 +203,7 @@ impl DevicePlatform {
             lights: Lights::default(),
             led_state: None,
             disp_dark: false,
+            rainbow: None,
         }
     }
 
@@ -237,6 +239,7 @@ impl DevicePlatform {
             lights: Lights::default(),
             led_state: None,
             disp_dark: false,
+            rainbow: None,
         }
     }
 
@@ -522,7 +525,60 @@ fn battery_colour(state: LedState) -> Option<u32> {
     }
 }
 
-const ANIM_ZONE_RAINBOW: u32 = 16;
+const RAINBOW_TICK: Duration = Duration::from_millis(120);
+
+/// Degrees the hue moves each tick: a full turn in about six seconds.
+const RAINBOW_STEP: f32 = 7.0;
+
+/// Cycles the lit zones round the colour wheel until the flag it hands back
+/// is set. The light driver only fades between two colours, so the turning
+/// is done here.
+fn spawn_rainbow(dir: PathBuf, lit: usize) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    let spawned = std::thread::Builder::new()
+        .name("slot-rainbow".into())
+        .spawn(move || {
+            let mut hue = 0.0f32;
+            while !flag.load(Ordering::Relaxed) {
+                let rgb = hue_rgb(hue);
+                for (zone, _) in &ANIM_ZONES[..lit] {
+                    let _ = fs::write(
+                        dir.join(format!("effect_rgb_hex_{zone}")),
+                        format!("{rgb:06X}\n"),
+                    );
+                    let _ = fs::write(dir.join(format!("effect_{zone}")), "4\n");
+                    if *zone == "f1" {
+                        let _ = fs::write(dir.join("effect_rgb_hex_f2"), format!("{rgb:06X}\n"));
+                        let _ = fs::write(dir.join("effect_f2"), "4\n");
+                    }
+                }
+                hue = (hue + RAINBOW_STEP) % 360.0;
+                std::thread::sleep(RAINBOW_TICK);
+            }
+        });
+    if let Err(e) = spawned {
+        eprintln!("slot: rainbow: {e}");
+    }
+    stop
+}
+
+/// A fully saturated, full brightness colour at `hue` degrees, as 0xRRGGBB.
+pub fn hue_rgb(hue: f32) -> u32 {
+    let h = hue.rem_euclid(360.0) / 60.0;
+    let x = 1.0 - (h % 2.0 - 1.0).abs();
+    let (r, g, b) = match h as u32 {
+        0 => (1.0, x, 0.0),
+        1 => (x, 1.0, 0.0),
+        2 => (0.0, 1.0, x),
+        3 => (0.0, x, 1.0),
+        4 => (x, 0.0, 1.0),
+        _ => (1.0, 0.0, x),
+    };
+    let byte = |v: f32| (v * 255.0).round() as u32;
+    byte(r) << 16 | byte(g) << 8 | byte(b)
+}
 
 const SUSPEND_TRIES: u32 = 5;
 
@@ -550,10 +606,9 @@ fn anim_zone(dir: &Path, zone: &str, rgb: u32, effect: LightsEffect) {
         LightsEffect::Static => (4, 1000),
         LightsEffect::Breathe => (2, 2000),
         LightsEffect::Blink => (5, 1000),
-        // The top bar and the side lights have their own rainbow, as
-        // NextUI's ledcontrol lists them for the Brick.
-        LightsEffect::Rainbow if matches!(zone, "m" | "lr") => (ANIM_ZONE_RAINBOW, 3000),
-        LightsEffect::Rainbow => (8, 3000),
+        // The Brick's driver has no rainbow of its own; spawn_rainbow walks
+        // the colour wheel over a static light instead.
+        LightsEffect::Rainbow => (4, 1000),
     };
     let write = |name: String, body: String| {
         let _ = fs::write(dir.join(name), body);
@@ -677,6 +732,9 @@ impl Platform for DevicePlatform {
 
     fn set_led(&mut self, state: LedState) {
         self.led_state = Some(state);
+        if let Some(stop) = self.rainbow.take() {
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         let Some(led) = &self.led else {
             return;
         };
@@ -724,12 +782,19 @@ impl Platform for DevicePlatform {
                 let Some((rgb, effect, percent)) = shown else {
                     return;
                 };
+                let shown_effect = match effect {
+                    LightsEffect::Rainbow => LightsEffect::Static,
+                    other => other,
+                };
                 for (zone, scale) in &ANIM_ZONES[..lit] {
-                    anim_zone(dir, zone, rgb, effect);
+                    anim_zone(dir, zone, rgb, shown_effect);
                     if *zone == "f1" {
-                        anim_zone(dir, "f2", rgb, effect);
+                        anim_zone(dir, "f2", rgb, shown_effect);
                     }
                     let _ = fs::write(dir.join(scale), format!("{percent}\n"));
+                }
+                if effect == LightsEffect::Rainbow {
+                    self.rainbow = Some(spawn_rainbow(dir.clone(), lit));
                 }
             }
         }

@@ -147,3 +147,19 @@ fn colour_mode_lights_every_zone_and_off_darkens_them_all() {
         assert_eq!(read(&sys, &format!("class/led_anim/{scale}")), "0");
     }
 }
+
+#[test]
+fn rainbow_uses_the_top_bar_and_side_lights_own_effect() {
+    let (sys, dev) = brick_pro_tree();
+    let mut p = brick_pro(&sys, &dev);
+    p.set_led(LedState::Running);
+    p.set_lights(Lights {
+        mode: LightsMode::Colour,
+        rgb: 0xFFFFFF,
+        effect: LightsEffect::Rainbow,
+        percent: 50,
+    });
+    assert_eq!(read(&sys, "class/led_anim/effect_m"), "16");
+    assert_eq!(read(&sys, "class/led_anim/effect_lr"), "16");
+    assert_eq!(read(&sys, "class/led_anim/effect_f1"), "8");
+}

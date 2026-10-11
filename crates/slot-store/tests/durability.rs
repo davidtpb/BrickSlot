@@ -209,6 +209,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             syncthing: false,
             achievements: false,
             save_format: slot_store::SaveFormat::RetroArch,
+            auto_time: true,
         }
     );
 }
@@ -424,6 +425,7 @@ fn the_light_settings_round_trip() {
         syncthing: true,
         achievements: true,
         save_format: slot_store::SaveFormat::Slot,
+        auto_time: false,
         ..SlotState::default()
     };
     write_slot_state(d.path(), &s).unwrap();

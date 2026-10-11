@@ -682,6 +682,8 @@ fn syncthing_brings_wifi_with_it_and_wifi_off_takes_syncthing_down() {
     assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::On));
     assert_eq!(a.quick_value(QuickRow::Syncthing), Some(QuickValue::On));
     press(&mut a, Btn::Up);
+    press(&mut a, Btn::Up);
+    assert_eq!(a.quick_menu(), Some(QuickRow::Wifi));
     press(&mut a, Btn::Right);
     assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::Off));
     assert_eq!(a.quick_value(QuickRow::Syncthing), Some(QuickValue::Off));
@@ -713,6 +715,8 @@ fn retroachievements_needs_wifi_and_goes_when_wifi_does() {
     assert!(read_slot_state(d.path()).achievements);
     press(&mut a, Btn::Up);
     press(&mut a, Btn::Up);
+    press(&mut a, Btn::Up);
+    assert_eq!(a.quick_menu(), Some(QuickRow::Wifi));
     press(&mut a, Btn::Right);
     assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::Off));
     assert_eq!(a.quick_value(QuickRow::Achievements), Some(QuickValue::Off));
@@ -737,4 +741,14 @@ fn save_format_flips_between_retroarch_and_slot_and_is_remembered() {
         a.quick_value(QuickRow::SaveFormat),
         Some(QuickValue::RetroArch)
     );
+}
+
+#[test]
+fn set_time_automatically_is_on_by_default_and_can_be_turned_off() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::AutoTime);
+    assert_eq!(a.quick_value(QuickRow::AutoTime), Some(QuickValue::On));
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::AutoTime), Some(QuickValue::Off));
+    assert!(!read_slot_state(d.path()).auto_time);
 }

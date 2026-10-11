@@ -310,6 +310,7 @@ pub struct App {
     messages: std::collections::VecDeque<(String, String)>,
     net: crate::net::Net,
     cheevos_login: CheevosLogin,
+    clock_asked: bool,
     play_key: Option<String>,
     play_ms: Millis,
     play_tick: Option<Millis>,
@@ -441,6 +442,7 @@ impl App {
             messages: std::collections::VecDeque::new(),
             net: crate::net::Net::idle(),
             cheevos_login: CheevosLogin::Waiting,
+            clock_asked: false,
             play_key: None,
             play_ms: 0,
             play_tick: None,
@@ -696,6 +698,7 @@ impl App {
             QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
             QuickRow::Syncthing => Some(QuickValue::flag(self.state.syncthing)),
             QuickRow::Achievements => Some(QuickValue::flag(self.state.achievements)),
+            QuickRow::AutoTime => Some(QuickValue::flag(self.state.auto_time)),
             QuickRow::SaveFormat => Some(match self.state.save_format {
                 SaveFormat::RetroArch => QuickValue::RetroArch,
                 SaveFormat::Slot => QuickValue::Slot,
@@ -1466,6 +1469,7 @@ impl App {
             | QuickRow::Syncthing
             | QuickRow::Achievements
             | QuickRow::SaveFormat
+            | QuickRow::AutoTime
             | QuickRow::Rumble => {}
         }
     }
@@ -1544,6 +1548,10 @@ impl App {
                 }
             }
             QuickRow::SaveFormat => s.save_format = s.save_format.other(),
+            QuickRow::AutoTime => {
+                s.auto_time = !s.auto_time;
+                self.clock_asked = false;
+            }
             QuickRow::Achievements => {
                 s.achievements = !s.achievements;
                 crate::cheevos::enable(s.achievements);
@@ -1993,6 +2001,46 @@ impl App {
             });
     }
 
+    fn clock_tick(&mut self) {
+        if !self.state.auto_time {
+            return;
+        }
+        if !self.clock_asked && self.net.online() {
+            self.clock_asked = true;
+            self.net.send(NetJob::SyncClock);
+        }
+        if let Some(utc) = self.net.clock() {
+            self.set_network_time(utc);
+        }
+    }
+
+    /// Takes the time a time server gave. The time zone stays the one picked
+    /// under Date & Time, so only the UTC clock moves.
+    pub fn set_network_time(&mut self, utc: i64) {
+        if let Some(power) = &mut self.power {
+            power.set_clock(utc);
+        }
+        let was_set = self.state.clock_set;
+        self.state.clock_set = true;
+        self.persist();
+        if matches!(
+            self.phase,
+            Phase::SetClock {
+                from_menu: false,
+                ..
+            }
+        ) {
+            self.start();
+        }
+        let local = utc + i64::from(self.state.utc_offset_min) * 60;
+        let (h, m) = (local.rem_euclid(86_400) / 3600, local.rem_euclid(3600) / 60);
+        let detail = match was_set {
+            true => format!("{h:02}:{m:02}"),
+            false => format!("{h:02}:{m:02} UTC, set your time zone in Date & Time"),
+        };
+        self.say("Clock set from the internet", detail);
+    }
+
     fn cheevos_tick(&mut self) {
         if !self.state.achievements {
             return;
@@ -2036,6 +2084,7 @@ impl App {
             self.say(title, detail);
         }
         self.cheevos_tick();
+        self.clock_tick();
         let offer = self.undo_label();
         if let Some(p) = &mut self.polaroids {
             p.set_undo(offer);

@@ -522,11 +522,16 @@ fn battery_colour(state: LedState) -> Option<u32> {
     }
 }
 
+const ANIM_ZONE_RAINBOW: u32 = 16;
+
 fn anim_zone(dir: &Path, zone: &str, rgb: u32, effect: LightsEffect) {
     let (id, ms) = match effect {
         LightsEffect::Static => (4, 1000),
         LightsEffect::Breathe => (2, 2000),
         LightsEffect::Blink => (5, 1000),
+        // The top bar and the side lights have their own rainbow, as
+        // NextUI's ledcontrol lists them for the Brick.
+        LightsEffect::Rainbow if matches!(zone, "m" | "lr") => (ANIM_ZONE_RAINBOW, 3000),
         LightsEffect::Rainbow => (8, 3000),
     };
     let write = |name: String, body: String| {

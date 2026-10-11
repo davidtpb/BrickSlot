@@ -107,6 +107,8 @@ These live in the quick menu (tap MENU on the shelf).
 - **Network > Wi-Fi**: joins the networks you saved in TrimUI's own Wi-Fi menu. To add
   one by hand, put `ssid = ...` and `password = ...` lines in `Config/wifi.txt`. Link play
   borrows the radio and gives it back afterwards.
+- **Network > Set Time Automatically** (on by default): once Wi-Fi connects, the clock is
+  set from an internet time server. Your time zone stays the one picked under Date & Time.
 - **Network > Syncthing**: runs Syncthing so saves and states sync with your computer or
   another handheld. Once Wi-Fi is up a banner shows the address of its web page
   (`http://<ip>:8384`); share `Saves/` and `States/` from there. Its settings live in

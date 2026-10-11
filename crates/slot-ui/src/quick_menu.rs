@@ -32,10 +32,11 @@ pub enum QuickRow {
     Syncthing,
     Achievements,
     SaveFormat,
+    AutoTime,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 26] = [
+    pub const ALL: [QuickRow; 27] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -62,6 +63,7 @@ impl QuickRow {
         QuickRow::Syncthing,
         QuickRow::Achievements,
         QuickRow::SaveFormat,
+        QuickRow::AutoTime,
     ];
 
     pub const MAIN: [QuickRow; 6] = [
@@ -99,8 +101,12 @@ impl QuickRow {
         QuickRow::LightLevel,
     ];
 
-    pub const NETWORK: [QuickRow; 3] =
-        [QuickRow::Wifi, QuickRow::Syncthing, QuickRow::Achievements];
+    pub const NETWORK: [QuickRow; 4] = [
+        QuickRow::Wifi,
+        QuickRow::AutoTime,
+        QuickRow::Syncthing,
+        QuickRow::Achievements,
+    ];
 
     pub fn index(self) -> usize {
         self as usize
@@ -118,7 +124,9 @@ impl QuickRow {
             | QuickRow::LightColour
             | QuickRow::LightEffect
             | QuickRow::LightLevel => &QuickRow::LIGHTS,
-            QuickRow::Wifi | QuickRow::Syncthing | QuickRow::Achievements => &QuickRow::NETWORK,
+            QuickRow::Wifi | QuickRow::AutoTime | QuickRow::Syncthing | QuickRow::Achievements => {
+                &QuickRow::NETWORK
+            }
             QuickRow::FastForward
             | QuickRow::FastForwardSound
             | QuickRow::Rewind
@@ -182,6 +190,7 @@ impl QuickRow {
             QuickRow::Syncthing => "Syncthing",
             QuickRow::Achievements => "RetroAchievements",
             QuickRow::SaveFormat => "Save Format",
+            QuickRow::AutoTime => "Set Time Automatically",
         }
     }
 

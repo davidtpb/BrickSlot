@@ -49,7 +49,8 @@ net() {
 	SLOT_ROOT="$TMP/card" AGS_RUN="$TMP/run" AGS_NET_CONF="$TMP/etc/wpa.conf" \
 		AGS_NET_CTRL="$TMP/etc/sockets" AGS_IP="$TMP/bin/ip" AGS_NET_SYS="$TMP/sys" \
 		AGS_WPA_SUPPLICANT="$TMP/bin/wpa_supplicant" AGS_WPA_CLI="$TMP/bin/wpa_cli" \
-		AGS_WPA_PASSPHRASE="$TMP/bin/none" AGS_UDHCPC="$TMP/bin/udhcpc" sh "$SCRIPT" "$@"
+		AGS_WPA_PASSPHRASE="$TMP/bin/none" AGS_UDHCPC="$TMP/bin/udhcpc" \
+		AGS_NMCLI="${NMCLI_STUB:-$TMP/bin/none}" AGS_MODPROBE="$TMP/bin/none" sh "$SCRIPT" "$@"
 }
 
 fail() {
@@ -116,5 +117,29 @@ net up
 grep -q '^wpa_supplicant' "$LOG" && fail "a second wpa_supplicant was started beside the running one"
 grep -q '^udhcpc -i wlan0' "$LOG" || fail "no address was asked for through the running one"
 grep -q 'using the wpa_supplicant already' "$TMP/card/slot-net.log" || fail "the running one was not noted"
+
+# A system where NetworkManager looks after Wi-Fi.
+cat > "$TMP/bin/nmcli" <<STUB
+#!/bin/sh
+echo "nmcli \$*" >> "$LOG"
+case "\$*" in
+*RUNNING*) echo running ;;
+*"wifi list"*)
+	printf '90:WPA2:Home Net\n40:WPA2:Home Net\n60::Cafe\n70:WPA1 WPA2:Colon\\\\:Net\n'
+	;;
+esac
+exit 0
+STUB
+chmod +x "$TMP/bin/nmcli"
+: > "$LOG"
+out="$(NMCLI_STUB="$TMP/bin/nmcli" net scan)"
+[ "$(echo "$out" | head -n 1)" = "$(printf -- '-55\t[WPA2-PSK]\tHome Net')" ] || fail "NetworkManager's networks read wrong: $out"
+echo "$out" | grep -q "$(printf '\t\[ESS\]\tCafe$')" || fail "an open network was taken as locked: $out"
+echo "$out" | grep -q "$(printf '\tColon:Net$')" || fail "a colon in a name was lost: $out"
+grep -q '^wpa_supplicant' "$LOG" && fail "a wpa_supplicant was started beside NetworkManager"
+NMCLI_STUB="$TMP/bin/nmcli" NET_SSID="Home Net" NET_PSK="hunter22" net join
+grep -q 'nmcli dev wifi connect Home Net password hunter22 ifname wlan0' "$LOG" || fail "NetworkManager was not asked to join"
+NMCLI_STUB="$TMP/bin/nmcli" net pause
+grep -q 'nmcli dev set wlan0 managed no' "$LOG" || fail "link play would fight NetworkManager for wlan0"
 
 echo "net: all passed"

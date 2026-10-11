@@ -30,6 +30,8 @@ WPA_SUPPLICANT="${AGS_WPA_SUPPLICANT:-wpa_supplicant}"
 WPA_CLI="${AGS_WPA_CLI:-wpa_cli}"
 WPA_PASSPHRASE="${AGS_WPA_PASSPHRASE:-wpa_passphrase}"
 UDHCPC="${AGS_UDHCPC:-udhcpc}"
+NMCLI="${AGS_NMCLI:-nmcli}"
+MODPROBE="${AGS_MODPROBE:-modprobe}"
 
 STOCK_CONF="/etc/wifi/wpa_supplicant.conf"
 CARD_CONF="$SD/Config/wifi/wpa_supplicant.conf"
@@ -89,13 +91,16 @@ find_running() {
 # Writes what this system has to work with to the log, for when Wi-Fi
 # will not come up.
 diagnose() {
-	log "tools: $(for t in "$WPA_SUPPLICANT" "$WPA_CLI" "$UDHCPC" iw iwlist rfkill ip; do
+	log "tools: $(for t in "$WPA_SUPPLICANT" "$WPA_CLI" "$UDHCPC" "$NMCLI" connmanctl iw iwlist rfkill ip; do
 		command -v "$t" > /dev/null 2>&1 && printf '%s ' "$t" || printf '(no %s) ' "$t"
 	done)"
 	log "interfaces: $(ls "$NET" 2>/dev/null | tr '\n' ' ')"
 	log "rfkill: $(rfkill list 2>/dev/null | tr '\n' ' ' | head -c 300)"
 	log "running: $(ps 2>/dev/null | grep -E 'wpa_supplicant|udhcpc|hostapd|connman|NetworkManager' | grep -v grep | tr -s ' ' | tr '\n' ';' | head -c 400)"
 	log "control: $CTRL status: $(cli status 2>&1 | tr '\n' ' ' | head -c 300)"
+	log "modules: $(lsmod 2>/dev/null | awk 'NR > 1 { printf "%s ", $1 }' | head -c 400)"
+	log "kernel: $(uname -a 2>/dev/null)"
+	log "os: $(head -n 3 /etc/os-release 2>/dev/null | tr '\n' ' ')"
 }
 
 value() {
@@ -135,7 +140,50 @@ merge_wifi_txt() {
 	remember "$ssid" "$(value password)"
 }
 
+# Whether NetworkManager looks after Wi-Fi here, as on some H700 systems.
+# A wpa_supplicant of our own beside it would find nothing.
+nm() {
+	command -v "$NMCLI" > /dev/null 2>&1 &&
+		$NMCLI -t -f RUNNING general 2>/dev/null | grep -q '^running'
+}
+
+# Loads the Wi-Fi driver the H700 handhelds use when the interface has
+# not appeared on its own.
+load_driver() {
+	[ -d "$NET/$IFACE" ] && return 0
+	for m in 8821cs rtl8821cs 8723ds 8189fs aic8800_fdrv; do
+		$MODPROBE "$m" > /dev/null 2>&1 && log "loaded $m" && return 0
+	done
+	return 1
+}
+
+nm_scan() {
+	$NMCLI radio wifi on > /dev/null 2>&1
+	# SIGNAL is a percentage; turned into dBm here to match wpa_supplicant.
+	# Colons inside a field come escaped as \:.
+	$NMCLI -t -f SIGNAL,SECURITY,SSID dev wifi list --rescan yes 2>/dev/null |
+		awk '{
+			line = $0; gsub(/\\:/, "\001", line)
+			n = split(line, f, ":")
+			ssid = f[3]; for (i = 4; i <= n; i++) ssid = ssid ":" f[i]
+			gsub(/\001/, ":", ssid)
+			sec = (f[2] == "" || f[2] == "--") ? "[ESS]" : "[WPA2-PSK]"
+			printf "%d\t%s\t%s\n", f[1] / 2 - 100, sec, ssid
+		}'
+}
+
+nm_join() {
+	log "joining $1 through NetworkManager"
+	$NMCLI radio wifi on > /dev/null 2>&1
+	if [ -n "$2" ]; then
+		$NMCLI dev wifi connect "$1" password "$2" ifname "$IFACE" >> "$LOG" 2>&1
+	else
+		$NMCLI dev wifi connect "$1" ifname "$IFACE" >> "$LOG" 2>&1
+	fi
+}
+
 wait_iface() {
+	load_driver
 	w=0
 	while [ ! -d "$NET/$IFACE" ] && [ "$w" -lt 40 ]; do
 		sleep 0.25 2>/dev/null || sleep 1
@@ -160,6 +208,12 @@ dhcp() {
 start() {
 	log "up"
 	rfkill unblock wifi 2>/dev/null || rfkill.elf unblock wifi 2>/dev/null || true
+	if nm; then
+		log "NetworkManager looks after Wi-Fi here"
+		$NMCLI dev set "$IFACE" managed yes > /dev/null 2>&1
+		$NMCLI radio wifi on >> "$LOG" 2>&1
+		return 0
+	fi
 	wait_iface || return 1
 	$IP link set "$IFACE" up 2>/dev/null || true
 	pick_conf
@@ -188,6 +242,12 @@ start() {
 
 stop() {
 	log "down"
+	if nm; then
+		# Let go of the interface for link play rather than turn the radio off.
+		$NMCLI dev disconnect "$IFACE" > /dev/null 2>&1
+		$NMCLI dev set "$IFACE" managed no > /dev/null 2>&1
+		return 0
+	fi
 	pick_conf
 	find_running || true
 	cli terminate > /dev/null 2>&1
@@ -235,6 +295,12 @@ iwlist_scan() {
 
 scan() {
 	start > /dev/null 2>&1 || true
+	if nm; then
+		found="$(nm_scan | best)"
+		[ -n "$found" ] || { log "NetworkManager found no networks"; diagnose; }
+		[ -n "$found" ] && echo "$found"
+		return 0
+	fi
 	pick_conf
 	find_running || true
 	cli scan > /dev/null 2>&1
@@ -265,6 +331,10 @@ join() {
 	[ -n "$target" ] || { echo "no NET_SSID" >&2; return 2; }
 	touch "$WANT"
 	start || true
+	if nm; then
+		nm_join "$target" "${NET_PSK:-}"
+		return 0
+	fi
 	pick_conf
 	find_running || true
 	remember "$target" "${NET_PSK:-}"

@@ -255,6 +255,14 @@ enum CheevosLogin {
 
 pub const PLAY_FLUSH_MS: Millis = 60_000;
 
+/// The Customize panel while it is up: where its cursor is, and the cart's
+/// shell as it was, so an unchanged one is not written back.
+#[derive(Copy, Clone, Debug)]
+struct Customize {
+    panel: slot_ui::CustomizePanel,
+    before: Option<slot_store::ShellChoice>,
+}
+
 #[derive(Debug)]
 struct SettingsModel {
     side: Option<usize>,
@@ -342,6 +350,9 @@ pub struct App {
     home: Option<slot_ui::HomePanel>,
     socket_backdrop: Option<TexId>,
     socket_chrome: Vec<(TexId, u32, u32)>,
+    customize: Option<Customize>,
+    dropped_faces: Vec<TexId>,
+    shell_generation: u32,
     settings_faces: Vec<Option<(TexId, u32, u32)>>,
     socket_faces: Vec<Option<(TexId, u32, u32)>>,
     home_faces: Vec<Option<(TexId, u32, u32)>>,
@@ -487,6 +498,9 @@ impl App {
             home: None,
             socket_backdrop: None,
             socket_chrome: Vec::new(),
+            customize: None,
+            dropped_faces: Vec::new(),
+            shell_generation: 0,
             settings_faces: Vec::new(),
             socket_faces: Vec::new(),
             home_faces: Vec::new(),
@@ -759,6 +773,10 @@ impl App {
                 CpuMode::Saver => QuickValue::CpuSaver,
                 CpuMode::Performance => QuickValue::CpuPerformance,
             }),
+            QuickRow::ClockFormat => Some(match self.state.clock_12h {
+                true => QuickValue::Hour12,
+                false => QuickValue::Hour24,
+            }),
             QuickRow::Look => Some(match self.state.look {
                 Look::Classic => QuickValue::LookClassic,
                 Look::Socket => QuickValue::LookSocket,
@@ -946,7 +964,7 @@ impl App {
 
     pub fn shed_faces(&mut self) -> Vec<TexId> {
         let neighbours = self.neighbour_shelves();
-        let mut shed = Vec::new();
+        let mut shed = std::mem::take(&mut self.dropped_faces);
         for (at, (_, shelf)) in self.shelves.iter_mut().enumerate() {
             let keep = if at == self.shelf_at {
                 shelf.around(FACE_KEEP)
@@ -1424,6 +1442,12 @@ impl App {
             }
             return self.home_input(action);
         }
+        if self.customize.is_some() {
+            if self.adjust(action) {
+                return;
+            }
+            return self.customize_input(action);
+        }
         if let Phase::SetClock {
             picker, from_menu, ..
         } = &mut self.phase
@@ -1478,6 +1502,7 @@ impl App {
                 Action::GbaDown(Btn::L1) => self.switch_shelf(-1),
                 Action::GbaDown(Btn::R1) => self.switch_shelf(1),
                 Action::GbaDown(Btn::Y) => self.open_search(),
+                Action::GbaDown(Btn::X) => self.open_customize(),
                 Action::GbaDown(Btn::Home) => self.open_home(),
                 _ => {}
             },
@@ -1586,7 +1611,7 @@ impl App {
     }
 
     pub fn wants_socket_chrome(&self) -> bool {
-        self.socket_look() && self.socket_chrome.is_empty()
+        (self.socket_look() || self.customize.is_some()) && self.socket_chrome.is_empty()
     }
 
     pub fn set_socket_chrome(&mut self, chrome: Vec<(TexId, u32, u32)>) {
@@ -1671,7 +1696,12 @@ impl App {
             Phase::QuickMenu { row } => Some(row),
             _ => None,
         };
-        if !self.socket_look() || (row.is_none() && self.power_menu.is_none()) {
+        let customizing = self
+            .customize
+            .filter(|_| matches!(self.phase, Phase::Shelf));
+        let shown = (self.socket_look() && (row.is_some() || self.power_menu.is_some()))
+            || customizing.is_some();
+        if !shown {
             return None;
         }
         let key = |k: &str, label: &str| format!("{k}{}{label}", slot_ui::KEY_SEP);
@@ -1698,6 +1728,22 @@ impl App {
             };
             lines[slot_ui::SETTINGS_HINT] = (hint, true);
         }
+        if let Some(c) = customizing {
+            let material = slot_ui::Material::of(self.selected_shell());
+            lines[slot_ui::CUSTOM_TITLE] = ("Customize".into(), true);
+            lines[slot_ui::CUSTOM_MATERIAL] = ("Material".into(), true);
+            lines[slot_ui::CUSTOM_COLOUR] = ("Color".into(), true);
+            lines[slot_ui::CUSTOM_TYPE] = ("Type".into(), true);
+            lines[slot_ui::CUSTOM_TYPE_VALUE] = (material.name().into(), true);
+            lines[slot_ui::CUSTOM_CLOSE] = (key("B", "Close"), true);
+            if c.panel.popup.is_some() && self.power_menu.is_none() {
+                lines[slot_ui::POPUP_TITLE_SLOT] = ("Type".into(), true);
+                for (i, m) in slot_ui::Material::ALL.iter().enumerate() {
+                    lines[slot_ui::option_slot(i)] = (m.name().to_string(), true);
+                }
+                lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+            }
+        }
         if self.power_menu.is_some() {
             lines[slot_ui::POPUP_TITLE_SLOT] = ("Power".into(), true);
             for (i, c) in PowerChoice::ALL.iter().enumerate() {
@@ -1709,7 +1755,7 @@ impl App {
     }
 
     pub fn wants_socket_backdrop(&self) -> bool {
-        self.socket_look() && self.socket_backdrop.is_none()
+        (self.socket_look() || self.customize.is_some()) && self.socket_backdrop.is_none()
     }
 
     pub fn set_socket_backdrop(&mut self, tex: TexId) {
@@ -1722,12 +1768,11 @@ impl App {
 
     /// The text for every pill of the Socket shelf, while it shows.
     pub fn socket_lines(&self) -> Option<Vec<(String, bool)>> {
-        if !self.socket_look()
-            || !matches!(
-                self.phase,
-                Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }
-            )
-        {
+        let shelf_up = matches!(
+            self.phase,
+            Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }
+        );
+        if !shelf_up || !(self.socket_look() || self.customize.is_some()) {
             return None;
         }
         let key = |k: &str, label: &str| format!("{k}{}{label}", slot_ui::KEY_SEP);
@@ -1754,8 +1799,156 @@ impl App {
         }
         lines[slot_ui::socket_bottom_slot(0)] = (key("MENU", "Settings"), true);
         lines[slot_ui::socket_bottom_slot(1)] = (key("Y", "Search"), true);
-        lines[slot_ui::socket_bottom_slot(2)] = (key("START", "Core"), true);
+        lines[slot_ui::socket_bottom_slot(2)] = (key("X", "Customize"), true);
         Some(lines)
+    }
+
+    pub fn customize_open(&self) -> bool {
+        self.customize.is_some()
+    }
+
+    /// Bumped whenever a cart's shell changes, so the faces built from the
+    /// old one are built again.
+    pub fn shell_generation(&self) -> u32 {
+        self.shell_generation
+    }
+
+    pub fn selected_shell(&self) -> Option<slot_store::ShellChoice> {
+        self.shelf()
+            .carts
+            .get(self.shelf().index)
+            .and_then(|c| c.shell)
+    }
+
+    fn open_customize(&mut self) {
+        if self.core_picker.is_some() || self.shelf().carts.is_empty() {
+            return;
+        }
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+        self.customize = Some(Customize {
+            panel: slot_ui::CustomizePanel::default(),
+            before: self.selected_shell(),
+        });
+    }
+
+    fn close_customize(&mut self) {
+        let Some(c) = self.customize.take() else {
+            return;
+        };
+        let now = self.selected_shell();
+        if now == c.before {
+            return;
+        }
+        let (Some(root), Some(stem)) = (self.root.clone(), self.selected_stem().map(str::to_owned))
+        else {
+            return;
+        };
+        if let Err(e) = slot_store::cart_shell::save(&root, &stem, now) {
+            eprintln!("slot: customize: {e}");
+            self.say("Could not save the cart's colour", e.to_string());
+        }
+    }
+
+    /// Puts `shell` on the selected cart and has its face built again.
+    fn set_shell(&mut self, shell: Option<slot_store::ShellChoice>) {
+        let shelf = self.shelf_mut();
+        let index = shelf.index;
+        let Some(cart) = shelf.carts.get_mut(index) else {
+            return;
+        };
+        if cart.shell == shell {
+            return;
+        }
+        cart.shell = shell;
+        let old = shelf.take_face(index);
+        self.dropped_faces.extend(old);
+        self.shell_generation = self.shell_generation.wrapping_add(1);
+    }
+
+    fn customize_input(&mut self, action: Action) {
+        let Some(mut c) = self.customize else {
+            return;
+        };
+        let now = self.selected_shell();
+        match action {
+            Action::GbaDown(Btn::Up) => c.panel.up(),
+            Action::GbaDown(Btn::Down) => c.panel.down(),
+            Action::GbaDown(Btn::Left)
+            | Action::ShelfLeft
+            | Action::GbaDown(Btn::Right)
+            | Action::ShelfRight => {
+                let right = matches!(action, Action::GbaDown(Btn::Right) | Action::ShelfRight);
+                if c.panel.popup.is_none() && c.panel.focus == slot_ui::CustomFocus::Material {
+                    let all = slot_ui::Material::ALL;
+                    let at = all
+                        .iter()
+                        .position(|m| *m == slot_ui::Material::of(now))
+                        .unwrap_or(0);
+                    let to = match right {
+                        true => (at + 1) % all.len(),
+                        false => (at + all.len() - 1) % all.len(),
+                    };
+                    self.set_shell(slot_ui::with_material(now, all[to]));
+                } else {
+                    c.panel.step(right);
+                }
+            }
+            Action::GbaDown(Btn::A) => match (c.panel.popup, c.panel.focus) {
+                (Some(at), _) => {
+                    self.set_shell(slot_ui::with_material(now, slot_ui::Material::ALL[at]));
+                    c.panel.popup = None;
+                }
+                (None, slot_ui::CustomFocus::Material) => {
+                    c.panel.popup = slot_ui::Material::ALL
+                        .iter()
+                        .position(|m| *m == slot_ui::Material::of(now));
+                }
+                (None, slot_ui::CustomFocus::Swatch(i)) => {
+                    self.set_shell(Some(slot_ui::with_colour(now, slot_ui::SWATCHES[i])));
+                }
+            },
+            Action::GbaDown(Btn::B) | Action::GbaDown(Btn::X) if c.panel.popup.is_some() => {
+                c.panel.popup = None;
+            }
+            Action::GbaDown(Btn::B) | Action::GbaDown(Btn::X) => return self.close_customize(),
+            _ => {}
+        }
+        if self.customize.is_some() {
+            self.customize = Some(c);
+        }
+    }
+
+    fn draw_customize(&self, out: &mut Vec<Draw>) {
+        let Some(c) = self.customize else {
+            return;
+        };
+        let screen = self.socket_screen(0.0);
+        screen.draw_backdrop(out);
+        self.shelf()
+            .draw_socket_solo(self.now(), slot_ui::CUSTOM_CART_X, out);
+        screen.draw_clock(out);
+        screen.draw_name_at(slot_ui::CUSTOM_CART_X, out);
+        let chosen = self
+            .selected_shell()
+            .and_then(|s| slot_ui::SWATCHES.iter().position(|w| *w == s.colour));
+        slot_ui::CustomizeScreen {
+            chrome: &self.socket_chrome,
+            faces: &self.settings_faces,
+            panel: c.panel,
+            chosen,
+        }
+        .draw(out);
+        if let Some(Some((tex, w, h))) = self.settings_faces.get(slot_ui::CUSTOM_CLOSE).copied() {
+            out.push(Draw::Tex {
+                x: 12.0,
+                y: (OUT_H - 12) as f32 - h as f32,
+                w: w as f32,
+                h: h as f32,
+                tex,
+                alpha: 1.0,
+            });
+        }
     }
 
     pub fn home_open(&self) -> bool {
@@ -2097,6 +2290,7 @@ impl App {
             }
             QuickRow::EjectSave
             | QuickRow::Look
+            | QuickRow::ClockFormat
             | QuickRow::Turbo
             | QuickRow::Rewind
             | QuickRow::FastForward
@@ -2198,6 +2392,10 @@ impl App {
             }
             QuickRow::SaveFormat => s.save_format = s.save_format.other(),
             QuickRow::Look => s.look = s.look.other(),
+            QuickRow::ClockFormat => {
+                s.clock_12h = !s.clock_12h;
+                slot_ui::set_twelve_hour(s.clock_12h);
+            }
             QuickRow::FileTransfer => return self.toggle_file_transfer(),
             QuickRow::AutoTime => {
                 s.auto_time = !s.auto_time;
@@ -2462,6 +2660,9 @@ impl App {
         self.timers();
         self.poll_link();
         self.home_tick();
+        if slot_ui::twelve_hour() != self.state.clock_12h {
+            slot_ui::set_twelve_hour(self.state.clock_12h);
+        }
         let now = self.now();
         let ready = self.core_faces_ready();
         if let Some(picker) = &mut self.core_picker {
@@ -2540,6 +2741,7 @@ impl App {
         self.screen = (self.screen + step).clamp(0.0, 1.0);
         let docked = self.power_menu.is_none()
             && !self.socket_look()
+            && self.customize.is_none()
             && matches!(
                 self.phase,
                 Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }
@@ -2561,6 +2763,7 @@ impl App {
 
     pub fn frame_split(&self) -> Option<f32> {
         match (&self.phase, self.power_menu) {
+            (Phase::Shelf, None) if self.customize.is_some() => Some(slot_ui::SOCKET_SPLIT),
             (Phase::Shelf, None) if self.socket_look() && self.home.is_some() => {
                 Some(slot_ui::HOME_SPLIT)
             }
@@ -3022,6 +3225,7 @@ impl App {
                 faces: self.quick_menu_faces.as_ref(),
             }
             .draw(out),
+            Phase::Shelf if self.customize.is_some() => self.draw_customize(out),
             Phase::Shelf if self.socket_look() => {
                 let screen = self.socket_screen(0.0);
                 screen.draw_backdrop(out);
@@ -3133,6 +3337,19 @@ impl App {
         }
         if let Some(menu) = self.game_menu {
             self.draw_game_menu(menu, out);
+        }
+        if let Some(at) = self
+            .customize
+            .and_then(|c| c.panel.popup)
+            .filter(|_| matches!(self.phase, Phase::Shelf) && self.power_menu.is_none())
+        {
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: slot_ui::Material::ALL.len(),
+                focus: at,
+            }
+            .draw(out);
         }
         if let Some(focus) = self.power_menu {
             slot_ui::SocketPopup {

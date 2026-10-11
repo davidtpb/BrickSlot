@@ -33,9 +33,34 @@ pub fn clock_label(stamp: &str) -> String {
     parse_stamp(stamp).map(hhmm).unwrap_or_default()
 }
 
+static TWELVE_HOUR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Shows every clock as 12-hour time with AM or PM, or as 24-hour time.
+pub fn set_twelve_hour(on: bool) {
+    TWELVE_HOUR.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn twelve_hour() -> bool {
+    TWELVE_HOUR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub fn hhmm(secs: i64) -> String {
+    clock_text(secs, twelve_hour())
+}
+
+/// The time of day `secs` into it, as `21:07` or `9:07 PM`.
+pub fn clock_text(secs: i64, twelve: bool) -> String {
     let rem = secs.rem_euclid(DAY);
-    format!("{:02}:{:02}", rem / 3600, rem / 60 % 60)
+    let (h, m) = (rem / 3600, rem / 60 % 60);
+    if !twelve {
+        return format!("{h:02}:{m:02}");
+    }
+    let half = if h < 12 { "AM" } else { "PM" };
+    let h12 = match h % 12 {
+        0 => 12,
+        h => h,
+    };
+    format!("{h12}:{m:02} {half}")
 }
 
 const MONTHS: [&str; 12] = [

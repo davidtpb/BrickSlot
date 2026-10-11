@@ -23,10 +23,14 @@ pub enum Chrome {
     PopupRest,
     PopupFocus,
     PopupClose,
+    Panel,
+    PanelTitle,
+    PanelRow,
+    PanelRowFocus,
 }
 
 impl Chrome {
-    pub const ALL: [Chrome; 13] = [
+    pub const ALL: [Chrome; 17] = [
         Chrome::Card,
         Chrome::SideRest,
         Chrome::SideLit,
@@ -40,6 +44,10 @@ impl Chrome {
         Chrome::PopupRest,
         Chrome::PopupFocus,
         Chrome::PopupClose,
+        Chrome::Panel,
+        Chrome::PanelTitle,
+        Chrome::PanelRow,
+        Chrome::PanelRowFocus,
     ];
 
     pub fn index(self) -> usize {
@@ -95,6 +103,18 @@ fn chrome_size(c: Chrome) -> (u32, u32) {
         Chrome::PopupTitle | Chrome::PopupRest | Chrome::PopupFocus | Chrome::PopupClose => {
             ((POPUP_W - 2.0 * POPUP_PAD) as u32, POPUP_ROW as u32)
         }
+        Chrome::Panel => (
+            crate::customize::PANEL_W as u32,
+            crate::customize::PANEL_H as u32,
+        ),
+        Chrome::PanelTitle => (
+            crate::customize::PANEL_INNER_W as u32,
+            crate::customize::PANEL_TITLE_H as u32,
+        ),
+        Chrome::PanelRow | Chrome::PanelRowFocus => (
+            crate::customize::PANEL_INNER_W as u32,
+            crate::customize::PANEL_ROW_H as u32,
+        ),
     }
 }
 
@@ -163,6 +183,10 @@ pub fn chrome_face(c: Chrome) -> UndoFace {
         Chrome::Popup => block(w, h, 16.0, CARD, false),
         Chrome::PopupTitle => block(w, h, 8.0, POPUP_TITLE, false),
         Chrome::PopupClose => block(w, h, 8.0, RED, false),
+        Chrome::Panel => block(w, h, 16.0, CARD, false),
+        Chrome::PanelTitle => block(w, h, 8.0, POPUP_TITLE, false),
+        Chrome::PanelRow => block(w, h, 9.0, REST, false),
+        Chrome::PanelRowFocus => block(w, h, 10.0, FOCUS, true),
     }
 }
 
@@ -174,7 +198,13 @@ pub const SETTINGS_HINT: usize = SETTINGS_CLOSE + 1;
 pub const POPUP_TITLE_SLOT: usize = SETTINGS_HINT + 1;
 const OPTION0: usize = POPUP_TITLE_SLOT + 1;
 pub const POPUP_CLOSE_SLOT: usize = OPTION0 + POPUP_OPTIONS;
-pub const SETTINGS_SLOTS: usize = POPUP_CLOSE_SLOT + 1;
+pub const CUSTOM_TITLE: usize = POPUP_CLOSE_SLOT + 1;
+pub const CUSTOM_MATERIAL: usize = CUSTOM_TITLE + 1;
+pub const CUSTOM_COLOUR: usize = CUSTOM_MATERIAL + 1;
+pub const CUSTOM_TYPE: usize = CUSTOM_COLOUR + 1;
+pub const CUSTOM_TYPE_VALUE: usize = CUSTOM_TYPE + 1;
+pub const CUSTOM_CLOSE: usize = CUSTOM_TYPE_VALUE + 1;
+pub const SETTINGS_SLOTS: usize = CUSTOM_CLOSE + 1;
 
 pub fn side_slot(i: usize) -> usize {
     SIDE0 + i
@@ -218,6 +248,14 @@ pub fn settings_face(slot: usize, text: &str, _lit: bool) -> UndoFace {
             pill(k.as_deref(), &l, Style::Grey, FOOT_H)
         }
         POPUP_TITLE_SLOT => inter_text_face(text, 22.0, POPUP_ROW as u32, INK),
+        CUSTOM_TITLE => inter_text_face(text, 19.0, 40, INK),
+        CUSTOM_MATERIAL | CUSTOM_COLOUR => inter_text_face(text, 15.0, 22, CAPTION),
+        CUSTOM_TYPE => inter_text_face(text, 13.0, 18, CAPTION),
+        CUSTOM_TYPE_VALUE => inter_text_face(text, 19.0, 26, INK),
+        CUSTOM_CLOSE => {
+            let (k, l) = split(text);
+            pill(k.as_deref(), &l, Style::Red, FOOT_H)
+        }
         POPUP_CLOSE_SLOT => {
             let (k, l) = split(text);
             pill(k.as_deref(), &l, Style::Bare, POPUP_ROW as u32)
@@ -382,8 +420,11 @@ pub struct SocketPopup<'a> {
 }
 
 impl SocketPopup<'_> {
+    /// Centred, or higher where that would cross the split a taller screen
+    /// opens up below.
     pub fn top() -> f32 {
-        (OUT_H as f32 - popup_h(POPUP_OPTIONS)) / 2.0
+        let h = popup_h(POPUP_OPTIONS);
+        ((OUT_H as f32 - h) / 2.0).min(SETTINGS_SPLIT - 8.0 - h)
     }
 
     pub fn draw(&self, out: &mut Vec<Draw>) {
@@ -450,7 +491,7 @@ mod tests {
     #[test]
     fn the_popup_fits_on_the_screen() {
         assert!(SocketPopup::top() > 0.0);
-        assert!(SocketPopup::top() + popup_h(POPUP_OPTIONS) < OUT_H as f32);
+        assert!(SocketPopup::top() + popup_h(POPUP_OPTIONS) < SETTINGS_SPLIT);
     }
 
     #[test]

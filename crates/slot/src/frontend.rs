@@ -891,11 +891,14 @@ fn sync_core_picker(
     lid: &mut Option<TexId>,
     built: &mut Option<String>,
 ) {
-    let highlighted = app.selected_stem().map(str::to_string);
+    let stem = app.selected_stem().map(str::to_string);
+    let highlighted = stem
+        .as_ref()
+        .map(|s| format!("{s}\u{0}{}", app.shell_generation()));
     if highlighted.is_some() && *asked != highlighted {
         if let Some(cart) = app
             .carts()
-            .find(|c| highlighted.as_deref() == Some(c.stem.as_str()))
+            .find(|c| stem.as_deref() == Some(c.stem.as_str()))
         {
             builder.request(cart.clone());
         }
@@ -904,7 +907,10 @@ fn sync_core_picker(
     let Some(faces) = builder.take() else {
         return;
     };
-    if highlighted.as_deref() != Some(faces.stem.as_str()) || *built == highlighted {
+    if stem.as_deref() != Some(faces.stem.as_str())
+        || faces.shell != app.selected_shell()
+        || *built == highlighted
+    {
         return;
     }
     let board_id = upload_rgba(
@@ -916,7 +922,7 @@ fn sync_core_picker(
     );
     let lid_id = upload_rgba(compositor, lid, faces.lid.w, faces.lid.h, &faces.lid.rgba);
     app.set_core_board_faces(board_id, lid_id);
-    *built = Some(faces.stem);
+    *built = highlighted;
 }
 
 fn upload(compositor: &mut Compositor, slot: &mut Option<TexId>, face: slot_ui::UndoFace) -> TexId {

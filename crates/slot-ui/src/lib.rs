@@ -6,6 +6,7 @@ mod battery;
 mod board;
 mod cart;
 mod clock;
+mod customize;
 mod draw;
 mod footer;
 mod home_panel;
@@ -45,7 +46,14 @@ pub use cart::{
     CartFace, CART_H, CART_W, GB_CART_H, GB_CART_W, GB_LABEL_H, GB_LABEL_W, GB_LABEL_X, GB_LABEL_Y,
     LABEL_H, LABEL_W, LABEL_X, LABEL_Y,
 };
-pub use clock::{clock_label, date_time_text, hhmm, set_clock_hint_face, ClockPicker, Field};
+pub use clock::{
+    clock_label, clock_text, date_time_text, hhmm, set_clock_hint_face, set_twelve_hour,
+    twelve_hour, ClockPicker, Field,
+};
+pub use customize::{
+    swatch_rect, with_colour, with_material, CustomFocus, CustomizePanel, CustomizeScreen,
+    Material, CUSTOM_CART_X, SWATCHES, SWATCH_COLS,
+};
 pub use draw::{Draw, TexId, OUT_H, OUT_W};
 pub use footer::{draw_footer, Printed};
 pub use home_panel::{
@@ -102,8 +110,9 @@ pub use socket::{
 };
 pub use socket_menu::{
     caption_slot, chrome_face, item_top, option_slot, settings_face, side_slot, value_slot, Card,
-    Chrome, SocketPopup, SocketSettings, ITEMS as SETTINGS_ITEMS, POPUP_CLOSE_SLOT, POPUP_OPTIONS,
-    POPUP_TITLE_SLOT, SETTINGS_CLOSE, SETTINGS_HINT, SETTINGS_SLOTS, SETTINGS_SPLIT,
+    Chrome, SocketPopup, SocketSettings, CUSTOM_CLOSE, CUSTOM_COLOUR, CUSTOM_MATERIAL,
+    CUSTOM_TITLE, CUSTOM_TYPE, CUSTOM_TYPE_VALUE, ITEMS as SETTINGS_ITEMS, POPUP_CLOSE_SLOT,
+    POPUP_OPTIONS, POPUP_TITLE_SLOT, SETTINGS_CLOSE, SETTINGS_HINT, SETTINGS_SLOTS, SETTINGS_SPLIT,
 };
 pub use sticker::{
     draw_sticker, head_rows, sticker_face, sticker_lines, StickerFields, COPYRIGHT, CREDITS, DC,

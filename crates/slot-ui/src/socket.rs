@@ -583,6 +583,25 @@ impl Shelf {
     /// The carousel as Socket draws it. `ms` drives the sway; `zoom` runs
     /// from 0 to 1 as the selected cart is played, swelling it while the
     /// others fall away.
+    /// The selected cart alone, full size and swaying, centred on `cx`.
+    pub fn draw_socket_solo(&self, ms: u64, cx: f32, out: &mut Vec<Draw>) {
+        let Some(cart) = self.carts.get(self.index) else {
+            return;
+        };
+        let (yaw, pitch, roll) = sway(ms);
+        let wh = fit(MAIN_BOX, cart_box(cart.platform));
+        let (corners, q) = tilt((cx, ROW_Y), wh, yaw, pitch, roll);
+        if let Some(tex) = self.face(self.index) {
+            out.push(Draw::Warp {
+                corners,
+                q,
+                tex,
+                alpha: 1.0,
+                grey: 0.0,
+            });
+        }
+    }
+
     pub fn draw_socket(&self, ms: u64, zoom: f32, out: &mut Vec<Draw>) {
         let zoom = zoom.clamp(0.0, 1.0);
         let target = self.scroll_target();
@@ -703,10 +722,21 @@ impl SocketScreen<'_> {
         }
     }
 
+    /// The game's name alone, centred on `cx`.
+    pub fn draw_name_at(&self, cx: f32, out: &mut Vec<Draw>) {
+        let name = self.width(SOCKET_NAME);
+        self.put(out, SOCKET_NAME, cx - name / 2.0, NAME_Y);
+    }
+
     /// Everything but the carts: the bar along the top, the game's name and
     /// the controls along the bottom.
-    pub fn draw_pills(&self, out: &mut Vec<Draw>) {
+    /// The clock alone, top left.
+    pub fn draw_clock(&self, out: &mut Vec<Draw>) {
         self.put(out, SOCKET_CLOCK, EDGE, TOP_Y);
+    }
+
+    pub fn draw_pills(&self, out: &mut Vec<Draw>) {
+        self.draw_clock(out);
         let status = self.width(SOCKET_STATUS);
         self.put(out, SOCKET_STATUS, OUT_W as f32 - EDGE - status, TOP_Y);
 

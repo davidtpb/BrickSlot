@@ -38,10 +38,11 @@ pub enum QuickRow {
     Labels,
     FileTransfer,
     Look,
+    ClockFormat,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 32] = [
+    pub const ALL: [QuickRow; 33] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -74,6 +75,7 @@ impl QuickRow {
         QuickRow::Labels,
         QuickRow::FileTransfer,
         QuickRow::Look,
+        QuickRow::ClockFormat,
     ];
 
     pub const MAIN: [QuickRow; 7] = [
@@ -86,7 +88,7 @@ impl QuickRow {
         QuickRow::About,
     ];
 
-    pub const SCREEN: [QuickRow; 7] = [
+    pub const SCREEN: [QuickRow; 8] = [
         QuickRow::Brightness,
         QuickRow::Warmth,
         QuickRow::GbaShader,
@@ -94,6 +96,7 @@ impl QuickRow {
         QuickRow::ColourCorrection,
         QuickRow::GbPalettes,
         QuickRow::Look,
+        QuickRow::ClockFormat,
     ];
 
     pub const GAME: [QuickRow; 8] = [
@@ -135,7 +138,8 @@ impl QuickRow {
             | QuickRow::GbShader
             | QuickRow::ColourCorrection
             | QuickRow::GbPalettes
-            | QuickRow::Look => &QuickRow::SCREEN,
+            | QuickRow::Look
+            | QuickRow::ClockFormat => &QuickRow::SCREEN,
             QuickRow::LightMode
             | QuickRow::LightColour
             | QuickRow::LightEffect
@@ -214,6 +218,7 @@ impl QuickRow {
             QuickRow::Search => "Search Games",
             QuickRow::Performance => "Performance",
             QuickRow::Look => "Style",
+            QuickRow::ClockFormat => "Clock",
             QuickRow::Labels => "Download Labels",
             QuickRow::FileTransfer => "File Transfer",
         }
@@ -299,6 +304,8 @@ pub enum QuickValue {
     CpuPerformance,
     LookClassic,
     LookSocket,
+    Hour12,
+    Hour24,
 }
 
 impl QuickValue {
@@ -315,7 +322,7 @@ impl QuickValue {
         QuickValue::Level9,
     ];
 
-    pub const ALL: [QuickValue; 53] = [
+    pub const ALL: [QuickValue; 55] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -369,6 +376,8 @@ impl QuickValue {
         QuickValue::CpuPerformance,
         QuickValue::LookClassic,
         QuickValue::LookSocket,
+        QuickValue::Hour12,
+        QuickValue::Hour24,
     ];
 
     pub fn index(self) -> usize {
@@ -430,6 +439,8 @@ impl QuickValue {
             QuickValue::CpuPerformance => "Performance",
             QuickValue::LookClassic => "Slot",
             QuickValue::LookSocket => "Socket",
+            QuickValue::Hour12 => "12-hour",
+            QuickValue::Hour24 => "24-hour",
         }
     }
 

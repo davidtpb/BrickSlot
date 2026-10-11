@@ -212,6 +212,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             auto_time: true,
             cpu: slot_store::CpuMode::Stock,
             look: slot_store::Look::Classic,
+            clock_12h: false,
         }
     );
 }

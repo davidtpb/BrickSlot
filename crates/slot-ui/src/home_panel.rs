@@ -27,7 +27,7 @@ impl HomeTile {
 
     pub fn name(self) -> &'static str {
         match self {
-            HomeTile::Screenshot => "Shot",
+            HomeTile::Screenshot => "Screenshot",
             HomeTile::Sound => "Sound",
             HomeTile::Rumble => "Rumble",
             HomeTile::Wifi => "Wi-Fi",

@@ -91,3 +91,55 @@ pub fn layered(system: &str, labels: &str) -> HashMap<String, ShellChoice> {
     }
     out
 }
+
+/// Keeps `choice` for the cart `stem` in the card's own shell file, or
+/// forgets it so the cart goes back to its own colours.
+pub fn save(
+    root: &std::path::Path,
+    stem: &str,
+    choice: Option<ShellChoice>,
+) -> std::io::Result<()> {
+    let path = root.join(CART_SHELL_FILE);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
+    let value = choice.map(|c| c.to_value());
+    let out = crate::ini::set(&text, &key(stem), value.as_deref())?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    crate::atomic_write(&path, out.as_bytes())
+}
+
+#[cfg(test)]
+mod save_tests {
+    use super::*;
+
+    #[test]
+    fn a_saved_choice_reads_back_and_forgetting_it_leaves_the_rest() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("Config")).unwrap();
+        std::fs::write(
+            d.path().join(CART_SHELL_FILE),
+            "Other = auto 112233 solid\n",
+        )
+        .unwrap();
+        let pick = ShellChoice {
+            outline: Outline::Auto,
+            colour: [0x2e, 0xcc, 0x5c],
+            finish: ShellFinish::Clear,
+        };
+        save(d.path(), "Pokémon Emerald", Some(pick)).unwrap();
+        let text = std::fs::read_to_string(d.path().join(CART_SHELL_FILE)).unwrap();
+        let read = choices(&text);
+        assert_eq!(read.get(&key("Pokémon Emerald")), Some(&pick));
+        assert!(read.contains_key("Other"));
+        save(d.path(), "Pokémon Emerald", None).unwrap();
+        let text = std::fs::read_to_string(d.path().join(CART_SHELL_FILE)).unwrap();
+        let read = choices(&text);
+        assert!(!read.contains_key(&key("Pokémon Emerald")));
+        assert!(read.contains_key("Other"));
+    }
+}

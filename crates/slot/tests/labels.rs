@@ -59,7 +59,9 @@ fn an_error_page_is_not_saved_as_a_label() {
         stem: "Tetris".into(),
         dest: d.path().join("Tetris.png"),
     };
-    let tally = fetch_all(&[w.clone()], |_| Some(b"<html>404</html>".to_vec()));
+    let tally = fetch_all(std::slice::from_ref(&w), |_| {
+        Some(b"<html>404</html>".to_vec())
+    });
     assert_eq!(tally.missing, 1);
     assert!(!w.dest.exists());
 }
@@ -72,7 +74,7 @@ fn the_github_mirror_is_tried_when_the_server_has_nothing() {
         stem: "Metroid Fusion (USA)".into(),
         dest: d.path().join("Metroid Fusion (USA).png"),
     };
-    let tally = fetch_all(&[w.clone()], |u| {
+    let tally = fetch_all(std::slice::from_ref(&w), |u| {
         (u == "https://raw.githubusercontent.com/libretro-thumbnails/Nintendo_-_Game_Boy_Advance/master/Named_Boxarts/Metroid%20Fusion%20%28USA%29.png")
             .then(|| b"\x89PNG\r\n\x1a\nart".to_vec())
     });

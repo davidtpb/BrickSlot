@@ -46,6 +46,14 @@ impl Power {
         self.platform.set_led(state)
     }
 
+    pub fn can_deep_sleep(&self) -> bool {
+        self.platform.can_deep_sleep()
+    }
+
+    pub fn deep_sleep(&mut self) -> bool {
+        self.platform.deep_sleep()
+    }
+
     pub fn set_lights(&mut self, lights: Lights) {
         self.platform.set_lights(lights);
     }

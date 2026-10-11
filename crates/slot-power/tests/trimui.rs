@@ -163,3 +163,25 @@ fn rainbow_uses_the_top_bar_and_side_lights_own_effect() {
     assert_eq!(read(&sys, "class/led_anim/effect_lr"), "16");
     assert_eq!(read(&sys, "class/led_anim/effect_f1"), "8");
 }
+
+#[test]
+fn deep_sleep_writes_mem_to_the_kernels_power_state() {
+    let (sys, dev) = brick_pro_tree();
+    let mut p = brick_pro(&sys, &dev);
+    assert!(!p.can_deep_sleep(), "no /sys/power/state, no deep sleep");
+    fs::create_dir_all(sys.path().join("power")).unwrap();
+    fs::write(sys.path().join("power/state"), "").unwrap();
+    let mut p = brick_pro(&sys, &dev);
+    assert!(p.can_deep_sleep());
+    assert!(p.deep_sleep());
+    assert_eq!(read(&sys, "power/state"), "mem");
+}
+
+#[test]
+fn an_anbernic_still_powers_off_instead_of_deep_sleeping() {
+    let (sys, _dev) = brick_pro_tree();
+    fs::create_dir_all(sys.path().join("power")).unwrap();
+    fs::write(sys.path().join("power/state"), "").unwrap();
+    let p = DevicePlatform::probe(sys.path(), PathBuf::from("/mnt/sdcard"));
+    assert!(!p.can_deep_sleep());
+}

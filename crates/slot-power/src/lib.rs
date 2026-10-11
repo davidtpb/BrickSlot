@@ -91,6 +91,17 @@ pub trait Platform: Send {
 
     fn set_lights(&mut self, _lights: Lights) {}
 
+    /// Whether the handheld can suspend to RAM instead of powering off
+    /// after sleeping a while.
+    fn can_deep_sleep(&self) -> bool {
+        false
+    }
+
+    /// Suspends to RAM and returns once woken. False if it never slept.
+    fn deep_sleep(&mut self) -> bool {
+        false
+    }
+
     fn headphones(&self) -> bool {
         false
     }

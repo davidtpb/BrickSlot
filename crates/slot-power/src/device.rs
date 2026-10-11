@@ -524,6 +524,27 @@ fn battery_colour(state: LedState) -> Option<u32> {
 
 const ANIM_ZONE_RAINBOW: u32 = 16;
 
+const SUSPEND_TRIES: u32 = 5;
+
+/// Writes "mem" to /sys/power/state, which returns once the handheld wakes.
+/// As NextUI's suspend script found on the Brick, the write can report a
+/// failure after a real sleep, so anything longer than a few seconds counts
+/// as slept; a quick failure is retried a few times.
+fn suspend(state: &Path) -> bool {
+    for attempt in 1..=SUSPEND_TRIES {
+        let began = std::time::Instant::now();
+        match fs::write(state, "mem") {
+            Ok(()) => return true,
+            Err(_) if began.elapsed() > Duration::from_secs(5) => return true,
+            Err(e) => {
+                eprintln!("slot: suspend attempt {attempt}: {e}");
+                std::thread::sleep(Duration::from_secs(2));
+            }
+        }
+    }
+    false
+}
+
 fn anim_zone(dir: &Path, zone: &str, rgb: u32, effect: LightsEffect) {
     let (id, ms) = match effect {
         LightsEffect::Static => (4, 1000),
@@ -712,6 +733,28 @@ impl Platform for DevicePlatform {
                 }
             }
         }
+    }
+
+    fn can_deep_sleep(&self) -> bool {
+        self.board.is_trimui() && self.sysfs.join("power/state").is_file()
+    }
+
+    fn deep_sleep(&mut self) -> bool {
+        if !self.can_deep_sleep() {
+            return false;
+        }
+        self.breadcrumb("deep sleep: syncing");
+        let _ = Command::new("sync").status();
+        let net = self.root.join("System/net.sh");
+        let _ = Command::new("/bin/sh").arg(&net).arg("pause").status();
+        let slept = suspend(&self.sysfs.join("power/state"));
+        self.breadcrumb(if slept {
+            "deep sleep: woke"
+        } else {
+            "deep sleep: the kernel would not suspend"
+        });
+        let _ = Command::new("/bin/sh").arg(&net).arg("resume").spawn();
+        slept
     }
 
     fn set_lights(&mut self, lights: Lights) {

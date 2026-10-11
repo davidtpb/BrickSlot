@@ -197,6 +197,7 @@ pub fn trimui_code_to_btn(code: u16) -> Option<Btn> {
         0x13a => Btn::Select,
         0x13b => Btn::Start,
         0x13c => Btn::Menu,
+        172 => Btn::Home,
         115 => Btn::VolUp,
         114 => Btn::VolDown,
         116 => Btn::Power,
@@ -204,9 +205,9 @@ pub fn trimui_code_to_btn(code: u16) -> Option<Btn> {
     })
 }
 
-const WANTED: [u16; 16] = [
+const WANTED: [u16; 17] = [
     0x130, 0x131, 0x132, 0x133, 0x134, 0x135, 0x136, 0x137, 0x138, 0x13a, 0x13b, 0x13c, 0x162, 115,
-    114, 116,
+    114, 116, 172,
 ];
 
 pub use slot_power::has_bit;

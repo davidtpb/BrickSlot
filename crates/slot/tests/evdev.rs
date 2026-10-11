@@ -401,3 +401,9 @@ fn a_trimui_switch_event_is_never_taken_for_a_lid() {
         Some(RawEvent::Down(Btn::Lid))
     );
 }
+
+#[test]
+fn the_brick_pros_home_button_is_home() {
+    use slot::input::evdev::Keymap;
+    assert_eq!(Keymap::TrimUi.btn(172), Some(Btn::Home));
+}

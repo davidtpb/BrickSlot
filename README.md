@@ -72,6 +72,10 @@ exists, and brickslot's updater takes over from there.
 
 What changes on TrimUI hardware:
 
+- Sleep works like NextUI's deep sleep: a tap of power turns the screen off, and after
+  three minutes asleep (not while charging) the Brick Pro suspends to RAM instead of
+  powering off. Power wakes it straight back into the game.
+
 - Buttons come from TrimUI's own `trimui_inputd` pad, which numbers its buttons
   differently from the Anbernics, and sends L2/R2 as analog triggers. brickslot spots the pad by
   name; `export SLOT_KEYMAP=anbernic` in the updater turns that off.
@@ -97,7 +101,7 @@ saves, and the files in the old format are kept as `.bak`.
 
 These live in the quick menu (tap MENU on the shelf).
 
-- **Search Games** (or **Y** on the shelf): type part of a name on the on-screen keyboard
+- **Search Games** (or **Y**, or **Home** on the Brick Pro, on the shelf): type part of a name on the on-screen keyboard
   (D-pad to move, A to type, B to delete). Matching games from every shelf are listed as
   you type, ignoring accents and capitals. L/R picks one and START takes you to its cart.
 - **Lights** (TrimUI): show the battery state on the top bar, light every zone in one

@@ -228,6 +228,10 @@ pub const UNPLUG_HOLD_MS: Millis = 420;
 
 pub const PLAY_GAP_MS: Millis = 1000;
 
+/// The power press that woke the handheld from deep sleep arrives too; it
+/// must not put it straight back to sleep.
+pub const WAKE_GRACE_MS: Millis = 1500;
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum CheevosLogin {
     Waiting,
@@ -314,6 +318,7 @@ pub struct App {
     net: crate::net::Net,
     cheevos_login: CheevosLogin,
     clock_asked: bool,
+    power_quiet_until: Millis,
     play_key: Option<String>,
     play_ms: Millis,
     play_tick: Option<Millis>,
@@ -448,6 +453,7 @@ impl App {
             net: crate::net::Net::idle(),
             cheevos_login: CheevosLogin::Waiting,
             clock_asked: false,
+            power_quiet_until: 0,
             play_key: None,
             play_ms: 0,
             play_tick: None,
@@ -1291,6 +1297,13 @@ impl App {
     }
 
     pub fn apply(&mut self, action: Action) {
+        let power_key = matches!(
+            action,
+            Action::PowerPress | Action::PowerTap | Action::PowerHold | Action::PowerOff
+        );
+        if power_key && self.now() < self.power_quiet_until {
+            return;
+        }
         if self.power_menu.is_some() {
             match action {
                 Action::LidClose => {
@@ -1382,7 +1395,7 @@ impl App {
                 Action::Insert => self.insert(!self.state.eject_save),
                 Action::GbaDown(Btn::L1) => self.switch_shelf(-1),
                 Action::GbaDown(Btn::R1) => self.switch_shelf(1),
-                Action::GbaDown(Btn::Y) => self.open_search(),
+                Action::GbaDown(Btn::Y) | Action::GbaDown(Btn::Home) => self.open_search(),
                 _ => {}
             },
             Phase::Search => self.search_input(action),
@@ -1477,7 +1490,7 @@ impl App {
                 self.go_to_hit();
                 return;
             }
-            Action::QuickMenu => {
+            Action::QuickMenu | Action::GbaDown(Btn::Home) => {
                 self.phase = Phase::Shelf;
                 return;
             }
@@ -3067,6 +3080,24 @@ impl App {
     pub fn on_doze_timeout(&mut self) {
         if !matches!(self.phase, Phase::Doze { .. }) {
             return;
+        }
+        if self.power.as_ref().is_some_and(|p| p.can_deep_sleep()) {
+            if matches!(
+                self.power.as_ref().map(|p| p.charge()),
+                Some(Charge::Charging)
+            ) {
+                self.dozed_at = self.now();
+                return;
+            }
+            self.settle_saves();
+            eprintln!("slot: deep sleep at {:.1} ms", crate::boot_time::ms());
+            let slept = self.power.as_mut().is_some_and(|p| p.deep_sleep());
+            if slept {
+                eprintln!("slot: back from deep sleep");
+                self.power_quiet_until = self.now() + WAKE_GRACE_MS;
+                self.wake();
+                return;
+            }
         }
         self.begin_power_off();
     }

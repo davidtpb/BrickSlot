@@ -247,6 +247,7 @@ fn screen_opens_a_page_of_its_own_and_b_comes_back_to_it() {
     for want in [
         QuickRow::Warmth,
         QuickRow::Look,
+        QuickRow::Tint,
         QuickRow::ClockFormat,
         QuickRow::GbaShader,
         QuickRow::GbShader,

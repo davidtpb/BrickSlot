@@ -72,6 +72,32 @@ cli() {
 	$WPA_CLI -p "$CTRL" -i "$IFACE" "$@"
 }
 
+# Finds a wpa_supplicant already looking after the interface, the system's
+# own or one started earlier, and talks to it from then on.
+find_running() {
+	for d in "$CTRL" /var/run/wpa_supplicant /run/wpa_supplicant /etc/wifi/sockets \
+		/tmp/wpa_supplicant "$RUN/wpa_supplicant"; do
+		[ -n "$d" ] || continue
+		if $WPA_CLI -p "$d" -i "$IFACE" status > /dev/null 2>&1; then
+			CTRL="$d"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# Writes what this system has to work with to the log, for when Wi-Fi
+# will not come up.
+diagnose() {
+	log "tools: $(for t in "$WPA_SUPPLICANT" "$WPA_CLI" "$UDHCPC" iw iwlist rfkill ip; do
+		command -v "$t" > /dev/null 2>&1 && printf '%s ' "$t" || printf '(no %s) ' "$t"
+	done)"
+	log "interfaces: $(ls "$NET" 2>/dev/null | tr '\n' ' ')"
+	log "rfkill: $(rfkill list 2>/dev/null | tr '\n' ' ' | head -c 300)"
+	log "running: $(ps 2>/dev/null | grep -E 'wpa_supplicant|udhcpc|hostapd|connman|NetworkManager' | grep -v grep | tr -s ' ' | tr '\n' ';' | head -c 400)"
+	log "control: $CTRL status: $(cli status 2>&1 | tr '\n' ' ' | head -c 300)"
+}
+
 value() {
 	sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$WIFI_TXT" 2>/dev/null | head -n 1 | tr -d '\r'
 }
@@ -138,6 +164,11 @@ start() {
 	$IP link set "$IFACE" up 2>/dev/null || true
 	pick_conf
 	merge_wifi_txt
+	if find_running; then
+		log "using the wpa_supplicant already at $CTRL"
+		dhcp
+		return 0
+	fi
 	log "config $CONF, control $CTRL"
 	if ! cli status > /dev/null 2>&1; then
 		$WPA_SUPPLICANT -B -i "$IFACE" -c "$CONF" >> "$LOG" 2>&1 ||
@@ -158,6 +189,7 @@ start() {
 stop() {
 	log "down"
 	pick_conf
+	find_running || true
 	cli terminate > /dev/null 2>&1
 	[ -f "$RUN/slot-udhcpc.pid" ] && kill "$(cat "$RUN/slot-udhcpc.pid")" 2>/dev/null
 	rm -f "$RUN/slot-udhcpc.pid"
@@ -169,17 +201,63 @@ address() {
 	$IP -4 addr show "$IFACE" 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -n 1
 }
 
+# Keeps the strongest of each named network from signal<TAB>flags<TAB>ssid
+# lines, strongest first.
+best() {
+	awk -F '\t' 'NF >= 3 && $3 != "" {
+		if (!($3 in best) || $1 > best[$3]) { best[$3] = $1; flags[$3] = $2 }
+	} END { for (s in best) printf "%s\t%s\t%s\n", best[s], flags[s], s }' |
+		sort -t "$(printf '\t')" -k1,1nr
+}
+
+# The same lines from iw's scan, for when wpa_supplicant gives none.
+iw_scan() {
+	iw dev "$IFACE" scan 2>/dev/null | awk '
+		function out() { if (ssid != "") printf "%d\t%s\t%s\n", sig, flags, ssid }
+		/^BSS / { out(); ssid = ""; sig = -100; flags = "[ESS]" }
+		/signal:/ { sig = int($2) }
+		/SSID: / { sub(/^[ \t]*SSID: /, ""); ssid = $0 }
+		/RSN:|WPA:/ { flags = "[WPA2-PSK]" }
+		/Privacy/ { if (flags == "[ESS]") flags = "[WEP]" }
+		END { out() }'
+}
+
+# And from iwlist's, the oldest of the three.
+iwlist_scan() {
+	iwlist "$IFACE" scan 2>/dev/null | awk '
+		function out() { if (ssid != "") printf "%d\t%s\t%s\n", sig, flags, ssid }
+		/Cell [0-9]+/ { out(); ssid = ""; sig = -100; flags = "[ESS]" }
+		/Signal level=/ { s = $0; sub(/.*Signal level=/, "", s); sig = int(s) }
+		/ESSID:/ { s = $0; sub(/.*ESSID:"/, "", s); sub(/"$/, "", s); ssid = s }
+		/Encryption key:on/ { flags = "[WPA2-PSK]" }
+		END { out() }'
+}
+
 scan() {
 	start > /dev/null 2>&1 || true
 	pick_conf
+	find_running || true
 	cli scan > /dev/null 2>&1
 	sleep 4
-	# bssid freq signal flags ssid: keep the strongest of each named network.
-	cli scan_results 2>/dev/null | tail -n +2 |
-		awk -F '\t' 'NF >= 5 && $5 != "" {
-			if (!($5 in best) || $3 > best[$5]) { best[$5] = $3; flags[$5] = $4 }
-		} END { for (s in best) printf "%s\t%s\t%s\n", best[s], flags[s], s }' |
-		sort -t "$(printf '\t')" -k1,1nr
+	# bssid freq signal flags ssid
+	found="$(cli scan_results 2>/dev/null | tail -n +2 |
+		awk -F '\t' 'NF >= 5 { printf "%s\t%s\t%s\n", $3, $4, $5 }' | best)"
+	if [ -z "$found" ] && command -v iw > /dev/null 2>&1; then
+		log "wpa_supplicant found nothing, asking iw"
+		found="$(iw_scan | best)"
+	fi
+	if [ -z "$found" ] && command -v iwlist > /dev/null 2>&1; then
+		log "asking iwlist"
+		found="$(iwlist_scan | best)"
+	fi
+	if [ -z "$found" ]; then
+		log "scan found no networks"
+		diagnose
+	else
+		log "scan found $(echo "$found" | wc -l) networks"
+	fi
+	[ -n "$found" ] && echo "$found"
+	return 0
 }
 
 join() {
@@ -188,11 +266,29 @@ join() {
 	touch "$WANT"
 	start || true
 	pick_conf
+	find_running || true
 	remember "$target" "${NET_PSK:-}"
-	log "joining $target"
-	cli reconfigure > /dev/null 2>&1
-	id="$(cli list_networks 2>/dev/null | awk -F '\t' -v s="$target" '$2 == s { print $1 }' | tail -n 1)"
-	[ -n "$id" ] && cli select_network "$id" > /dev/null 2>&1
+	log "joining $target through $CTRL"
+	# Told to the running wpa_supplicant directly, so it does not matter
+	# whose config it read when it started.
+	for old in $(cli list_networks 2>/dev/null | awk -F '\t' -v s="$target" 'NR > 1 && $2 == s { print $1 }'); do
+		cli remove_network "$old" > /dev/null 2>&1
+	done
+	id="$(cli add_network 2>/dev/null | tail -n 1 | tr -dc '0-9')"
+	if [ -z "$id" ]; then
+		log "wpa_supplicant would not take a new network"
+		diagnose
+		return 1
+	fi
+	cli set_network "$id" ssid "\"$target\"" > /dev/null 2>&1
+	if [ -n "${NET_PSK:-}" ]; then
+		cli set_network "$id" psk "\"$NET_PSK\"" > /dev/null 2>&1
+	else
+		cli set_network "$id" key_mgmt NONE > /dev/null 2>&1
+	fi
+	cli enable_network "$id" > /dev/null 2>&1
+	cli select_network "$id" > /dev/null 2>&1
+	cli save_config > /dev/null 2>&1
 	dhcp
 	return 0
 }

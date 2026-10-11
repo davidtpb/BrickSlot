@@ -2025,6 +2025,7 @@ fn a_chorded_select_never_reaches_the_pad() {
 #[test]
 fn a_latched_fast_forward_does_not_outlive_the_cart() {
     let d = common::tmp_root_with_carts(&["Emerald", "Zzz"]);
+    common::taps_resume(d.path());
     let mut s = session_playing(d.path());
     s.feed([RawEvent::Down(Btn::R2)], 1000);
     s.feed([RawEvent::Up(Btn::R2)], 1050);

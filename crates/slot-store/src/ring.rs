@@ -86,6 +86,11 @@ impl StateRing {
         atomic_write(&self.path(RESUME, STATE_EXT), state)
     }
 
+    /// Whether the game was left with a state to pick up from.
+    pub fn has_resume(&self) -> bool {
+        self.path(RESUME, STATE_EXT).is_file()
+    }
+
     pub fn read_resume(&self) -> std::io::Result<Option<Vec<u8>>> {
         match std::fs::read(self.path(RESUME, STATE_EXT)) {
             Ok(b) => Ok(Some(b)),

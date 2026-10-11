@@ -51,6 +51,7 @@ pub struct SlotState {
     pub cpu: CpuMode,
     pub look: Look,
     pub clock_12h: bool,
+    pub ask_resume: bool,
 }
 
 /// How battery saves are written: RetroArch's `.srm` with the clock in a
@@ -233,6 +234,7 @@ impl Default for SlotState {
             cpu: CpuMode::Stock,
             look: Look::Classic,
             clock_12h: false,
+            ask_resume: true,
         }
     }
 }
@@ -251,7 +253,7 @@ pub fn read_slot_state(root: &Path) -> SlotState {
 
 pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     let text = format!(
-        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\nsave_format={}\nauto_time={}\ncpu={}\nlook={}\nclock_12h={}\n",
+        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\nsave_format={}\nauto_time={}\ncpu={}\nlook={}\nclock_12h={}\nask_resume={}\n",
         s.cart.as_deref().unwrap_or(""),
         s.cart_platform.map_or(String::new(), platform_key),
         s.brightness,
@@ -284,7 +286,8 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.auto_time as u8,
         s.cpu.name(),
         s.look.name(),
-        s.clock_12h
+        s.clock_12h,
+        s.ask_resume
     );
     atomic_write(&state_path(root), text.as_bytes())
 }
@@ -323,6 +326,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut cpu = None;
     let mut look = None;
     let mut clock_12h = None;
+    let mut ask_resume = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let Some((key, value)) = line.split_once('=') else {
             continue;
@@ -360,6 +364,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "cpu" => cpu = CpuMode::parse(value),
             "look" => look = Look::parse(value),
             "clock_12h" => clock_12h = value.parse().ok(),
+            "ask_resume" => ask_resume = value.parse().ok(),
             "shader_gb" => shader_gb = Shader::parse(value).filter(|s| Shader::GB.contains(s)),
             _ => {}
         }
@@ -400,6 +405,7 @@ fn parse(text: &str) -> Option<SlotState> {
         cpu: cpu.unwrap_or(fallback.cpu),
         look: look.unwrap_or(fallback.look),
         clock_12h: clock_12h.unwrap_or(fallback.clock_12h),
+        ask_resume: ask_resume.unwrap_or(fallback.ask_resume),
     })
 }
 

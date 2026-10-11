@@ -40,10 +40,11 @@ pub enum QuickRow {
     Look,
     ClockFormat,
     JoinNetwork,
+    AskResume,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 34] = [
+    pub const ALL: [QuickRow; 35] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -78,6 +79,7 @@ impl QuickRow {
         QuickRow::Look,
         QuickRow::ClockFormat,
         QuickRow::JoinNetwork,
+        QuickRow::AskResume,
     ];
 
     pub const MAIN: [QuickRow; 7] = [
@@ -101,13 +103,14 @@ impl QuickRow {
         QuickRow::GbPalettes,
     ];
 
-    pub const GAME: [QuickRow; 8] = [
+    pub const GAME: [QuickRow; 9] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Rewind,
         QuickRow::Turbo,
         QuickRow::Rumble,
         QuickRow::EjectSave,
+        QuickRow::AskResume,
         QuickRow::SaveFormat,
         QuickRow::Performance,
     ];
@@ -161,7 +164,8 @@ impl QuickRow {
             | QuickRow::Rumble
             | QuickRow::EjectSave
             | QuickRow::SaveFormat
-            | QuickRow::Performance => &QuickRow::GAME,
+            | QuickRow::Performance
+            | QuickRow::AskResume => &QuickRow::GAME,
             _ => &QuickRow::MAIN,
         }
     }
@@ -225,6 +229,7 @@ impl QuickRow {
             QuickRow::ClockFormat => "Clock",
             QuickRow::Labels => "Download Labels",
             QuickRow::JoinNetwork => "Join Network",
+            QuickRow::AskResume => "Ask to Resume",
             QuickRow::FileTransfer => "File Transfer",
         }
     }

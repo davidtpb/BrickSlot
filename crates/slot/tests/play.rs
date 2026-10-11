@@ -13,6 +13,7 @@ use slot_store::{Core, Platform, StateRing};
 #[test]
 fn a_tap_resumes_and_a_hold_starts_clean() {
     let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    common::taps_resume(d.path());
     StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald")
         .write_resume(&[7u8; 64])
         .unwrap();
@@ -98,6 +99,7 @@ fn a_hold_hands_the_core_no_state_and_a_tap_hands_it_the_resume() {
     let tapped = tmp_root_with_carts(&["Emerald", "Fusion"]);
     let held = tmp_root_with_carts(&["Emerald", "Fusion"]);
     for d in [&tapped, &held] {
+        common::taps_resume(d.path());
         persist::flush(
             d.path(),
             Platform::Gba,

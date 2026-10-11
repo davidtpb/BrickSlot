@@ -459,6 +459,14 @@ pub fn clocked(root: &Path) {
     write_slot_state(root, &s).expect("write slot.state");
 }
 
+/// Turns off the question on insert, so a tap on A picks up where the
+/// game was left, as tests of resuming expect.
+pub fn taps_resume(root: &Path) {
+    let mut s = slot_store::read_slot_state(root);
+    s.ask_resume = false;
+    write_slot_state(root, &s).expect("write slot.state");
+}
+
 pub fn boot(root: &Path) -> App {
     clocked(root);
     App::boot(root)

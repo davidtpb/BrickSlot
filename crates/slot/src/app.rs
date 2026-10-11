@@ -366,6 +366,7 @@ pub struct App {
     socket_chrome: Vec<(TexId, u32, u32)>,
     customize: Option<Customize>,
     core_popup: Option<usize>,
+    resume_popup: Option<usize>,
     restart_armed_at: Option<Millis>,
     restart_after_eject: bool,
     dropped_faces: Vec<TexId>,
@@ -517,6 +518,7 @@ impl App {
             socket_chrome: Vec::new(),
             customize: None,
             core_popup: None,
+            resume_popup: None,
             restart_armed_at: None,
             restart_after_eject: false,
             dropped_faces: Vec::new(),
@@ -779,6 +781,7 @@ impl App {
             QuickRow::GbShader => Some(shader_value(self.state.shader_gb)),
             QuickRow::Rumble => Some(QuickValue::flag(self.state.rumble)),
             QuickRow::EjectSave => Some(QuickValue::flag(self.state.eject_save)),
+            QuickRow::AskResume => Some(QuickValue::flag(self.state.ask_resume)),
             QuickRow::Turbo => Some(QuickValue::flag(self.state.turbo)),
             QuickRow::Rewind => Some(QuickValue::flag(self.state.rewind)),
             QuickRow::Brightness => Some(QuickValue::level(self.state.brightness)),
@@ -1475,6 +1478,12 @@ impl App {
             }
             return self.core_popup_input(action);
         }
+        if self.resume_popup.is_some() {
+            if self.adjust(action) {
+                return;
+            }
+            return self.resume_popup_input(action);
+        }
         if let Phase::SetClock {
             picker, from_menu, ..
         } = &mut self.phase
@@ -1522,10 +1531,10 @@ impl App {
                 Action::GbaDown(Btn::A) => self.play_held = Some(now),
                 Action::GbaUp(Btn::A) => {
                     if self.play_held.take().is_some() {
-                        self.insert(!self.state.eject_save);
+                        self.insert_or_ask();
                     }
                 }
-                Action::Insert => self.insert(!self.state.eject_save),
+                Action::Insert => self.insert_or_ask(),
                 Action::GbaDown(Btn::L1) => self.switch_shelf(-1),
                 Action::GbaDown(Btn::R1) => self.switch_shelf(1),
                 Action::GbaDown(Btn::Y) => self.open_search(),
@@ -1643,6 +1652,7 @@ impl App {
         (self.socket_look()
             || self.customize.is_some()
             || self.core_popup.is_some()
+            || self.resume_popup.is_some()
             || matches!(self.phase, Phase::Networks { .. }))
             && self.socket_chrome.is_empty()
     }
@@ -1736,9 +1746,13 @@ impl App {
             .core_popup
             .filter(|_| matches!(self.phase, Phase::Shelf));
         let networks = matches!(self.phase, Phase::Networks { .. });
+        let resume_popup = self
+            .resume_popup
+            .filter(|_| matches!(self.phase, Phase::Shelf));
         let shown = (self.socket_look() && (row.is_some() || self.power_menu.is_some()))
             || customizing.is_some()
             || core_popup.is_some()
+            || resume_popup.is_some()
             || networks;
         if !shown {
             return None;
@@ -1798,6 +1812,18 @@ impl App {
                 lines[slot_ui::option_slot(i)] = (text, true);
             }
             lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+        }
+        if resume_popup.is_some() && self.power_menu.is_none() {
+            let name = self
+                .shelf()
+                .carts
+                .get(self.shelf().index)
+                .map(slot_ui::label_text)
+                .unwrap_or_default();
+            lines[slot_ui::POPUP_TITLE_SLOT] = (name, true);
+            lines[slot_ui::option_slot(0)] = ("Continue where you left off".into(), true);
+            lines[slot_ui::option_slot(1)] = ("Start fresh from the save".into(), true);
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Cancel"), true);
         }
         if let Phase::Networks { list, scanning, .. } = &self.phase {
             let (first, shown, _) = self.networks_window();
@@ -2530,6 +2556,7 @@ impl App {
             QuickRow::EjectSave
             | QuickRow::Look
             | QuickRow::ClockFormat
+            | QuickRow::AskResume
             | QuickRow::Turbo
             | QuickRow::Rewind
             | QuickRow::FastForward
@@ -2586,6 +2613,7 @@ impl App {
             }
             QuickRow::Rumble => s.rumble = !s.rumble,
             QuickRow::EjectSave => s.eject_save = !s.eject_save,
+            QuickRow::AskResume => s.ask_resume = !s.ask_resume,
             QuickRow::Turbo => s.turbo = !s.turbo,
             QuickRow::Rewind => s.rewind = !s.rewind,
             QuickRow::GbPalettes => s.gb_palettes = !s.gb_palettes,
@@ -3627,6 +3655,18 @@ impl App {
             .draw(out);
         }
         if let Some(focus) = self
+            .resume_popup
+            .filter(|_| matches!(self.phase, Phase::Shelf) && self.power_menu.is_none())
+        {
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: 2,
+                focus,
+            }
+            .draw(out);
+        }
+        if let Some(focus) = self
             .core_popup
             .filter(|_| matches!(self.phase, Phase::Shelf) && self.power_menu.is_none())
         {
@@ -4308,6 +4348,52 @@ impl App {
             Action::GbaDown(Btn::B) | Action::GbaDown(Btn::Start) => self.core_popup = None,
             _ => {}
         }
+    }
+
+    /// Puts the selected game in, first asking whether to pick up where it
+    /// was left or start from its save, when there is a choice to make.
+    fn insert_or_ask(&mut self) {
+        if !self.state.eject_save {
+            return self.insert(true);
+        }
+        if self.state.ask_resume && self.selected_has_resume() {
+            self.shelf_mut().release_hold();
+            self.play_held = None;
+            self.resume_popup = Some(0);
+            return;
+        }
+        self.insert(false);
+    }
+
+    fn selected_has_resume(&self) -> bool {
+        let (Some(root), Some(cart)) = (&self.root, self.shelf().carts.get(self.shelf().index))
+        else {
+            return false;
+        };
+        let core = slot_store::core_for_platform(root, &cart.stem, cart.platform);
+        StateRing::new(root, cart.platform, core, &cart.stem).has_resume()
+            && !persist::save_replaced(root, cart.platform, &cart.stem)
+    }
+
+    fn resume_popup_input(&mut self, action: Action) {
+        let Some(at) = self.resume_popup else {
+            return;
+        };
+        match action {
+            Action::GbaDown(Btn::Up) | Action::GbaDown(Btn::Down) => {
+                self.resume_popup = Some(1 - at)
+            }
+            Action::GbaDown(Btn::A) => {
+                self.resume_popup = None;
+                self.insert(at == 1);
+            }
+            Action::GbaDown(Btn::B) => self.resume_popup = None,
+            _ => {}
+        }
+    }
+
+    pub fn resume_popup_open(&self) -> bool {
+        self.resume_popup.is_some()
     }
 
     pub fn core_popup_open(&self) -> bool {

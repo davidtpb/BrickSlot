@@ -111,6 +111,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Turbo Buttons",
             "Rumble",
             "Auto Save on Eject",
+            "Ask to Resume",
             "Save Format",
             "Performance"
         ]
@@ -126,7 +127,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::Lights,
             QuickRow::Network,
             QuickRow::Search,
-            QuickRow::Labels
+            QuickRow::Labels,
+            QuickRow::JoinNetwork
         ]
     );
     assert_eq!(

@@ -228,6 +228,8 @@ pub const UNPLUG_HOLD_MS: Millis = 420;
 
 pub const PLAY_GAP_MS: Millis = 1000;
 
+pub const SCREENSHOTS: &str = "Screenshots";
+
 /// The power press that woke the handheld from deep sleep arrives too, and
 /// its release can come well after the resume; up to its release (or this
 /// long, if the release never shows) power presses are ignored, so it does
@@ -1435,6 +1437,7 @@ impl App {
                 Action::Polaroids => self.open_polaroids(),
                 Action::SaveState => self.save_state(),
                 Action::LoadState => self.load_newest(),
+                Action::Screenshot => self.screenshot(),
                 Action::RewindStart if !self.may_rewind() => self.refuse(),
                 Action::FfStart if !self.may_fast_forward() => self.refuse(),
                 _ => {}
@@ -3774,6 +3777,30 @@ impl App {
             self.pending = Some((PendingUndo::Load { prior }, self.now()));
         }
         true
+    }
+
+    fn screenshot(&mut self) {
+        let (Some(root), Some(snapshot), Some(stem)) = (
+            self.root.clone(),
+            &self.snapshot,
+            self.seated().map(str::to_owned),
+        ) else {
+            return;
+        };
+        let Some(frame) = snapshot.thumb() else {
+            eprintln!("slot: screenshot: the core gave up no frame");
+            return;
+        };
+        let (w, h) = self.platform.picture();
+        let png = crate::thumb::crop_png(&frame, w, h).unwrap_or(frame);
+        let dir = root.join(SCREENSHOTS);
+        let name = format!("{stem} {}.png", format_stamp(self.wall_secs()));
+        let written = std::fs::create_dir_all(&dir)
+            .and_then(|()| slot_store::atomic_write(&dir.join(&name), &png));
+        match written {
+            Ok(()) => self.say("Screenshot saved", format!("{SCREENSHOTS}/{name}")),
+            Err(e) => eprintln!("slot: screenshot: {e}"),
+        }
     }
 
     fn save_state(&mut self) {

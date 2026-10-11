@@ -8,6 +8,7 @@ mod cart;
 mod clock;
 mod draw;
 mod footer;
+mod home_panel;
 mod hud;
 mod icon;
 mod link_art;
@@ -45,6 +46,12 @@ pub use cart::{
 pub use clock::{clock_label, date_time_text, hhmm, set_clock_hint_face, ClockPicker, Field};
 pub use draw::{Draw, TexId, OUT_H, OUT_W};
 pub use footer::{draw_footer, Printed};
+pub use home_panel::{
+    home_face, home_slider_name_slot, home_slider_value_slot, home_stat_name_slot,
+    home_stat_value_slot, home_tile_name_slot, home_tile_state_slot, stat_rect, tile_rect,
+    track_rect, HomeFocus, HomePanel, HomeScreen, HomeTile, CARD_H, CARD_W, CARD_X, CARD_Y,
+    HOME_ACCENT, HOME_CLOCK, HOME_LEGEND, HOME_SLOTS, HOME_STATS, HOME_TITLE,
+};
 pub use hud::{
     badge_at, ff_badge, FfState, Hud, HudKind, LinkBadge, Millis, ALARM_BAND_H, HUD_ICON_PX,
     HUD_INK, HUD_MS, LINK_HOST_INK, LINK_JOIN_INK, PLATE_H,

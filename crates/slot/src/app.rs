@@ -45,6 +45,8 @@ const POWER_ON_S: f32 = 0.22;
 const POWER_OFF_S: f32 = 0.16;
 
 const VOLUME_STEP: u8 = 5;
+/// How often the Home panel re-reads the temperature, clock and memory.
+const HOME_STATS_MS: Millis = 1000;
 
 const AUTOSAVE_MS: Millis = 60_000;
 const CARD_CHECK_MS: Millis = 2_000;
@@ -328,6 +330,10 @@ pub struct App {
     search: crate::search::Search,
     search_faces: Vec<Option<(TexId, u32, u32)>>,
     search_picked_at: Millis,
+    home: Option<slot_ui::HomePanel>,
+    home_faces: Vec<Option<(TexId, u32, u32)>>,
+    home_stats: crate::sysinfo::Stats,
+    home_stats_at: Millis,
     net: crate::net::Net,
     cheevos_login: CheevosLogin,
     clock_asked: bool,
@@ -465,6 +471,10 @@ impl App {
             search: crate::search::Search::default(),
             search_faces: Vec::new(),
             search_picked_at: 0,
+            home: None,
+            home_faces: Vec::new(),
+            home_stats: crate::sysinfo::Stats::default(),
+            home_stats_at: 0,
             net: crate::net::Net::idle(),
             cheevos_login: CheevosLogin::Waiting,
             clock_asked: false,
@@ -1387,6 +1397,12 @@ impl App {
             Action::PowerOff => return,
             _ => {}
         }
+        if self.home.is_some() {
+            if self.adjust(action) {
+                return;
+            }
+            return self.home_input(action);
+        }
         if let Phase::SetClock {
             picker, from_menu, ..
         } = &mut self.phase
@@ -1440,7 +1456,8 @@ impl App {
                 Action::Insert => self.insert(!self.state.eject_save),
                 Action::GbaDown(Btn::L1) => self.switch_shelf(-1),
                 Action::GbaDown(Btn::R1) => self.switch_shelf(1),
-                Action::GbaDown(Btn::Y) | Action::GbaDown(Btn::Home) => self.open_search(),
+                Action::GbaDown(Btn::Y) => self.open_search(),
+                Action::GbaDown(Btn::Home) => self.open_home(),
                 _ => {}
             },
             Phase::Search => self.search_input(action),
@@ -1458,6 +1475,7 @@ impl App {
                 Action::SaveState => self.save_state(),
                 Action::LoadState => self.load_newest(),
                 Action::Screenshot => self.screenshot(),
+                Action::GbaDown(Btn::Home) => self.open_home(),
                 Action::RewindStart if !self.may_rewind() => self.refuse(),
                 Action::FfStart if !self.may_fast_forward() => self.refuse(),
                 _ => {}
@@ -1532,6 +1550,179 @@ impl App {
             format!("{} games without one", wanted.len()),
         );
         self.net.send(NetJob::Labels(wanted));
+    }
+
+    pub fn home_open(&self) -> bool {
+        self.home.is_some()
+    }
+
+    pub fn home_focus(&self) -> Option<slot_ui::HomeFocus> {
+        self.home.map(|p| p.focus())
+    }
+
+    fn open_home(&mut self) {
+        if self.core_picker.is_some() || self.link_active() {
+            return;
+        }
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+        self.home = Some(slot_ui::HomePanel::new());
+        self.home_stats = crate::sysinfo::Stats::read();
+        self.home_stats_at = self.now();
+    }
+
+    fn close_home(&mut self) {
+        self.home = None;
+    }
+
+    fn home_tick(&mut self) {
+        let now = self.now();
+        if self.home.is_some() && now.saturating_sub(self.home_stats_at) >= HOME_STATS_MS {
+            self.home_stats = crate::sysinfo::Stats::read();
+            self.home_stats_at = now;
+        }
+    }
+
+    fn home_input(&mut self, action: Action) {
+        let Some(mut panel) = self.home else {
+            return;
+        };
+        let focus = panel.focus();
+        match action {
+            Action::GbaDown(Btn::Up) => panel.up(),
+            Action::GbaDown(Btn::Down) => panel.down(),
+            Action::GbaDown(Btn::Left)
+            | Action::ShelfLeft
+            | Action::GbaDown(Btn::Right)
+            | Action::ShelfRight => {
+                let right = matches!(action, Action::GbaDown(Btn::Right) | Action::ShelfRight);
+                if !panel.step(right) {
+                    let step = match (focus, right) {
+                        (slot_ui::HomeFocus::Brightness, true) => Action::BrightnessUp,
+                        (slot_ui::HomeFocus::Brightness, false) => Action::BrightnessDown,
+                        (_, true) => Action::VolumeUp,
+                        (_, false) => Action::VolumeDown,
+                    };
+                    self.adjust(step);
+                }
+            }
+            Action::GbaDown(Btn::A) => match focus {
+                slot_ui::HomeFocus::Tile(tile) => return self.home_tile(tile),
+                slot_ui::HomeFocus::Volume => self.mute_toggle(),
+                slot_ui::HomeFocus::Brightness => {}
+            },
+            Action::GbaDown(Btn::B) | Action::GbaDown(Btn::Home) => return self.close_home(),
+            Action::QuickMenu if self.on_shelf() => {
+                self.close_home();
+                return self.open_quick_menu();
+            }
+            _ => {}
+        }
+        if self.home.is_some() {
+            self.home = Some(panel);
+        }
+    }
+
+    fn home_tile(&mut self, tile: slot_ui::HomeTile) {
+        match tile {
+            slot_ui::HomeTile::Screenshot => {
+                if !matches!(self.phase, Phase::Playing { .. }) {
+                    return self.say("Screenshots are taken in a game", "");
+                }
+                self.close_home();
+                self.screenshot();
+            }
+            slot_ui::HomeTile::Sound => self.mute_toggle(),
+            slot_ui::HomeTile::Rumble => self.change_setting(QuickRow::Rumble, true),
+            slot_ui::HomeTile::Wifi => self.change_setting(QuickRow::Wifi, true),
+            slot_ui::HomeTile::Lights => self.change_setting(QuickRow::LightMode, true),
+            slot_ui::HomeTile::Power => {
+                self.close_home();
+                self.open_power_menu();
+            }
+        }
+    }
+
+    fn home_tiles_on(&self) -> [bool; 6] {
+        slot_ui::HomeTile::ALL.map(|tile| match tile {
+            slot_ui::HomeTile::Screenshot => matches!(self.phase, Phase::Playing { .. }),
+            slot_ui::HomeTile::Sound => !self.muted(),
+            slot_ui::HomeTile::Rumble => self.state.rumble,
+            slot_ui::HomeTile::Wifi => self.state.wifi,
+            slot_ui::HomeTile::Lights => self.state.light_mode != LightMode::Off,
+            slot_ui::HomeTile::Power => false,
+        })
+    }
+
+    /// The text for every slot of the Home panel and whether it is lit,
+    /// while the panel is up.
+    pub fn home_lines(&self) -> Option<Vec<(String, bool)>> {
+        self.home?;
+        let on = self.home_tiles_on();
+        let mut lines = vec![(String::new(), false); slot_ui::HOME_SLOTS];
+        let title = match self.phase {
+            Phase::Playing { .. } => self.seated().unwrap_or("brickslot").to_string(),
+            _ => "brickslot".to_string(),
+        };
+        lines[slot_ui::HOME_TITLE] = (title, true);
+        lines[slot_ui::HOME_CLOCK] = (slot_ui::hhmm(self.wall_secs()), true);
+        for (i, tile) in slot_ui::HomeTile::ALL.iter().enumerate() {
+            let state = match tile {
+                slot_ui::HomeTile::Screenshot if on[i] => "Take",
+                slot_ui::HomeTile::Screenshot => "In game",
+                slot_ui::HomeTile::Wifi if on[i] && !self.net.online() => "Joining",
+                slot_ui::HomeTile::Lights => match self.state.light_mode {
+                    LightMode::Battery => "Battery",
+                    LightMode::Colour => "Colour",
+                    LightMode::Off => "Off",
+                },
+                slot_ui::HomeTile::Power => "Menu",
+                _ if on[i] => "On",
+                _ => "Off",
+            };
+            lines[slot_ui::home_tile_name_slot(i)] = (tile.name().to_string(), true);
+            lines[slot_ui::home_tile_state_slot(i)] = (state.to_string(), on[i]);
+        }
+        let focus = self.home.map(|p| p.focus());
+        lines[slot_ui::home_slider_name_slot(0)] = (
+            "Brightness".into(),
+            focus == Some(slot_ui::HomeFocus::Brightness),
+        );
+        lines[slot_ui::home_slider_name_slot(1)] =
+            ("Volume".into(), focus == Some(slot_ui::HomeFocus::Volume));
+        lines[slot_ui::home_slider_value_slot(0)] = (
+            format!("{}/{}", self.state.brightness, BRIGHTNESS_MAX),
+            true,
+        );
+        let volume = match self.muted() {
+            true => "Muted".to_string(),
+            false => format!("{}%", self.level()),
+        };
+        lines[slot_ui::home_slider_value_slot(1)] = (volume, true);
+        let stats = &self.home_stats;
+        let battery = self
+            .battery
+            .map_or("--".to_string(), |b| format!("{}%", b.percent));
+        let named = [
+            ("Temp", crate::sysinfo::temp_text(stats)),
+            ("CPU", crate::sysinfo::cpu_text(stats)),
+            ("RAM", crate::sysinfo::ram_text(stats)),
+            ("Battery", battery),
+        ];
+        for (i, (name, value)) in named.into_iter().enumerate() {
+            lines[slot_ui::home_stat_name_slot(i)] = (name.to_string(), false);
+            lines[slot_ui::home_stat_value_slot(i)] = (value, true);
+        }
+        let legend = match self.on_shelf() {
+            true => "A select   D-PAD adjust   B close   MENU settings",
+            false => "A select   D-PAD adjust   B resume",
+        };
+        lines[slot_ui::HOME_LEGEND] = (legend.to_string(), false);
+        Some(lines)
+    }
+
+    pub fn set_home_faces(&mut self, faces: Vec<Option<(TexId, u32, u32)>>) {
+        self.home_faces = faces;
     }
 
     fn open_search(&mut self) {
@@ -2062,6 +2253,7 @@ impl App {
         }
         self.timers();
         self.poll_link();
+        self.home_tick();
         let now = self.now();
         let ready = self.core_faces_ready();
         if let Some(picker) = &mut self.core_picker {
@@ -2212,7 +2404,9 @@ impl App {
 
     fn track_play(&mut self) {
         let now = self.now();
-        let playing = matches!(self.phase, Phase::Playing { .. }) && self.game_menu.is_none();
+        let playing = matches!(self.phase, Phase::Playing { .. })
+            && self.game_menu.is_none()
+            && self.home.is_none();
         if playing {
             if let Some(last) = self.play_tick {
                 self.play_ms += now.saturating_sub(last).min(PLAY_GAP_MS);
@@ -2688,6 +2882,21 @@ impl App {
         }
         if let Some(menu) = self.game_menu {
             self.draw_game_menu(menu, out);
+        }
+        if let Some(panel) = self.home {
+            slot_ui::HomeScreen {
+                faces: &self.home_faces,
+                panel,
+                on: self.home_tiles_on(),
+                levels: [
+                    f32::from(self.state.brightness) / f32::from(BRIGHTNESS_MAX),
+                    match self.muted() {
+                        true => 0.0,
+                        false => f32::from(self.level()) / f32::from(VOLUME_MAX),
+                    },
+                ],
+            }
+            .draw(out);
         }
         self.hud.draw(self.now(), out);
     }

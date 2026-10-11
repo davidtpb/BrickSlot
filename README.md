@@ -101,7 +101,8 @@ saves, and the files in the old format are kept as `.bak`.
 
 These live in the quick menu (tap MENU on the shelf).
 
-- **Search Games** (or **Y**, or **Home** on the Brick Pro, on the shelf): type part of a name on the on-screen keyboard
+- **Home panel** (**Home** on the Brick Pro, on the shelf or in a game): quick toggles for screenshot, sound, rumble, Wi-Fi, lights and power, brightness and volume sliders, and live temperature, CPU clock, memory and battery. The game pauses while it is up; **B** or **Home** resumes, **MENU** on the shelf opens settings.
+- **Search Games** (or **Y** on the shelf): type part of a name on the on-screen keyboard
   (D-pad to move, A to type, B to delete). Matching games from every shelf are listed as
   you type, ignoring accents and capitals. L/R picks one and START takes you to its cart.
 - **Lights** (TrimUI): show the battery state on the top bar, light every zone in one

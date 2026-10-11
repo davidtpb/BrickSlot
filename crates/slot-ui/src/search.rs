@@ -71,7 +71,14 @@ fn face_at(label: &str, colour: [u8; 3], px: f32, h: u32, max_w: f32) -> UndoFac
     sized(label, colour, px, px, h, max_w)
 }
 
-fn sized(label: &str, colour: [u8; 3], px: f32, min_px: f32, h: u32, max_w: f32) -> UndoFace {
+pub(crate) fn sized(
+    label: &str,
+    colour: [u8; 3],
+    px: f32,
+    min_px: f32,
+    h: u32,
+    max_w: f32,
+) -> UndoFace {
     let empty = UndoFace {
         rgba: Vec::new(),
         w: 0,

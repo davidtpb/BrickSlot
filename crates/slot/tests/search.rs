@@ -94,9 +94,9 @@ fn nothing_found_says_so() {
 }
 
 #[test]
-fn home_opens_and_closes_search_too() {
+fn home_closes_search_too() {
     let (_d, mut a) = shelf_of(&["Fusion", "Mother 3"]);
-    press(&mut a, Btn::Home);
+    press(&mut a, Btn::Y);
     assert!(matches!(a.phase(), Phase::Search));
     press(&mut a, Btn::Home);
     assert!(matches!(a.phase(), Phase::Shelf));

@@ -56,6 +56,7 @@ pub struct Frontend {
     about: AboutFace,
     quick_clock: QuickClock,
     search_texes: Vec<SearchLine>,
+    home_texes: Vec<SearchLine>,
 }
 
 #[derive(Clone, Default)]
@@ -146,6 +147,7 @@ impl Frontend {
             about: AboutFace::default(),
             quick_clock: QuickClock::default(),
             search_texes: Vec::new(),
+            home_texes: Vec::new(),
         }
     }
 
@@ -302,32 +304,25 @@ impl Frontend {
         let Some(lines) = self.session.app().search_lines() else {
             return;
         };
-        self.search_texes.resize(lines.len(), SearchLine::default());
-        let mut changed = false;
-        for (slot, (line, (text, lit))) in self.search_texes.iter_mut().zip(lines).enumerate() {
-            if line.text.as_deref() == Some(text.as_str()) && line.lit == lit {
-                continue;
-            }
-            changed = true;
-            let face = slot_ui::search_face(slot, &text, lit);
-            line.face = match (face.w > 0 && face.h > 0, line.tex) {
-                (false, _) => None,
-                (true, Some(tex)) => {
-                    compositor.update_texture(tex, face.w, face.h, &face.rgba);
-                    Some((tex, face.w, face.h))
-                }
-                (true, None) => {
-                    let tex = compositor.create_texture(face.w, face.h, &face.rgba);
-                    line.tex = Some(tex);
-                    Some((tex, face.w, face.h))
-                }
-            };
-            line.text = Some(text);
-            line.lit = lit;
-        }
-        if changed {
+        if sync_lines(
+            &mut self.search_texes,
+            lines,
+            slot_ui::search_face,
+            compositor,
+        ) {
             let faces = self.search_texes.iter().map(|l| l.face).collect();
             self.session.app_mut().set_search_faces(faces);
+        }
+    }
+
+    /// The same for the Home panel.
+    fn sync_home(&mut self, compositor: &mut Compositor) {
+        let Some(lines) = self.session.app().home_lines() else {
+            return;
+        };
+        if sync_lines(&mut self.home_texes, lines, slot_ui::home_face, compositor) {
+            let faces = self.home_texes.iter().map(|l| l.face).collect();
+            self.session.app_mut().set_home_faces(faces);
         }
     }
 
@@ -409,6 +404,7 @@ impl Frontend {
         self.cart_faces.sync(self.session.app_mut(), compositor);
         self.show_message(compositor);
         self.sync_search(compositor);
+        self.sync_home(compositor);
         sync_clock(self.session.app_mut(), compositor, &mut self.clocks);
         sync_about(self.session.app_mut(), compositor, &mut self.about);
         sync_quick_clock(self.session.app_mut(), compositor, &mut self.quick_clock);
@@ -881,4 +877,38 @@ fn upload_rgba(
             id
         }
     }
+}
+
+/// Brings a texture per line up to date with `lines`, saying whether any
+/// changed.
+fn sync_lines(
+    texes: &mut Vec<SearchLine>,
+    lines: Vec<(String, bool)>,
+    face_of: fn(usize, &str, bool) -> slot_ui::UndoFace,
+    compositor: &mut Compositor,
+) -> bool {
+    texes.resize(lines.len(), SearchLine::default());
+    let mut changed = false;
+    for (slot, (line, (text, lit))) in texes.iter_mut().zip(lines).enumerate() {
+        if line.text.as_deref() == Some(text.as_str()) && line.lit == lit {
+            continue;
+        }
+        changed = true;
+        let face = face_of(slot, &text, lit);
+        line.face = match (face.w > 0 && face.h > 0, line.tex) {
+            (false, _) => None,
+            (true, Some(tex)) => {
+                compositor.update_texture(tex, face.w, face.h, &face.rgba);
+                Some((tex, face.w, face.h))
+            }
+            (true, None) => {
+                let tex = compositor.create_texture(face.w, face.h, &face.rgba);
+                line.tex = Some(tex);
+                Some((tex, face.w, face.h))
+            }
+        };
+        line.text = Some(text);
+        line.lit = lit;
+    }
+    changed
 }

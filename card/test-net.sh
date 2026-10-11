@@ -51,7 +51,8 @@ net() {
 		AGS_NET_CTRL="$TMP/etc/sockets" AGS_IP="$TMP/bin/ip" AGS_NET_SYS="$TMP/sys" \
 		AGS_WPA_SUPPLICANT="$TMP/bin/wpa_supplicant" AGS_WPA_CLI="$TMP/bin/wpa_cli" \
 		AGS_WPA_PASSPHRASE="$TMP/bin/none" AGS_UDHCPC="$TMP/bin/udhcpc" \
-		AGS_NMCLI="${NMCLI_STUB:-$TMP/bin/none}" AGS_MODPROBE="$TMP/bin/none" sh "$SCRIPT" "$@"
+		AGS_NMCLI="${NMCLI_STUB:-$TMP/bin/none}" AGS_MODPROBE="$TMP/bin/none" \
+		AGS_WIFI_MODULE_PATH="${MODULE_STUB:-}" sh "$SCRIPT" "$@"
 }
 
 fail() {
@@ -151,5 +152,36 @@ NMCLI_STUB="$TMP/bin/nmcli" net pause
 grep -q 'nmcli dev set wlan0 managed no' "$LOG" || fail "link play would fight NetworkManager for wlan0"
 [ "$(NMCLI_STUB="$TMP/bin/nmcli" net status)" = "On, not connected" ] ||
 	fail "NetworkManager's state read wrong: $(NMCLI_STUB="$TMP/bin/nmcli" net status)"
+
+# An H700 handheld: the driver unloaded, wlan0 absent until it loads, and
+# the firmware's own wpa_supplicant running with a config of its own.
+H="$TMP/h700"
+mkdir -p "$H/sys" "$H/proc/4242" "$H/card/Config" "$H/run"
+: > "$H/8821cs.ko"
+printf 'ctrl_interface=/var/run/wpa_supplicant\nnetwork={\n\tssid="Stock Net"\n\tpsk="stockpass"\n}\n' > "$H/stock.conf"
+printf 'wpa_supplicant\0-B\0-i\0wlan0\0-c\0%s\0' "$H/stock.conf" > "$H/proc/4242/cmdline"
+printf '#!/bin/sh\necho "insmod $*" >> "%s"\nmkdir -p "%s/sys/wlan0"\n' "$LOG" "$H" > "$TMP/bin/insmod"
+printf '#!/bin/sh\necho "pgrep $*" >> "%s"\n[ -f "%s/stock.gone" ] || echo 4242\n' "$LOG" "$H" > "$TMP/bin/pgrep"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/bin/lsmod"
+chmod +x "$TMP/bin/insmod" "$TMP/bin/pgrep" "$TMP/bin/lsmod"
+rm -f "$UP"
+: > "$LOG"
+h700() {
+	SLOT_ROOT="$H/card" AGS_RUN="$H/run" AGS_IP="$TMP/bin/ip" AGS_NET_SYS="$H/sys" \
+		AGS_WPA_SUPPLICANT="$TMP/bin/wpa_supplicant" AGS_WPA_CLI="$TMP/bin/wpa_cli" \
+		AGS_WPA_PASSPHRASE="$TMP/bin/none" AGS_UDHCPC="$TMP/bin/udhcpc" \
+		AGS_NMCLI="$TMP/bin/none" AGS_WIFI_MODULE_PATH="$H/8821cs.ko" \
+		AGS_INSMOD="$TMP/bin/insmod" AGS_LSMOD="$TMP/bin/lsmod" AGS_PGREP="$TMP/bin/pgrep" \
+		AGS_PROC="$H/proc" AGS_RAIL_SETTLE=0 sh "$SCRIPT" "$@"
+}
+h700 up
+grep -q "^insmod $H/8821cs.ko" "$LOG" || fail "the H700 Wi-Fi driver was not loaded"
+grep -q '^wpa_supplicant -B -D nl80211 -i wlan0 -c' "$LOG" || fail "the H700 wpa_supplicant was not started with nl80211"
+C="$H/card/Config/wifi/wpa_supplicant.conf"
+grep -q '^ctrl_interface=/var/run/wpa_supplicant$' "$C" || fail "the H700 control socket is not where link play looks"
+grep -q 'ssid="Stock Net"' "$C" || fail "the firmware's networks were not adopted"
+h700 up
+[ "$(grep -c 'ssid="Stock Net"' "$C")" = 1 ] || fail "the firmware's networks were adopted twice"
+grep -q 'taking over from wpa_supplicant 4242' "$H/card/slot-net.log" || fail "the firmware's wpa_supplicant was left running"
 
 echo "net: all passed"

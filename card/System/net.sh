@@ -33,6 +33,25 @@ WPA_PASSPHRASE="${AGS_WPA_PASSPHRASE:-wpa_passphrase}"
 UDHCPC="${AGS_UDHCPC:-udhcpc}"
 NMCLI="${AGS_NMCLI:-nmcli}"
 MODPROBE="${AGS_MODPROBE:-modprobe}"
+INSMOD="${AGS_INSMOD:-insmod}"
+RMMOD="${AGS_RMMOD:-rmmod}"
+LSMOD="${AGS_LSMOD:-lsmod}"
+PGREP="${AGS_PGREP:-pgrep}"
+PROC="${AGS_PROC:-/proc}"
+SDC1_INSERT="${AGS_SDC1_INSERT:-/sys/devices/platform/soc/sdc1/sunxi_insert}"
+WLAN_BIND="${AGS_WLAN_BIND:-/sys/bus/platform/drivers/sunxi-wlan}"
+RAIL_SETTLE="${AGS_RAIL_SETTLE:-3}"
+
+# The H700 handhelds' Wi-Fi driver, which their firmware leaves unloaded:
+# the RTL8821CS on SDIO, or the RG28XX's RTL8188EU on USB. Found, it marks an
+# H700 system, where Wi-Fi is brought up the way spruceOS does it there.
+MODULE_PATH="${AGS_WIFI_MODULE_PATH:-}"
+if [ -z "$MODULE_PATH" ]; then
+	for m in /lib/modules/8821cs.ko /lib/modules/8188eu.ko; do
+		[ -f "$m" ] && MODULE_PATH="$m" && break
+	done
+fi
+MODULE="$(basename "${MODULE_PATH:-none}" .ko)"
 
 STOCK_CONF="/etc/wifi/wpa_supplicant.conf"
 CARD_CONF="$SD/Config/wifi/wpa_supplicant.conf"
@@ -51,11 +70,14 @@ log() {
 pick_conf() {
 	if [ -n "${AGS_NET_CONF:-}" ]; then
 		CONF="$AGS_NET_CONF"
-	elif [ -f "$STOCK_CONF" ] && [ -w "$STOCK_CONF" ]; then
+	elif [ -z "$MODULE_PATH" ] && [ -f "$STOCK_CONF" ] && [ -w "$STOCK_CONF" ]; then
 		CONF="$STOCK_CONF"
 	else
 		CONF="$CARD_CONF"
 	fi
+	# On the H700 handhelds wpa_cli and slot's link play both look for the
+	# socket where spruceOS and the stock firmware put it.
+	[ -n "$MODULE_PATH" ] && [ -z "${AGS_NET_CTRL:-}" ] && AGS_NET_CTRL=/var/run/wpa_supplicant
 	if [ ! -f "$CONF" ]; then
 		mkdir -p "$(dirname "$CONF")" 2>/dev/null
 		{
@@ -65,6 +87,9 @@ pick_conf() {
 		if [ "$CONF" = "$CARD_CONF" ] && [ -f "$STOCK_CONF" ]; then
 			sed -n '/^network={/,/^}/p' "$STOCK_CONF" >> "$CONF" 2>/dev/null
 		fi
+	fi
+	if [ -n "$MODULE_PATH" ] && ! grep -q "^ctrl_interface=$AGS_NET_CTRL\$" "$CONF" 2>/dev/null; then
+		sed -i "s|^ctrl_interface=.*|ctrl_interface=$AGS_NET_CTRL|" "$CONF" 2>/dev/null
 	fi
 	CTRL="${AGS_NET_CTRL:-$(sed -n 's/^ctrl_interface=\(DIR=\)\{0,1\}\([^ ]*\).*/\2/p' "$CONF" 2>/dev/null | head -n 1)}"
 	[ -n "$CTRL" ] || CTRL="$RUN/wpa_supplicant"
@@ -148,14 +173,119 @@ nm() {
 		$NMCLI -t -f RUNNING general 2>/dev/null | grep -q '^running'
 }
 
-# Loads the Wi-Fi driver the H700 handhelds use when the interface has
-# not appeared on its own.
+iface_within() {
+	n=0
+	while [ ! -d "$NET/$IFACE" ] && [ "$n" -lt "$(($1 * 4))" ]; do
+		sleep 0.25 2>/dev/null || sleep 1
+		n=$((n + 1))
+	done
+	[ -d "$NET/$IFACE" ]
+}
+
+loaded() {
+	$LSMOD 2>/dev/null | grep -q "^$MODULE "
+}
+
+# Brings the Wi-Fi chip up. On an H700 handheld that means loading its
+# driver, and, since the RTL8821CS sometimes fails to come up on SDIO at
+# boot, cycling its power until the interface appears, as spruceOS does.
 load_driver() {
 	[ -d "$NET/$IFACE" ] && return 0
-	for m in 8821cs rtl8821cs 8723ds 8189fs aic8800_fdrv; do
-		$MODPROBE "$m" > /dev/null 2>&1 && log "loaded $m" && return 0
+	if [ -z "$MODULE_PATH" ]; then
+		for m in 8821cs rtl8821cs 8723ds 8189fs aic8800_fdrv; do
+			$MODPROBE "$m" > /dev/null 2>&1 && log "loaded $m" && return 0
+		done
+		return 1
+	fi
+	if ! loaded; then
+		if $INSMOD "$MODULE_PATH" >> "$LOG" 2>&1; then
+			log "loaded $MODULE"
+		else
+			log "insmod $MODULE_PATH failed: $(dmesg 2>/dev/null | grep "$MODULE" | tail -n 1)"
+		fi
+	fi
+	iface_within 12 && return 0
+	log "$IFACE is missing, recovering the Wi-Fi chip"
+	if [ -w "$SDC1_INSERT" ]; then
+		echo 1 > "$SDC1_INSERT" 2>/dev/null
+		iface_within 5 && { log "a rescan brought $IFACE back"; return 0; }
+	fi
+	try=1
+	while [ "$try" -le 3 ]; do
+		log "power cycle $try"
+		$RMMOD "$MODULE" 2>/dev/null
+		sleep "$RAIL_SETTLE"
+		if [ "$try" -ge 2 ] && [ -w "$WLAN_BIND/unbind" ]; then
+			echo "soc@03000000:wlan" > "$WLAN_BIND/unbind" 2>/dev/null
+			sleep 1
+			echo "soc@03000000:wlan" > "$WLAN_BIND/bind" 2>/dev/null
+			sleep 1
+		fi
+		$INSMOD "$MODULE_PATH" >> "$LOG" 2>&1
+		[ -w "$SDC1_INSERT" ] && echo 1 > "$SDC1_INSERT" 2>/dev/null
+		iface_within 8 && { log "$IFACE back after power cycle $try"; return 0; }
+		try=$((try + 1))
 	done
+	log "$IFACE still missing after three power cycles"
 	return 1
+}
+
+# The wpa_supplicants running on the interface, by pid.
+supplicants() {
+	$PGREP -f "wpa_supplicant.*$IFACE" 2>/dev/null
+}
+
+# The config a running wpa_supplicant was started with.
+conf_of() {
+	tr '\0' ' ' < "$PROC/$1/cmdline" 2>/dev/null | sed -n 's/.*-c *\([^ ]*\).*/\1/p'
+}
+
+# Copies the networks of another config into ours, skipping ones we have.
+adopt() {
+	[ -f "$1" ] && [ "$1" != "$CONF" ] || return 0
+	awk '
+		function name(line) { sub(/.*ssid=/, "", line); return line }
+		NR == FNR { if ($0 ~ /^[ \t]*ssid=/) have[name($0)] = 1; next }
+		/^[ \t]*network=\{/ { inside = 1; block = ""; ssid = "" }
+		inside { block = block $0 "\n"; if ($0 ~ /^[ \t]*ssid=/) ssid = name($0) }
+		inside && /^[ \t]*\}/ {
+			inside = 0
+			if (ssid != "" && !(ssid in have)) { printf "%s", block; have[ssid] = 1 }
+		}
+	' "$CONF" "$1" > "$CONF.adopt" 2>/dev/null
+	if [ -s "$CONF.adopt" ]; then
+		cat "$CONF.adopt" >> "$CONF"
+		log "adopted the networks in $1"
+	fi
+	rm -f "$CONF.adopt"
+}
+
+# On an H700 handheld slot runs its own wpa_supplicant, as spruceOS does:
+# one the firmware started with a config of its own is asked for its
+# networks and replaced.
+take_over() {
+	ours=0
+	for pid in $(supplicants); do
+		c="$(conf_of "$pid")"
+		if [ "$c" = "$CONF" ]; then
+			ours=1
+		else
+			log "taking over from wpa_supplicant $pid (${c:-no config})"
+			adopt "$c"
+			kill -9 "$pid" 2>/dev/null
+		fi
+	done
+	[ "$ours" = 1 ] && cli status > /dev/null 2>&1 && return 0
+	sleep 1
+	$WPA_SUPPLICANT -B -D nl80211 -i "$IFACE" -c "$CONF" >> "$LOG" 2>&1 ||
+		$WPA_SUPPLICANT -B -i "$IFACE" -c "$CONF" >> "$LOG" 2>&1
+	s=0
+	while ! cli status > /dev/null 2>&1 && [ "$s" -lt 20 ]; do
+		sleep 0.25 2>/dev/null || sleep 1
+		s=$((s + 1))
+	done
+	cli status > /dev/null 2>&1 || { log "wpa_supplicant did not start"; return 1; }
+	log "started wpa_supplicant with $CONF"
 }
 
 nm_scan() {
@@ -219,6 +349,11 @@ start() {
 	$IP link set "$IFACE" up 2>/dev/null || true
 	pick_conf
 	merge_wifi_txt
+	if [ -n "$MODULE_PATH" ]; then
+		take_over || return 1
+		dhcp
+		return 0
+	fi
 	if find_running; then
 		log "using the wpa_supplicant already at $CTRL"
 		dhcp

@@ -53,6 +53,10 @@ impl Keymap {
 
     pub fn to_raw(self, ev: Ev) -> Option<RawEvent> {
         let btn = match ev.kind {
+            // analog ABS_Z / ABS_RZ own L2/R2; the digital copies chatter
+            EV_KEY if self == Keymap::TrimUi && matches!(ev.code, 0x138 | 0x139) => {
+                return None;
+            }
             EV_KEY => self.btn(ev.code)?,
             EV_SW if ev.code == SW_LID && self == Keymap::Anbernic => Btn::Lid,
             _ => return None,
@@ -66,7 +70,8 @@ impl Keymap {
 }
 
 pub struct Triggers {
-    at: i32,
+    l2_at: i32,
+    r2_at: i32,
     l2: bool,
     r2: bool,
 }
@@ -79,20 +84,25 @@ impl Default for Triggers {
 
 impl Triggers {
     pub fn new(at: i32) -> Self {
+        Triggers::axes(at, at)
+    }
+
+    pub fn axes(l2_at: i32, r2_at: i32) -> Self {
         Triggers {
-            at: at.max(1),
+            l2_at: l2_at.max(1),
+            r2_at: r2_at.max(1),
             l2: false,
             r2: false,
         }
     }
 
     pub fn feed(&mut self, ev: Ev) -> Option<RawEvent> {
-        let (held, btn) = match ev.code {
-            ABS_Z => (&mut self.l2, Btn::L2),
-            ABS_RZ => (&mut self.r2, Btn::R2),
+        let (held, btn, at) = match ev.code {
+            ABS_Z => (&mut self.l2, Btn::L2, self.l2_at),
+            ABS_RZ => (&mut self.r2, Btn::R2, self.r2_at),
             _ => return None,
         };
-        let now = ev.value >= self.at;
+        let now = ev.value >= at;
         if now == *held {
             return None;
         }

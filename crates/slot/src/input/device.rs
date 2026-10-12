@@ -7,8 +7,8 @@ use std::time::Instant;
 use slot_input::{Btn, InputSource, Millis, RawEvent};
 
 use super::evdev::{
-    decode, device_name, pick_devices, Ev, Hat, Keymap, Triggers, ABS_Z, EVENT_BYTES, EV_ABS,
-    EV_KEY, EV_SYN, KEYMAP_VAR,
+    decode, device_name, pick_devices, Ev, Hat, Keymap, Triggers, ABS_RZ, ABS_Z, EVENT_BYTES,
+    EV_ABS, EV_KEY, EV_SYN, KEYMAP_VAR,
 };
 use super::trace;
 
@@ -90,16 +90,22 @@ fn quicken_poll(sys: &Path, node: &Path) {
     }
 }
 
-const EVIOCGABS_Z: std::ffi::c_ulong = 0x8018_4540 + ABS_Z as std::ffi::c_ulong;
+const EVIOCGABS: std::ffi::c_ulong = 0x8018_4540;
 
 extern "C" {
     fn ioctl(fd: i32, request: std::ffi::c_ulong, ...) -> i32;
 }
 
-fn trigger_threshold(file: &File) -> i32 {
+fn trigger_threshold(file: &File, axis: u16) -> i32 {
     use std::os::unix::io::AsRawFd;
     let mut info = [0i32; 6];
-    let rc = unsafe { ioctl(file.as_raw_fd(), EVIOCGABS_Z, info.as_mut_ptr()) };
+    let rc = unsafe {
+        ioctl(
+            file.as_raw_fd(),
+            EVIOCGABS + axis as std::ffi::c_ulong,
+            info.as_mut_ptr(),
+        )
+    };
     let (min, max) = (info[1], info[2]);
     if rc < 0 || max <= min {
         return 1;
@@ -120,10 +126,13 @@ fn read_node(node: &Path, keymap: Keymap, queue: &Mutex<Vec<RawEvent>>, trace: O
             return;
         }
     };
-    let mut triggers = Triggers::new(match keymap {
-        Keymap::TrimUi => trigger_threshold(&file),
-        Keymap::Anbernic => 1,
-    });
+    let mut triggers = match keymap {
+        Keymap::TrimUi => Triggers::axes(
+            trigger_threshold(&file, ABS_Z),
+            trigger_threshold(&file, ABS_RZ),
+        ),
+        Keymap::Anbernic => Triggers::new(1),
+    };
     let mut buf = [0u8; EVENT_BYTES * 16];
     loop {
         let read = match file.read(&mut buf) {
@@ -196,7 +205,6 @@ impl Trace {
         let mut out = self.out.lock().unwrap_or_else(|e| e.into_inner());
         let _ = writeln!(out, "{line}");
         let _ = out.flush();
-        let _ = out.sync_data();
     }
 }
 

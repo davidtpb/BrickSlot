@@ -49,10 +49,10 @@ Release notes can be found in the [changelog](CHANGELOG.md).
 | Anbernic RG SP     | Yes                        | Always        |
 | Anbernic RG34XX    | Yes                        | 1.4.0         |
 | Anbernic RG34XXSP  | Yes (No Stick Support Yet) | 1.4.0         |
-| Anbernic RG35XXSP  | Yes                        | 1.5.0         |
+| Anbernic RG35XXSP  | Yes (tested)               | 1.5.0         |
 | Anbernic 35XX Plus | Yes                        | 1.5.0         |
 | Anbernic RG28XX    | Yes                        | 1.6.0         |
-| TrimUI Brick Pro   | Yes (early, tested)        | Unreleased    |
+| TrimUI Brick Pro   | Yes (tested)               | Unreleased    |
 | TrimUI Brick       | Untested port              | Unreleased    |
 
 RG28XX support was contributed by [GamerAnim](https://github.com/GamerAnim). Its panel is mounted
@@ -78,7 +78,9 @@ What changes on TrimUI hardware:
 
 - Buttons come from TrimUI's own `trimui_inputd` pad, which numbers its buttons
   differently from the Anbernics, and sends L2/R2 as analog triggers. brickslot spots the pad by
-  name; `export SLOT_KEYMAP=anbernic` in the updater turns that off.
+  name and ignores the digital L2/R2 copies of those axes. `export SLOT_KEYMAP=anbernic`
+  in the updater turns TrimUI mapping off. `export SLOT_TRACE_INPUT=1` writes every pad
+  event to `input-trace.log` (off unless you set it).
 - The backlight is driven through `/dev/disp`, rumble through GPIO 227 (held to 2.5V on
   the Brick Pro, as NextUI does), and the battery LED colours the top light bar.
 - The card is `/mnt/SDCARD`, and brickslot leaves the boot logo alone.

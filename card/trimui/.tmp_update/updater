@@ -24,23 +24,25 @@ keep_logs() {
 	return 0
 }
 
-model="$(strings /usr/trimui/bin/MainUI 2>/dev/null | grep '^Trimui' | head -n 1)"
-case "$model" in
-"Trimui Brick Pro") device=brickpro ;;
-"Trimui Brick") device=brick ;;
-"Trimui Smart Pro") device=smartpro ;;
+model="$(strings /usr/trimui/bin/MainUI 2>/dev/null | grep -i '^Trimui' | head -n 1)"
+model_lc="$(echo "$model" | tr 'A-Z' 'a-z')"
+case "$model_lc" in
+*brick*pro*) device=brickpro ;;
+*smart*pro*) device=smartpro ;;
+*brick*) device=brick ;;
 *)
 	case "$(cat /proc/cpuinfo 2>/dev/null)" in
 	*TG4040*) device=brickpro ;;
 	*TG3040*) device=brick ;;
-	*) device=smartpro ;;
+	*TG5040*) device=smartpro ;;
+	# this card is for the Brick family; do not fall through to Smart Pro
+	*) device=brickpro ;;
 	esac
 	;;
 esac
 export SLOT_DEVICE="${SLOT_DEVICE:-$device}"
 export SLOT_KEYMAP="${SLOT_KEYMAP:-trimui}"
-# while the port is new, every button press is written to input-trace.log
-export SLOT_TRACE_INPUT="${SLOT_TRACE_INPUT:-1}"
+# set SLOT_TRACE_INPUT=1 to log every pad event to input-trace.log
 log "boot on $model ($SLOT_DEVICE)"
 
 export LD_LIBRARY_PATH="/usr/trimui/lib:/usr/lib:$LD_LIBRARY_PATH"

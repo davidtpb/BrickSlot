@@ -392,6 +392,36 @@ fn trimui_triggers_press_past_half_travel_and_release_below_it() {
 }
 
 #[test]
+fn each_trimui_trigger_uses_its_own_halfway_point() {
+    use slot::input::evdev::{Ev, Triggers, ABS_RZ, ABS_Z, EV_ABS};
+    let ev = |code, value| Ev {
+        kind: EV_ABS,
+        code,
+        value,
+    };
+    let mut t = Triggers::axes(128, 2000);
+    assert_eq!(t.feed(ev(ABS_Z, 128)), Some(RawEvent::Down(Btn::L2)));
+    assert_eq!(
+        t.feed(ev(ABS_RZ, 1999)),
+        None,
+        "R2 is still below its own half"
+    );
+    assert_eq!(t.feed(ev(ABS_RZ, 2000)), Some(RawEvent::Down(Btn::R2)));
+}
+
+#[test]
+fn digital_trimui_l2_r2_are_ignored_so_the_analog_axes_own_them() {
+    use slot::input::evdev::Keymap;
+    let key = |code, value| {
+        decode(&packet(EV_KEY, code, value)).and_then(|ev| Keymap::TrimUi.to_raw(ev))
+    };
+    assert_eq!(key(0x138, 1), None);
+    assert_eq!(key(0x139, 1), None);
+    assert_eq!(Keymap::TrimUi.btn(0x138), Some(Btn::L2));
+    assert_eq!(Keymap::TrimUi.btn(0x139), Some(Btn::R2));
+}
+
+#[test]
 fn a_trimui_switch_event_is_never_taken_for_a_lid() {
     use slot::input::evdev::Keymap;
     let shut = decode(&packet(EV_SW, SW_LID, 1)).unwrap();

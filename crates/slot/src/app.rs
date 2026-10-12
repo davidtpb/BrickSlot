@@ -3522,6 +3522,7 @@ impl App {
             QuickRow::IdleDim => s.idle_dim = !s.idle_dim,
             QuickRow::Hardcore => {
                 s.hardcore = !s.hardcore;
+                crate::cheevos::set_hardcore(s.hardcore);
                 if s.hardcore {
                     s.achievements = true;
                     crate::cheevos::enable(true);
@@ -3537,7 +3538,6 @@ impl App {
                         );
                     }
                 }
-                crate::cheevos::set_hardcore(s.hardcore);
             }
             QuickRow::Syncthing => {
                 s.syncthing = !s.syncthing;

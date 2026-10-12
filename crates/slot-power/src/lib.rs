@@ -4,8 +4,9 @@ mod power;
 mod sim;
 
 pub use device::{
-    effect_colour, has_bit, hue_rgb, motor_change, read_only, read_only_in, record_first_frame,
-    rumble_node, trace_first_frame, uptime_seconds, Board, DevicePlatform, BOARD_VAR,
+    effect_colour, h700_lights, has_bit, hue_rgb, motor_change, read_only, read_only_in,
+    record_first_frame, rumble_node, trace_first_frame, uptime_seconds, Board, DevicePlatform,
+    Switch, BOARD_VAR,
 };
 pub use motor::Motor;
 pub use power::Power;

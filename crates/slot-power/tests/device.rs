@@ -362,3 +362,44 @@ fn an_option_that_merely_mentions_ro_is_not_read_only() {
     let m = "/dev/x /mnt/card vfat rw,errors=remount-ro 0 0\n";
     assert!(!slot_power::read_only_in(m, Path::new("/mnt/card")));
 }
+
+#[test]
+fn the_power_light_is_not_the_card_reader_s_and_goes_out_with_the_lid() {
+    let d = sysfs("255", "87");
+    leds(
+        &d,
+        "input0::capslock",
+        &[("brightness", "0"), ("max_brightness", "1")],
+    );
+    leds(
+        &d,
+        "mmc0::",
+        &[("brightness", "0"), ("max_brightness", "255")],
+    );
+    leds(&d, "work", &[("brightness", "1"), ("max_brightness", "1")]);
+    let pmic = d.path().join("class/power_supply/axp2202-battery");
+    fs::create_dir_all(&pmic).unwrap();
+    fs::write(pmic.join("work_led"), "1\n").unwrap();
+    let mut p = platform(&d);
+    p.set_led(LedState::Running);
+    assert_eq!(read(&d, "work/brightness"), "1");
+    p.set_led(LedState::Off);
+    assert_eq!(
+        read(&d, "work/brightness"),
+        "0",
+        "the power light stayed on"
+    );
+    assert_eq!(
+        fs::read_to_string(pmic.join("work_led")).unwrap().trim(),
+        "0",
+        "the PMIC's light stayed on"
+    );
+    assert_eq!(read(&d, "mmc0::/brightness"), "0");
+    assert_eq!(read(&d, "input0::capslock/brightness"), "0");
+    p.set_led(LedState::Running);
+    assert_eq!(read(&d, "work/brightness"), "1");
+    assert_eq!(
+        fs::read_to_string(pmic.join("work_led")).unwrap().trim(),
+        "1"
+    );
+}

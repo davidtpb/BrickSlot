@@ -125,6 +125,114 @@ enum Backlight {
     Disp(PathBuf),
 }
 
+/// A light that is only on or off.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Switch {
+    /// A `class/leds` LED: its directory and full brightness.
+    Leds { dir: PathBuf, max: u32 },
+    /// A file taking 1 for on and 0 for off.
+    File(PathBuf),
+}
+
+impl Switch {
+    fn set(&self, on: bool) {
+        let (path, value) = match self {
+            Switch::Leds { dir, max } => (dir.join("brightness"), if on { *max } else { 0 }),
+            Switch::File(path) => (path.clone(), u32::from(on)),
+        };
+        let _ = fs::write(path, format!("{value}\n"));
+    }
+}
+
+/// LEDs a kernel lists that are not a power light: the card reader's
+/// activity, keyboard locks, radios.
+fn not_a_power_light(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    [
+        "mmc",
+        "capslock",
+        "numlock",
+        "scrolllock",
+        "kana",
+        "compose",
+        "rfkill",
+        "phy",
+        "usb",
+        "disk",
+        "hci",
+        "wlan",
+        "bluetooth",
+        "mute",
+    ]
+    .iter()
+    .any(|n| name.contains(n))
+}
+
+/// The H700 boards' lights: the first `class/leds` LED that may be the
+/// power light, every other such LED, and any PMIC `work_led` switch.
+pub fn h700_lights(sysfs: &Path) -> (Option<PathBuf>, Vec<Switch>) {
+    let mut dirs: Vec<PathBuf> = fs::read_dir(sysfs.join("class/leds"))
+        .map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).collect())
+        .unwrap_or_default();
+    dirs.sort();
+    let mut lights = dirs.into_iter().filter(|d| {
+        let name = d.file_name().map(|n| n.to_string_lossy().into_owned());
+        name.is_some_and(|n| !not_a_power_light(&n))
+            && (d.join("multi_intensity").is_file() || d.join("brightness").is_file())
+    });
+    let first = lights.next();
+    let mut extra: Vec<Switch> = lights
+        .map(|dir| {
+            let max = read_number(&dir.join("max_brightness")).unwrap_or(255);
+            Switch::Leds { dir, max }
+        })
+        .collect();
+    if let Ok(supplies) = fs::read_dir(sysfs.join("class/power_supply")) {
+        let mut files: Vec<PathBuf> = supplies
+            .filter_map(|e| e.ok())
+            .map(|e| e.path().join("work_led"))
+            .filter(|f| f.is_file())
+            .collect();
+        files.sort();
+        extra.extend(files.into_iter().map(Switch::File));
+    }
+    (first, extra)
+}
+
+/// Writes what lights there are to `slot-led.log` on the card, so a light
+/// that will not go out can be tracked down.
+fn log_lights(root: &Path, sysfs: &Path, first: &Option<PathBuf>, extra: &[Switch]) {
+    use std::io::Write;
+    let mut text = String::from("class/leds:\n");
+    if let Ok(d) = fs::read_dir(sysfs.join("class/leds")) {
+        let mut names: Vec<String> = d
+            .filter_map(|e| e.ok())
+            .map(|e| {
+                let p = e.path();
+                let b = fs::read_to_string(p.join("brightness")).unwrap_or_default();
+                let m = fs::read_to_string(p.join("max_brightness")).unwrap_or_default();
+                let t = fs::read_to_string(p.join("trigger")).unwrap_or_default();
+                format!(
+                    "  {} brightness={} max={} trigger={}",
+                    e.file_name().to_string_lossy(),
+                    b.trim(),
+                    m.trim(),
+                    t.trim()
+                )
+            })
+            .collect();
+        names.sort();
+        for n in names {
+            text.push_str(&n);
+            text.push('\n');
+        }
+    }
+    text.push_str(&format!("chosen: {first:?}\nalso: {extra:?}\n"));
+    if let Ok(mut f) = fs::File::create(root.join("slot-led.log")) {
+        let _ = f.write_all(text.as_bytes());
+    }
+}
+
 enum Led {
     Multi(PathBuf),
     Mono { dir: PathBuf, max: u32 },
@@ -140,6 +248,9 @@ pub struct DevicePlatform {
     rtc: Option<PathBuf>,
     motor: Option<Motor>,
     led: Option<Led>,
+    /// More lights switched on and off with `led`: the H700 boards' other
+    /// LEDs and the PMIC's own LED switch, where there are such.
+    led_extra: Vec<Switch>,
     board: Board,
     lights: Lights,
     led_state: Option<LedState>,
@@ -180,10 +291,9 @@ impl DevicePlatform {
         let battery = first_dir(&sysfs.join("class/power_supply"), is_battery);
         let rtc = first_dir(&sysfs.join("class/rtc"), |_| true);
         let motor = Motor::open(sysfs);
-        let led = first_dir(&sysfs.join("class/leds"), |d| {
-            d.join("multi_intensity").is_file() || d.join("brightness").is_file()
-        })
-        .map(|dir| {
+        let (first, led_extra) = h700_lights(sysfs);
+        log_lights(&root, sysfs, &first, &led_extra);
+        let led = first.map(|dir| {
             if dir.join("multi_intensity").is_file() {
                 Led::Multi(dir)
             } else {
@@ -200,6 +310,7 @@ impl DevicePlatform {
             rtc,
             motor,
             led,
+            led_extra,
             board,
             lights: Lights::default(),
             led_state: None,
@@ -237,6 +348,7 @@ impl DevicePlatform {
             rtc: first_dir(&sysfs.join("class/rtc"), |_| true),
             motor,
             led,
+            led_extra: Vec::new(),
             board,
             lights: Lights::default(),
             led_state: None,
@@ -907,10 +1019,18 @@ impl Platform for DevicePlatform {
         if let Some(stop) = self.rainbow.take() {
             stop.store(true, std::sync::atomic::Ordering::Relaxed);
         }
+        let lights = self.lights;
+        let lit = match lights.mode {
+            LightsMode::Off => false,
+            LightsMode::Battery => !matches!(state, LedState::Off | LedState::Low),
+            LightsMode::Colour => state != LedState::Off,
+        };
+        for light in &self.led_extra {
+            light.set(lit);
+        }
         let Some(led) = &self.led else {
             return;
         };
-        let lights = self.lights;
         let shown = match (lights.mode, state) {
             (_, LedState::Off) | (LightsMode::Off, _) => None,
             (LightsMode::Colour, _) => Some((lights.rgb, lights.effect, lights.percent)),

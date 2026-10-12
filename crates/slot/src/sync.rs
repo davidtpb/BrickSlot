@@ -113,9 +113,13 @@ pub fn manifest(root: &Path, roms: bool) -> Vec<Entry> {
 }
 
 fn walk(root: &Path, at: &Path, out: &mut Vec<Entry>) {
-    let Ok(meta) = std::fs::metadata(at) else {
+    // Links are not followed: they could lead off the shared folders.
+    let Ok(meta) = std::fs::symlink_metadata(at) else {
         return;
     };
+    if meta.file_type().is_symlink() {
+        return;
+    }
     if meta.is_file() {
         let Ok(rel) = at.strip_prefix(root) else {
             return;
@@ -232,15 +236,22 @@ fn receive_files(
         if e.size > FILE_MAX {
             return Err(std::io::Error::other(format!("{} is too big", e.path)));
         }
-        let ok = allowed(&e.path, roms);
         let dest = root.join(&e.path);
         let tmp = PathBuf::from(format!("{}.sync.tmp", dest.display()));
+        let tmp_rel = format!("{}.sync.tmp", e.path);
+        let ok = allowed(&e.path, roms)
+            && crate::fileserver::no_links(root, Path::new(&e.path))
+            && crate::fileserver::no_links(root, Path::new(&tmp_rel));
         let mut body = r.take(e.size);
         if ok {
             if let Some(dir) = dest.parent() {
                 std::fs::create_dir_all(dir)?;
             }
-            let mut out = std::fs::File::create(&tmp)?;
+            let _ = std::fs::remove_file(&tmp);
+            let mut out = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)?;
             let copied = std::io::copy(&mut body, &mut out)?;
             if copied != e.size {
                 let _ = std::fs::remove_file(&tmp);

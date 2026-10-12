@@ -140,3 +140,27 @@ fn the_device_sync_screen_lives_under_network_and_toggles_roms() {
     assert_eq!(a.quick_menu(), Some(slot_ui::QuickRow::DeviceSync));
     assert!(!a.sync_running());
 }
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_neither_sends_nor_lets_in_a_file_from_outside() {
+    use std::os::unix::fs::symlink;
+    let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    put(a.path(), "System/secret", b"private", 5);
+    std::fs::create_dir_all(a.path().join("Saves")).unwrap();
+    symlink(a.path().join("System"), a.path().join("Saves/out")).unwrap();
+    put(b.path(), "System/slot", b"binary", 5);
+    std::fs::create_dir_all(b.path().join("Saves")).unwrap();
+    symlink(b.path().join("System"), b.path().join("Saves/GBA")).unwrap();
+    put(a.path(), "Saves/GBA/slot", b"evil", 1);
+    sync_pair(a.path(), b.path(), false);
+    assert!(
+        !b.path().join("Saves/out").exists(),
+        "a file behind a link was sent"
+    );
+    assert_eq!(
+        std::fs::read(b.path().join("System/slot")).unwrap(),
+        b"binary",
+        "a link let a file outside be overwritten"
+    );
+}

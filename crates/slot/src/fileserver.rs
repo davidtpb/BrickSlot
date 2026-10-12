@@ -4,9 +4,9 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const PORT: u16 = 8080;
 
@@ -23,6 +23,39 @@ pub const ROOTS: [&str; 7] = [
 
 const UPLOAD_MAX: u64 = 128 << 20;
 
+/// How many requests are served at once; more are turned away.
+pub const CONNECTIONS_MAX: usize = 8;
+/// The longest request line or header line taken.
+pub const LINE_MAX: usize = 8 * 1024;
+/// The most header lines taken.
+const HEADERS_MAX: usize = 64;
+/// How long a client has to send its whole request head.
+const HEAD_WITHIN: Duration = Duration::from_secs(10);
+
+/// Counts a request being served while it lives.
+struct Slot(Arc<AtomicUsize>);
+
+impl Slot {
+    fn take(active: &Arc<AtomicUsize>) -> Option<Slot> {
+        let mut now = active.load(Ordering::Acquire);
+        loop {
+            if now >= CONNECTIONS_MAX {
+                return None;
+            }
+            match active.compare_exchange(now, now + 1, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return Some(Slot(active.clone())),
+                Err(seen) => now = seen,
+            }
+        }
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 pub struct FileServer {
     stop: Arc<AtomicBool>,
     pub port: u16,
@@ -37,16 +70,27 @@ impl FileServer {
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
         let root = root.to_path_buf();
+        let active = Arc::new(AtomicUsize::new(0));
         std::thread::Builder::new()
             .name("slot-files".into())
             .spawn(move || {
                 while !flag.load(Ordering::Relaxed) {
                     match listener.accept() {
                         Ok((stream, _)) => {
+                            let _ = stream.set_nonblocking(false);
+                            let Some(slot) = Slot::take(&active) else {
+                                let mut stream = stream;
+                                let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+                                let _ = Reply::status(503, "Busy, try again").write(&mut stream);
+                                continue;
+                            };
                             let root = root.clone();
                             let _ = std::thread::Builder::new()
                                 .name("slot-files-req".into())
-                                .spawn(move || serve(&root, stream));
+                                .spawn(move || {
+                                    serve(&root, stream);
+                                    drop(slot);
+                                });
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             std::thread::sleep(Duration::from_millis(100))
@@ -84,17 +128,39 @@ impl Request {
     }
 }
 
+/// One line of the request head, refused past `LINE_MAX` or the deadline.
+fn read_line(reader: &mut BufReader<TcpStream>, by: Instant) -> Option<String> {
+    if Instant::now() > by {
+        return None;
+    }
+    let mut buf = Vec::new();
+    let n = reader
+        .by_ref()
+        .take(LINE_MAX as u64 + 1)
+        .read_until(b'\n', &mut buf)
+        .ok()?;
+    if n > LINE_MAX || (n > 0 && !buf.ends_with(b"\n")) {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&buf).into_owned())
+}
+
 fn read_request(reader: &mut BufReader<TcpStream>) -> Option<Request> {
-    let mut line = String::new();
-    reader.read_line(&mut line).ok()?;
+    let by = Instant::now() + HEAD_WITHIN;
+    let line = read_line(reader, by)?;
     let mut parts = line.split_whitespace();
     let method = parts.next()?.to_string();
     let target = parts.next()?.to_string();
     let mut length = 0;
+    let mut headers = 0;
     loop {
-        let mut header = String::new();
-        if reader.read_line(&mut header).ok()? == 0 {
+        let header = read_line(reader, by)?;
+        if header.is_empty() {
             break;
+        }
+        headers += 1;
+        if headers > HEADERS_MAX {
+            return None;
         }
         let header = header.trim_end();
         if header.is_empty() {
@@ -192,8 +258,29 @@ pub fn allowed(rel: &str) -> Option<PathBuf> {
     Some(parts.iter().collect())
 }
 
+/// Whether every part of `rel` that exists under `root` is a real file or
+/// folder, not a symbolic link that could lead outside the allowed folders.
+pub fn no_links(root: &Path, rel: &Path) -> bool {
+    let mut at = root.to_path_buf();
+    for part in rel.components() {
+        at.push(part);
+        match std::fs::symlink_metadata(&at) {
+            Ok(meta) if meta.file_type().is_symlink() => return false,
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return true,
+            Err(_) => return false,
+        }
+    }
+    true
+}
+
+/// `allowed`, and free of symbolic links on the card.
+fn reachable(root: &Path, rel: &str) -> Option<PathBuf> {
+    allowed(rel).filter(|p| no_links(root, p))
+}
+
 fn serve(root: &Path, stream: TcpStream) {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+    let _ = stream.set_read_timeout(Some(HEAD_WITHIN));
     let Ok(write_half) = stream.try_clone() else {
         return;
     };
@@ -204,19 +291,27 @@ fn serve(root: &Path, stream: TcpStream) {
     };
     let reply = match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/") => Reply::html(index_page(root)),
-        ("GET", "/browse") => match req.param("dir").and_then(allowed) {
+        ("GET", "/browse") => match req.param("dir").and_then(|d| reachable(root, d)) {
             Some(rel) => Reply::html(browse_page(root, &rel)),
             None => Reply::status(404, "No such folder"),
         },
-        ("GET", "/get") => match req.param("path").and_then(allowed) {
+        ("GET", "/get") => match req.param("path").and_then(|p| reachable(root, p)) {
             Some(rel) => return send_file(&mut out, &root.join(rel)),
             None => Reply::status(404, "No such file"),
         },
-        ("PUT", "/put") => match (req.param("dir").and_then(allowed), req.param("name")) {
-            (Some(dir), Some(name)) => receive(root, &dir, name, req.length, &mut reader),
+        ("PUT", "/put") => match (
+            req.param("dir").and_then(|d| reachable(root, d)),
+            req.param("name"),
+        ) {
+            (Some(dir), Some(name)) => {
+                let _ = reader
+                    .get_ref()
+                    .set_read_timeout(Some(Duration::from_secs(30)));
+                receive(root, &dir, name, req.length, &mut reader)
+            }
             _ => Reply::status(400, "Missing folder or name"),
         },
-        ("POST", "/delete") => match req.param("path").and_then(allowed) {
+        ("POST", "/delete") => match req.param("path").and_then(|p| reachable(root, p)) {
             Some(rel) if rel.components().count() > 1 => {
                 match std::fs::remove_file(root.join(&rel)) {
                     Ok(()) => Reply::status(200, "Deleted"),
@@ -257,8 +352,10 @@ impl Reply {
         let reason = match self.code {
             200 => "OK",
             400 => "Bad Request",
+            403 => "Forbidden",
             404 => "Not Found",
             413 => "Too Large",
+            503 => "Busy",
             _ => "Error",
         };
         write!(
@@ -307,14 +404,24 @@ fn receive(
     if length > UPLOAD_MAX {
         return Reply::status(413, "File too large");
     }
+    let tmp_name = format!(".{}.part", name.to_string_lossy());
+    if !no_links(root, &dir.join(name)) || !no_links(root, &dir.join(&tmp_name)) {
+        return Reply::status(403, "Not a plain file");
+    }
     let dir = root.join(dir);
     if let Err(e) = std::fs::create_dir_all(&dir) {
         return Reply::status(500, &e.to_string());
     }
     let dest = dir.join(name);
-    let tmp = dir.join(format!(".{}.part", name.to_string_lossy()));
+    let tmp = dir.join(tmp_name);
     let written = (|| -> std::io::Result<u64> {
-        let mut file = std::fs::File::create(&tmp)?;
+        // A new file only: never one already there, which could be a link
+        // put in place since the check.
+        let _ = std::fs::remove_file(&tmp);
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
         let n = std::io::copy(&mut body.take(length), &mut file)?;
         file.sync_all()?;
         Ok(n)
@@ -351,7 +458,7 @@ fn index_page(root: &Path) -> String {
         let mut subs: Vec<String> = std::fs::read_dir(&dir)
             .map(|d| {
                 d.flatten()
-                    .filter(|e| e.path().is_dir())
+                    .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
                     .map(|e| e.file_name().to_string_lossy().into_owned())
                     .filter(|n| !n.starts_with('.'))
                     .collect()
@@ -397,7 +504,10 @@ fn browse_page(root: &Path, rel: &Path) -> String {
                     if name.starts_with('.') {
                         return None;
                     }
-                    let meta = e.metadata().ok()?;
+                    let meta = std::fs::symlink_metadata(e.path()).ok()?;
+                    if meta.file_type().is_symlink() {
+                        return None;
+                    }
                     Some((meta.is_dir(), name, meta.len()))
                 })
                 .collect()

@@ -2591,17 +2591,6 @@ impl App {
         }
     }
 
-    fn start_update(&mut self) {
-        if !self.net.online() {
-            return self.say("Turn on Wi-Fi first", "Network > Wi-Fi");
-        }
-        if self.root.is_none() {
-            return;
-        }
-        self.net.send(NetJob::Update);
-        self.say("Looking for an update\u{2026}", "From GitHub releases");
-    }
-
     fn note_input(&mut self) {
         self.idle_at = self.now();
         if !self.dimmed {
@@ -3370,7 +3359,6 @@ impl App {
             }
             QuickRow::EmulatorSettings => self.open_emulator_settings(Platform::Gba),
             QuickRow::Screenshots => self.open_shots(),
-            QuickRow::Update => self.start_update(),
             QuickRow::WifiStatus => {
                 self.say("Checking Wi-Fi\u{2026}", "");
                 self.net.send(NetJob::Status);
@@ -3572,8 +3560,7 @@ impl App {
             | QuickRow::Tools
             | QuickRow::System
             | QuickRow::WifiStatus
-            | QuickRow::Screenshots
-            | QuickRow::Update => return,
+            | QuickRow::Screenshots => return,
         }
         if QuickRow::LIGHTS.contains(&row) {
             let lights = self.lights();
@@ -6391,7 +6378,6 @@ fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue>
         | QuickRow::Tools
         | QuickRow::System
         | QuickRow::WifiStatus
-        | QuickRow::Screenshots
-        | QuickRow::Update => None,
+        | QuickRow::Screenshots => None,
     }
 }

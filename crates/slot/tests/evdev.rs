@@ -299,6 +299,53 @@ fn the_left_stick_is_a_d_pad_past_its_deadzone() {
 }
 
 #[test]
+fn a_stick_axis_resting_pushed_holds_nothing_until_it_comes_back() {
+    use slot::input::evdev::{Ev, Stick, ABS_X, EV_ABS};
+    // X rests jammed at its minimum, as an axis with no stick behind it can.
+    let mut stick = Stick::new(0, 255, 16, 0, 255, 16).rest(0, 128);
+    let ev = |value| Ev {
+        kind: EV_ABS,
+        code: ABS_X,
+        value,
+    };
+    assert_eq!(stick.feed(ev(0)), vec![], "Left was held from the start");
+    assert_eq!(stick.feed(ev(2)), vec![]);
+    // Once it has been to the middle it works as normal.
+    assert_eq!(stick.feed(ev(128)), vec![]);
+    assert_eq!(stick.feed(ev(10)), vec![RawEvent::Down(Btn::Left)]);
+    assert_eq!(stick.feed(ev(128)), vec![RawEvent::Up(Btn::Left)]);
+}
+
+#[test]
+fn a_drifted_stick_is_centred_where_it_rests() {
+    use slot::input::evdev::{Ev, Stick, ABS_X, EV_ABS};
+    // Rests at 160 of 0..255: still inside the deadzone, but off-centre.
+    let mut stick = Stick::new(0, 255, 0, 0, 255, 0).rest(160, 128);
+    let ev = |value| Ev {
+        kind: EV_ABS,
+        code: ABS_X,
+        value,
+    };
+    assert_eq!(stick.feed(ev(170)), vec![]);
+    assert_eq!(stick.feed(ev(210)), vec![RawEvent::Down(Btn::Right)]);
+}
+
+#[test]
+fn a_stick_at_the_edge_of_its_deadzone_does_not_chatter() {
+    use slot::input::evdev::{Ev, Stick, ABS_X, EV_ABS};
+    let mut stick = Stick::new(0, 255, 0, 0, 255, 0);
+    let ev = |value| Ev {
+        kind: EV_ABS,
+        code: ABS_X,
+        value,
+    };
+    // Dead is 42 either side of 127.
+    assert_eq!(stick.feed(ev(170)), vec![RawEvent::Down(Btn::Right)]);
+    assert_eq!(stick.feed(ev(166)), vec![], "a wobble let go of Right");
+    assert_eq!(stick.feed(ev(150)), vec![RawEvent::Up(Btn::Right)]);
+}
+
+#[test]
 fn a_hat_swung_end_to_end_releases_before_it_presses() {
     let mut hat = slot::input::evdev::Hat::default();
     let ev = |code, value| slot::input::evdev::Ev {

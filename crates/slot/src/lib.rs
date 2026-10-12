@@ -43,6 +43,5 @@ pub mod state_writer;
 pub mod sync;
 pub mod sysinfo;
 pub mod thumb;
-pub mod update;
 pub mod video_mode;
 pub mod wallpaper;

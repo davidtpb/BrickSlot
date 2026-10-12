@@ -149,13 +149,63 @@ impl Hat {
 
 /// Left stick as a D-pad, using each axis's reported centre and deadzone.
 pub struct Stick {
-    x: i32,
-    y: i32,
-    x_mid: i32,
-    y_mid: i32,
-    x_dead: i32,
-    y_dead: i32,
+    x: Axis,
+    y: Axis,
     live: bool,
+}
+
+/// One stick axis: where it rests, how far it must move to press, and
+/// whether it has been seen at rest since it was opened.
+struct Axis {
+    held: i32,
+    mid: i32,
+    dead: i32,
+    /// An axis that starts pushed (no stick behind it, or one that rests at
+    /// the end of its range) would otherwise hold a direction for good. It
+    /// presses nothing until it has once come back to the middle.
+    armed: bool,
+}
+
+impl Axis {
+    fn new(min: i32, max: i32, flat: i32) -> Self {
+        Axis {
+            held: 0,
+            mid: min / 2 + max / 2,
+            dead: flat.abs().max((max - min).abs() / 6).max(1),
+            armed: true,
+        }
+    }
+
+    fn rest(&mut self, value: i32) {
+        if (value - self.mid).abs() < self.dead {
+            // A stick that has drifted a little rests a little off the
+            // middle of its range; centre on where it actually sits.
+            self.mid = value;
+        } else {
+            self.armed = false;
+        }
+    }
+
+    /// The direction the axis now holds, -1, 0 or 1.
+    fn read(&mut self, value: i32) -> i32 {
+        let delta = value - self.mid;
+        // Letting go happens a little nearer the middle than pressing, so
+        // a stick held right at the edge of the deadzone does not chatter.
+        let release = self.dead * 3 / 4;
+        if delta.abs() < release {
+            self.armed = true;
+            return 0;
+        }
+        if !self.armed {
+            return 0;
+        }
+        match self.held {
+            h if h != 0 && delta.signum() == h => h,
+            _ if delta <= -self.dead => -1,
+            _ if delta >= self.dead => 1,
+            _ => 0,
+        }
+    }
 }
 
 impl Default for Stick {
@@ -166,52 +216,37 @@ impl Default for Stick {
 
 impl Stick {
     pub fn new(xmin: i32, xmax: i32, xflat: i32, ymin: i32, ymax: i32, yflat: i32) -> Self {
-        let live = xmax > xmin && ymax > ymin;
-        let span = |min: i32, max: i32, flat: i32| {
-            let mid = min / 2 + max / 2;
-            let dead = flat.abs().max((max - min).abs() / 6).max(1);
-            (mid, dead)
-        };
-        let (x_mid, x_dead) = span(xmin, xmax, xflat);
-        let (y_mid, y_dead) = span(ymin, ymax, yflat);
         Stick {
-            x: 0,
-            y: 0,
-            x_mid,
-            y_mid,
-            x_dead,
-            y_dead,
-            live,
+            x: Axis::new(xmin, xmax, xflat),
+            y: Axis::new(ymin, ymax, yflat),
+            live: xmax > xmin && ymax > ymin,
         }
+    }
+
+    /// Where the axes sit when the stick is opened, as the kernel reports
+    /// them. An axis resting near the middle is centred on that; one
+    /// resting pushed is ignored until it comes back.
+    pub fn rest(mut self, x: i32, y: i32) -> Self {
+        self.x.rest(x);
+        self.y.rest(y);
+        self
     }
 
     pub fn feed(&mut self, ev: Ev) -> Vec<RawEvent> {
         if !self.live {
             return Vec::new();
         }
-        let (held, mid, dead, ends) = match ev.code {
-            ABS_X => (
-                &mut self.x,
-                self.x_mid,
-                self.x_dead,
-                [Btn::Left, Btn::Right],
-            ),
-            ABS_Y => (&mut self.y, self.y_mid, self.y_dead, [Btn::Up, Btn::Down]),
+        let (axis, ends) = match ev.code {
+            ABS_X => (&mut self.x, [Btn::Left, Btn::Right]),
+            ABS_Y => (&mut self.y, [Btn::Up, Btn::Down]),
             _ => return Vec::new(),
         };
-        let delta = ev.value - mid;
-        let now = if delta <= -dead {
-            -1
-        } else if delta >= dead {
-            1
-        } else {
-            0
-        };
-        let was = *held;
+        let was = axis.held;
+        let now = axis.read(ev.value);
         if now == was {
             return Vec::new();
         }
-        *held = now;
+        axis.held = now;
         let btn = |v: i32| ends[usize::from(v > 0)];
         let mut out = Vec::new();
         if was != 0 {

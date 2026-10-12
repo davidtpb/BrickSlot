@@ -138,8 +138,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Syncthing",
             "RetroAchievements",
             "Download Labels",
-            "Screenshots",
-            "Update"
+            "Screenshots"
         ]
     );
     assert_eq!(

@@ -97,6 +97,11 @@ extern "C" {
 }
 
 fn absinfo(file: &File, axis: u16) -> Option<(i32, i32, i32)> {
+    absinfo_now(file, axis).map(|(_, min, max, flat)| (min, max, flat))
+}
+
+/// An axis's current value, then its min, max and flat.
+fn absinfo_now(file: &File, axis: u16) -> Option<(i32, i32, i32, i32)> {
     use std::os::unix::io::AsRawFd;
     let mut info = [0i32; 6];
     let rc = unsafe {
@@ -106,8 +111,8 @@ fn absinfo(file: &File, axis: u16) -> Option<(i32, i32, i32)> {
             info.as_mut_ptr(),
         )
     };
-    let (min, max, flat) = (info[1], info[2], info[4]);
-    (rc >= 0 && max > min).then_some((min, max, flat))
+    let (value, min, max, flat) = (info[0], info[1], info[2], info[4]);
+    (rc >= 0 && max > min).then_some((value, min, max, flat))
 }
 
 fn trigger_threshold(file: &File, axis: u16) -> i32 {
@@ -134,11 +139,12 @@ fn read_node(node: &Path, keymap: Keymap, queue: &Mutex<Vec<RawEvent>>, trace: O
         ),
         Keymap::Anbernic => Triggers::new(1),
     };
-    let stick_x = absinfo(&file, ABS_X).unwrap_or((0, 0, 0));
-    let stick_y = absinfo(&file, ABS_Y).unwrap_or((0, 0, 0));
+    let stick_x = absinfo_now(&file, ABS_X).unwrap_or((0, 0, 0, 0));
+    let stick_y = absinfo_now(&file, ABS_Y).unwrap_or((0, 0, 0, 0));
     let mut stick = Stick::new(
-        stick_x.0, stick_x.1, stick_x.2, stick_y.0, stick_y.1, stick_y.2,
-    );
+        stick_x.1, stick_x.2, stick_x.3, stick_y.1, stick_y.2, stick_y.3,
+    )
+    .rest(stick_x.0, stick_y.0);
     let mut buf = [0u8; EVENT_BYTES * 16];
     loop {
         let read = match file.read(&mut buf) {

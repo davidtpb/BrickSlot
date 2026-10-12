@@ -54,11 +54,10 @@ pub enum QuickRow {
     IdleDim,
     Hardcore,
     Screenshots,
-    Update,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 49] = [
+    pub const ALL: [QuickRow; 48] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -107,7 +106,6 @@ impl QuickRow {
         QuickRow::IdleDim,
         QuickRow::Hardcore,
         QuickRow::Screenshots,
-        QuickRow::Update,
     ];
 
     pub const MAIN: [QuickRow; 7] = [
@@ -162,7 +160,7 @@ impl QuickRow {
 
     /// What the frontend does besides play: emulator settings, moving
     /// files and progress about, achievements and labels.
-    pub const TOOLS: [QuickRow; 9] = [
+    pub const TOOLS: [QuickRow; 8] = [
         QuickRow::Files,
         QuickRow::EmulatorSettings,
         QuickRow::DeviceSync,
@@ -171,7 +169,6 @@ impl QuickRow {
         QuickRow::Achievements,
         QuickRow::Labels,
         QuickRow::Screenshots,
-        QuickRow::Update,
     ];
 
     pub const SYSTEM: [QuickRow; 5] = [
@@ -279,7 +276,6 @@ impl QuickRow {
             QuickRow::IdleDim => "Idle Dim",
             QuickRow::Hardcore => "Hardcore",
             QuickRow::Screenshots => "Screenshots",
-            QuickRow::Update => "Update",
         }
     }
 
@@ -303,7 +299,6 @@ impl QuickRow {
                 | QuickRow::DeviceSync
                 | QuickRow::Files
                 | QuickRow::Screenshots
-                | QuickRow::Update
         )
     }
 

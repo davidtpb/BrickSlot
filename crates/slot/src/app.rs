@@ -376,7 +376,7 @@ pub struct App {
     home: Option<slot_ui::HomePanel>,
     socket_backdrop: Option<TexId>,
     /// The handheld the Socket look puts carts in.
-    sp_face: Option<(TexId, u32, u32)>,
+    sp_faces: Vec<(TexId, u32, u32)>,
     socket_chrome: Vec<(TexId, u32, u32)>,
     customize: Option<Customize>,
     /// The starred games, from every platform, as a shelf of their own
@@ -546,7 +546,7 @@ impl App {
             search_picked_at: 0,
             home: None,
             socket_backdrop: None,
-            sp_face: None,
+            sp_faces: Vec::new(),
             socket_chrome: Vec::new(),
             customize: None,
             fav_shelf: Shelf::new(Vec::new()),
@@ -2200,12 +2200,12 @@ impl App {
     }
 
     /// Whether the handheld for the Socket insert is wanted.
-    pub fn wants_sp_face(&self) -> bool {
-        self.socket_look() && self.sp_face.is_none()
+    pub fn wants_sp_faces(&self) -> bool {
+        self.socket_look() && self.sp_faces.is_empty()
     }
 
-    pub fn set_sp_face(&mut self, face: (TexId, u32, u32)) {
-        self.sp_face = Some(face);
+    pub fn set_sp_faces(&mut self, faces: Vec<(TexId, u32, u32)>) {
+        self.sp_faces = faces;
     }
 
     /// How long a cart takes to go in, and when it touches the contacts.
@@ -4565,7 +4565,7 @@ impl App {
             let (w, h) = slot_ui::cart_box(c.platform);
             face.map(|tex| (tex, (w as f32, h as f32)))
         });
-        slot_ui::draw_sp(self.sp_face, cart, pose, out);
+        slot_ui::draw_sp(&self.sp_faces, cart, pose, out);
     }
 
     fn push_game(&self, out: &mut Vec<Draw>) {

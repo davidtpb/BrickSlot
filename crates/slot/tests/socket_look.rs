@@ -312,6 +312,12 @@ fn save_format_picks_the_compressed_retroarch_format_from_a_list() {
     );
 }
 
+fn sp_faces() -> Vec<(slot_ui::TexId, u32, u32)> {
+    (0..4)
+        .map(|i| (slot_ui::TexId::from_raw(900 + i), 64, 64))
+        .collect()
+}
+
 fn run(a: &mut App, secs: f32) {
     let steps = (secs / 0.01).ceil() as usize;
     for _ in 0..steps {
@@ -322,8 +328,8 @@ fn run(a: &mut App, secs: f32) {
 #[test]
 fn a_cart_goes_into_the_handheld_and_the_view_zooms_into_its_screen() {
     let (_d, mut a) = shelf_with(Look::Socket);
-    assert!(a.wants_sp_face());
-    a.set_sp_face((slot_ui::TexId::from_raw(900), 300, 452));
+    assert!(a.wants_sp_faces());
+    a.set_sp_faces(sp_faces());
     a.take_sfx();
     press(&mut a, Btn::A);
     assert!(matches!(a.phase(), Phase::Inserting { .. }));
@@ -341,7 +347,7 @@ fn a_cart_goes_into_the_handheld_and_the_view_zooms_into_its_screen() {
     let device = |a: &App| {
         frame(a)
             .iter()
-            .any(|d| matches!(d, Draw::Tex { tex, .. } if *tex == slot_ui::TexId::from_raw(900)))
+            .any(|d| matches!(d, Draw::Warp { tex, .. } if *tex == slot_ui::TexId::from_raw(900)))
     };
     assert!(device(&a), "no handheld");
     let mut heard = None;
@@ -361,7 +367,7 @@ fn a_cart_goes_into_the_handheld_and_the_view_zooms_into_its_screen() {
 #[test]
 fn the_eject_comes_back_out_of_the_handheld_to_the_shelf() {
     let (_d, mut a) = shelf_with(Look::Socket);
-    a.set_sp_face((slot_ui::TexId::from_raw(900), 300, 452));
+    a.set_sp_faces(sp_faces());
     press(&mut a, Btn::A);
     a.apply(Action::Eject);
     assert!(matches!(a.phase(), Phase::Ejecting { .. }));

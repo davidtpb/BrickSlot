@@ -120,7 +120,7 @@ pub use socket_menu::{
     POPUP_OPTIONS, POPUP_TITLE_SLOT, SETTINGS_CLOSE, SETTINGS_HINT, SETTINGS_SLOTS, SETTINGS_SPLIT,
 };
 pub use sp_device::{
-    draw_sp, sp_eject_pose, sp_face, sp_insert_pose, sp_screen_rect, sp_shelf_back, sp_shelf_dark,
+    draw_sp, sp_eject_pose, sp_faces, sp_insert_pose, sp_screen_rect, sp_shelf_back, sp_shelf_dark,
     SpPose, SP_EJECT_S, SP_FADE_S, SP_INSERT_S, SP_RELEASE_S, SP_SEATED_S, SP_SHELF_BACK_S,
 };
 pub use sticker::{

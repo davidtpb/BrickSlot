@@ -1875,7 +1875,7 @@ impl App {
         let Some(root) = self.root.clone() else {
             return;
         };
-        let pin = (1000 + (self.wall_secs().unsigned_abs() % 9000) as u16).max(1000);
+        let pin = crate::fileserver::random_pin();
         match crate::fileserver::FileServer::start_pin(&root, crate::fileserver::PORT, Some(pin)) {
             Ok(server) => {
                 self.file_pin = Some(pin);
@@ -2613,8 +2613,23 @@ impl App {
         }
     }
 
+    /// Whether the screen is dimmed for want of a press.
+    pub fn idle_dimmed(&self) -> bool {
+        self.dimmed
+    }
+
     fn idle_tick(&mut self) {
         if !self.state.idle_dim || matches!(self.phase, Phase::Doze { .. }) {
+            return;
+        }
+        // A game can go a long while between presses, a run held down or a
+        // page of text read: it is never dimmed, and the wait starts again
+        // when it is left.
+        if matches!(
+            self.phase,
+            Phase::Inserting { .. } | Phase::Playing { .. } | Phase::Polaroids { .. }
+        ) {
+            self.idle_at = self.now();
             return;
         }
         if self.idle_at == 0 {

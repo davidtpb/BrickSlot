@@ -32,6 +32,31 @@ const HEADERS_MAX: usize = 64;
 /// How long a client has to send its whole request head.
 const HEAD_WITHIN: Duration = Duration::from_secs(10);
 
+/// Wrong PINs allowed before the page locks.
+pub const PIN_TRIES: u32 = 5;
+/// How long the page stays locked after too many wrong PINs.
+const PIN_LOCK: Duration = Duration::from_secs(60);
+
+/// Wrong PINs so far, and when a lock after too many ends.
+#[derive(Default)]
+struct PinGuard {
+    wrong: u32,
+    locked_until: Option<Instant>,
+}
+
+/// A PIN no one can work out from the clock: four digits from the
+/// randomly seeded hasher every process gets.
+pub fn random_pin() -> u16 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    );
+    1000 + (h.finish() % 9000) as u16
+}
+
 /// Counts a request being served while it lives.
 struct Slot(Arc<AtomicUsize>);
 
@@ -77,6 +102,7 @@ impl FileServer {
         let flag = stop.clone();
         let root = root.to_path_buf();
         let active = Arc::new(AtomicUsize::new(0));
+        let guard = Arc::new(std::sync::Mutex::new(PinGuard::default()));
         std::thread::Builder::new()
             .name("slot-files".into())
             .spawn(move || {
@@ -91,10 +117,11 @@ impl FileServer {
                                 continue;
                             };
                             let root = root.clone();
+                            let guard = guard.clone();
                             let _ = std::thread::Builder::new()
                                 .name("slot-files-req".into())
                                 .spawn(move || {
-                                    serve(&root, stream, pin);
+                                    serve(&root, stream, pin, &guard);
                                     drop(slot);
                                 });
                         }
@@ -298,14 +325,44 @@ fn cookie_pin(cookie: &str) -> Option<u16> {
     })
 }
 
-fn pin_ok(req: &Request, pin: Option<u16>) -> bool {
+enum PinCheck {
+    Open,
+    Ask,
+    Locked,
+}
+
+/// Whether a request may in: no PIN set or the right one given. A wrong
+/// PIN counts against the guard, and too many lock the page for a while.
+fn pin_check(req: &Request, pin: Option<u16>, guard: &std::sync::Mutex<PinGuard>) -> PinCheck {
     let Some(want) = pin else {
-        return true;
+        return PinCheck::Open;
     };
-    req.param("pin")
-        .and_then(|p| p.parse().ok())
-        .or_else(|| cookie_pin(&req.cookie))
-        == Some(want)
+    let mut g = guard.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    if g.locked_until.is_some_and(|t| now < t) {
+        return PinCheck::Locked;
+    }
+    g.locked_until = None;
+    let given = req
+        .param("pin")
+        .map(|p| p.parse::<u16>().ok())
+        .or_else(|| cookie_pin(&req.cookie).map(Some));
+    match given {
+        None => PinCheck::Ask,
+        Some(Some(p)) if p == want => {
+            g.wrong = 0;
+            PinCheck::Open
+        }
+        Some(_) => {
+            g.wrong += 1;
+            if g.wrong >= PIN_TRIES {
+                g.wrong = 0;
+                g.locked_until = Some(now + PIN_LOCK);
+                return PinCheck::Locked;
+            }
+            PinCheck::Ask
+        }
+    }
 }
 
 fn pin_page() -> String {
@@ -317,7 +374,7 @@ fn pin_page() -> String {
     )
 }
 
-fn serve(root: &Path, stream: TcpStream, pin: Option<u16>) {
+fn serve(root: &Path, stream: TcpStream, pin: Option<u16>, guard: &std::sync::Mutex<PinGuard>) {
     let _ = stream.set_read_timeout(Some(HEAD_WITHIN));
     let Ok(write_half) = stream.try_clone() else {
         return;
@@ -327,9 +384,17 @@ fn serve(root: &Path, stream: TcpStream, pin: Option<u16>) {
     let Some(req) = read_request(&mut reader) else {
         return;
     };
-    if !pin_ok(&req, pin) {
-        let _ = Reply::html(pin_page()).write(&mut out);
-        return;
+    match pin_check(&req, pin, guard) {
+        PinCheck::Open => {}
+        PinCheck::Ask => {
+            let _ = Reply::html(pin_page()).write(&mut out);
+            return;
+        }
+        PinCheck::Locked => {
+            let _ = Reply::status(429, "Too many wrong PINs. Wait a minute and try again")
+                .write(&mut out);
+            return;
+        }
     }
     let set_pin = pin.filter(|_| req.param("pin").is_some());
     let reply = match (req.method.as_str(), req.path.as_str()) {
@@ -410,6 +475,7 @@ impl Reply {
             403 => "Forbidden",
             404 => "Not Found",
             413 => "Too Large",
+            429 => "Too Many Requests",
             503 => "Busy",
             _ => "Error",
         };

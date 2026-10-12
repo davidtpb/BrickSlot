@@ -237,3 +237,29 @@ fn a_pin_hides_the_page_until_it_is_given() {
     assert_eq!(code, 200);
     assert!(body.contains("/browse?dir=Games"), "{body}");
 }
+
+#[test]
+fn too_many_wrong_pins_lock_the_page_for_a_while() {
+    use slot::fileserver::PIN_TRIES;
+    let d = card();
+    let srv = slot::fileserver::FileServer::start_pin(d.path(), 0, Some(4821)).unwrap();
+    for _ in 0..PIN_TRIES - 1 {
+        let (code, body) = http(srv.port, "GET", "/?pin=1111", b"");
+        assert_eq!(code, 200);
+        assert!(String::from_utf8_lossy(&body).contains("PIN"));
+    }
+    let (code, _) = http(srv.port, "GET", "/?pin=2222", b"");
+    assert_eq!(code, 429, "the last wrong PIN did not lock the page");
+    let (code, _) = http(srv.port, "GET", "/?pin=4821", b"");
+    assert_eq!(code, 429, "the right PIN got in while locked");
+    let (code, _) = http(srv.port, "GET", "/get?path=Saves/GBA/Emerald.srm", b"");
+    assert_ne!(code, 200);
+}
+
+#[test]
+fn pins_are_four_digits_and_not_all_the_same() {
+    let pins: std::collections::BTreeSet<u16> =
+        (0..20).map(|_| slot::fileserver::random_pin()).collect();
+    assert!(pins.iter().all(|p| (1000..=9999).contains(p)));
+    assert!(pins.len() > 1, "the PIN never changes");
+}

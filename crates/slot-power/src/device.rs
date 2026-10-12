@@ -976,7 +976,8 @@ fn switch_in(sysfs: &Path) -> bool {
 impl Platform for DevicePlatform {
     fn headphones(&self) -> bool {
         switch_in(&self.sysfs)
-            || fs::read_to_string(self.sysfs.join("kernel/debug/gpio")).is_ok_and(|g| headphones_in(&g))
+            || fs::read_to_string(self.sysfs.join("kernel/debug/gpio"))
+                .is_ok_and(|g| headphones_in(&g))
     }
 
     fn card_read_only(&self) -> bool {

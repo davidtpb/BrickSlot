@@ -28,10 +28,7 @@ pub fn is_zip(path: &std::path::Path) -> bool {
 
 /// Names of the files in `data`, in archive order.
 pub fn names(data: &[u8]) -> Vec<String> {
-    catalog(data)
-        .into_iter()
-        .map(|e| e.name)
-        .collect()
+    catalog(data).into_iter().map(|e| e.name).collect()
 }
 
 pub fn catalog(data: &[u8]) -> Vec<Entry> {
@@ -60,7 +57,10 @@ pub fn extract(data: &[u8], entry: &Entry) -> Option<Vec<u8>> {
     }
     let name_len = u16::from_le_bytes(data.get(local + 26..local + 28)?.try_into().ok()?) as usize;
     let extra_len = u16::from_le_bytes(data.get(local + 28..local + 30)?.try_into().ok()?) as usize;
-    let start = local.checked_add(30)?.checked_add(name_len)?.checked_add(extra_len)?;
+    let start = local
+        .checked_add(30)?
+        .checked_add(name_len)?
+        .checked_add(extra_len)?;
     let body = data.get(start..start.checked_add(entry.compressed)?)?;
     match entry.method {
         STORE => Some(body.to_vec()),
@@ -103,11 +103,14 @@ fn cd_entry(data: &[u8], at: &mut usize) -> Option<Entry> {
         return None;
     }
     let method = u16::from_le_bytes(data.get(start + 10..start + 12)?.try_into().ok()?);
-    let compressed = u32::from_le_bytes(data.get(start + 20..start + 24)?.try_into().ok()?) as usize;
-    let uncompressed = u32::from_le_bytes(data.get(start + 24..start + 28)?.try_into().ok()?) as usize;
+    let compressed =
+        u32::from_le_bytes(data.get(start + 20..start + 24)?.try_into().ok()?) as usize;
+    let uncompressed =
+        u32::from_le_bytes(data.get(start + 24..start + 28)?.try_into().ok()?) as usize;
     let name_len = u16::from_le_bytes(data.get(start + 28..start + 30)?.try_into().ok()?) as usize;
     let extra_len = u16::from_le_bytes(data.get(start + 30..start + 32)?.try_into().ok()?) as usize;
-    let comment_len = u16::from_le_bytes(data.get(start + 32..start + 34)?.try_into().ok()?) as usize;
+    let comment_len =
+        u16::from_le_bytes(data.get(start + 32..start + 34)?.try_into().ok()?) as usize;
     let local_off = u32::from_le_bytes(data.get(start + 42..start + 46)?.try_into().ok()?) as usize;
     let name = data.get(start + 46..start + 46 + name_len)?;
     let name = String::from_utf8_lossy(name).replace('\\', "/");
@@ -123,45 +126,45 @@ fn cd_entry(data: &[u8], at: &mut usize) -> Option<Entry> {
 
 /// A stored (uncompressed) ZIP with one file. For tests and tiny fixtures.
 pub fn store(name: &str, body: &[u8]) -> Vec<u8> {
-        let n = name.len() as u16;
-        let len = body.len() as u32;
-        let mut local = Vec::new();
-        local.extend_from_slice(LOCAL);
-        local.extend_from_slice(&[20, 0, 0, 0]);
-        local.extend_from_slice(&STORE.to_le_bytes());
-        local.extend_from_slice(&[0u8; 4]);
-        local.extend_from_slice(&[0u8; 4]);
-        local.extend_from_slice(&len.to_le_bytes());
-        local.extend_from_slice(&len.to_le_bytes());
-        local.extend_from_slice(&n.to_le_bytes());
-        local.extend_from_slice(&0u16.to_le_bytes());
-        local.extend_from_slice(name.as_bytes());
-        local.extend_from_slice(body);
-        let mut cd = Vec::new();
-        cd.extend_from_slice(CD);
-        cd.extend_from_slice(&[20, 0, 20, 0, 0, 0]);
-        cd.extend_from_slice(&STORE.to_le_bytes());
-        cd.extend_from_slice(&[0u8; 8]);
-        cd.extend_from_slice(&len.to_le_bytes());
-        cd.extend_from_slice(&len.to_le_bytes());
-        cd.extend_from_slice(&n.to_le_bytes());
-        cd.extend_from_slice(&0u16.to_le_bytes());
-        cd.extend_from_slice(&0u16.to_le_bytes());
-        cd.extend_from_slice(&0u16.to_le_bytes());
-        cd.extend_from_slice(&0u16.to_le_bytes());
-        cd.extend_from_slice(&0u32.to_le_bytes());
-        cd.extend_from_slice(&0u32.to_le_bytes());
-        cd.extend_from_slice(name.as_bytes());
-        let mut out = local;
-        let cd_off = out.len() as u32;
-        let cd_len = cd.len() as u32;
-        out.extend_from_slice(&cd);
-        out.extend_from_slice(EOCD);
-        out.extend_from_slice(&[0u8; 4]);
-        out.extend_from_slice(&1u16.to_le_bytes());
-        out.extend_from_slice(&1u16.to_le_bytes());
-        out.extend_from_slice(&cd_len.to_le_bytes());
-        out.extend_from_slice(&cd_off.to_le_bytes());
+    let n = name.len() as u16;
+    let len = body.len() as u32;
+    let mut local = Vec::new();
+    local.extend_from_slice(LOCAL);
+    local.extend_from_slice(&[20, 0, 0, 0]);
+    local.extend_from_slice(&STORE.to_le_bytes());
+    local.extend_from_slice(&[0u8; 4]);
+    local.extend_from_slice(&[0u8; 4]);
+    local.extend_from_slice(&len.to_le_bytes());
+    local.extend_from_slice(&len.to_le_bytes());
+    local.extend_from_slice(&n.to_le_bytes());
+    local.extend_from_slice(&0u16.to_le_bytes());
+    local.extend_from_slice(name.as_bytes());
+    local.extend_from_slice(body);
+    let mut cd = Vec::new();
+    cd.extend_from_slice(CD);
+    cd.extend_from_slice(&[20, 0, 20, 0, 0, 0]);
+    cd.extend_from_slice(&STORE.to_le_bytes());
+    cd.extend_from_slice(&[0u8; 8]);
+    cd.extend_from_slice(&len.to_le_bytes());
+    cd.extend_from_slice(&len.to_le_bytes());
+    cd.extend_from_slice(&n.to_le_bytes());
+    cd.extend_from_slice(&0u16.to_le_bytes());
+    cd.extend_from_slice(&0u16.to_le_bytes());
+    cd.extend_from_slice(&0u16.to_le_bytes());
+    cd.extend_from_slice(&0u16.to_le_bytes());
+    cd.extend_from_slice(&0u32.to_le_bytes());
+    cd.extend_from_slice(&0u32.to_le_bytes());
+    cd.extend_from_slice(name.as_bytes());
+    let mut out = local;
+    let cd_off = out.len() as u32;
+    let cd_len = cd.len() as u32;
+    out.extend_from_slice(&cd);
+    out.extend_from_slice(EOCD);
+    out.extend_from_slice(&[0u8; 4]);
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&cd_len.to_le_bytes());
+    out.extend_from_slice(&cd_off.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes());
     out
 }

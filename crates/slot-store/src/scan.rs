@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::gba::{header_from_bytes, header_title_code};
 use crate::gb::title_from_bytes as gb_title_from_bytes;
+use crate::gba::{header_from_bytes, header_title_code};
 use crate::platform::Platform;
 
 #[derive(Clone, PartialEq, Eq, Debug)]

@@ -136,7 +136,9 @@ fn read_node(node: &Path, keymap: Keymap, queue: &Mutex<Vec<RawEvent>>, trace: O
     };
     let stick_x = absinfo(&file, ABS_X).unwrap_or((0, 0, 0));
     let stick_y = absinfo(&file, ABS_Y).unwrap_or((0, 0, 0));
-    let mut stick = Stick::new(stick_x.0, stick_x.1, stick_x.2, stick_y.0, stick_y.1, stick_y.2);
+    let mut stick = Stick::new(
+        stick_x.0, stick_x.1, stick_x.2, stick_y.0, stick_y.1, stick_y.2,
+    );
     let mut buf = [0u8; EVENT_BYTES * 16];
     loop {
         let read = match file.read(&mut buf) {

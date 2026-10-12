@@ -97,7 +97,6 @@ impl HostInput {
                 _ => {}
             }
         }
-        drop(pad);
         for (axis, value) in axes {
             let (held, ends) = match axis {
                 Axis::LeftStickX => (&mut self.stick_x, [Btn::Left, Btn::Right]),

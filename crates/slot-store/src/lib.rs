@@ -16,11 +16,11 @@ mod ring;
 pub mod rom;
 pub mod rzip;
 mod scan;
-pub mod zip;
 mod search;
 mod slot_state;
 mod stamp;
 mod theme;
+pub mod zip;
 
 pub use atomic::atomic_write;
 pub use cart_shell::{Outline, ShellChoice, ShellFinish, CART_SHELL_FILE, LABELS_SHELL_FILE};

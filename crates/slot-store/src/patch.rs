@@ -179,7 +179,7 @@ mod tests {
         patch.extend_from_slice(b"XYZ");
         patch.extend_from_slice(IPS_EOF);
         apply_ips(&mut rom, &patch).unwrap();
-        assert_eq!(rom, b"HXYLO");
+        assert_eq!(rom, b"HXYZO");
     }
 
     #[test]

@@ -200,8 +200,7 @@ impl App {
     /// The cheats to turn on, when they have changed.
     pub fn take_cheats(&mut self) -> Option<Vec<String>> {
         if self.state.hardcore {
-            return std::mem::take(&mut self.running.cheats_dirty)
-                .then_some(Vec::new());
+            return std::mem::take(&mut self.running.cheats_dirty).then_some(Vec::new());
         }
         if !std::mem::take(&mut self.running.cheats_dirty) {
             return None;

@@ -1876,11 +1876,7 @@ impl App {
             return;
         };
         let pin = (1000 + (self.wall_secs().unsigned_abs() % 9000) as u16).max(1000);
-        match crate::fileserver::FileServer::start_pin(
-            &root,
-            crate::fileserver::PORT,
-            Some(pin),
-        ) {
+        match crate::fileserver::FileServer::start_pin(&root, crate::fileserver::PORT, Some(pin)) {
             Ok(server) => {
                 self.file_pin = Some(pin);
                 self.net.send(NetJob::Announce {
@@ -2559,9 +2555,7 @@ impl App {
                 d.flatten()
                     .filter_map(|e| {
                         let name = e.file_name().to_string_lossy().into_owned();
-                        name.to_ascii_lowercase()
-                            .ends_with(".png")
-                            .then_some(name)
+                        name.to_ascii_lowercase().ends_with(".png").then_some(name)
                     })
                     .collect()
             })

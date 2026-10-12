@@ -139,28 +139,6 @@ fn a_zip_of_a_game_boy_rom_stays_off_the_gba_shelf() {
 }
 
 #[test]
-fn a_zip_with_a_gba_rom_is_shelved() {
-    let d = tmp_root();
-    let mut rom = vec![0u8; 0x100];
-    rom[0xa0..0xa0 + 12].copy_from_slice(b"POKEMON EMER");
-    let zip = slot_store::zip::store("Emerald.gba", &rom);
-    std::fs::write(d.path().join("Games/GBA/Emerald.zip"), zip).unwrap();
-    let mut carts = scan(d.path()).unwrap();
-    assert_eq!(carts.len(), 1);
-    assert_eq!(carts[0].stem, "Emerald");
-    carts[0].read_header();
-    assert_eq!(carts[0].title, "POKEMON EMER");
-}
-
-#[test]
-fn a_zip_of_a_game_boy_rom_stays_off_the_gba_shelf() {
-    let d = tmp_root();
-    let zip = slot_store::zip::store("Tetris.gb", &[0u8; 0x150]);
-    std::fs::write(d.path().join("Games/GBA/Tetris.zip"), zip).unwrap();
-    assert!(scan(d.path()).unwrap().is_empty());
-}
-
-#[test]
 fn a_gba_rom_in_the_game_boy_folder_does_not_appear() {
     let d = tmp_root();
     std::fs::write(d.path().join("Games/GB/Wrong.gba"), vec![0u8; 0x150]).unwrap();

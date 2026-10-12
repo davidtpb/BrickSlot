@@ -99,7 +99,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "GBA Shader",
             "GB / GBC Shader",
             "Color Correction",
-            "GB Palettes"
+            "GB Palettes",
+            "Idle Dim"
         ]
     );
     assert_eq!(
@@ -113,7 +114,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Start Fresh",
             "Auto Save on Eject",
             "Save Format",
-            "Performance"
+            "Performance",
+            "Hardcore"
         ]
     );
     assert_eq!(
@@ -135,7 +137,9 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "File Transfer",
             "Syncthing",
             "RetroAchievements",
-            "Download Labels"
+            "Download Labels",
+            "Screenshots",
+            "Update"
         ]
     );
     assert_eq!(

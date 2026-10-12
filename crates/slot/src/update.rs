@@ -45,7 +45,8 @@ fn asset_url(json: &str) -> Option<String> {
         let end = rest.find('"')?;
         urls.push(rest[..end].to_string());
     }
-    urls.into_iter().find(|u| u.contains("trimui") && u.ends_with(".zip"))
+    urls.into_iter()
+        .find(|u| u.contains("trimui") && u.ends_with(".zip"))
         .or_else(|| {
             let mut rest = json;
             let mut found = None;

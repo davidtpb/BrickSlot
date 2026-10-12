@@ -375,8 +375,6 @@ pub struct App {
     search_picked_at: Millis,
     home: Option<slot_ui::HomePanel>,
     socket_backdrop: Option<TexId>,
-    /// The handheld the Socket look puts carts in.
-    sp_face: Option<(TexId, u32, u32)>,
     socket_chrome: Vec<(TexId, u32, u32)>,
     customize: Option<Customize>,
     /// The starred games, from every platform, as a shelf of their own
@@ -546,7 +544,6 @@ impl App {
             search_picked_at: 0,
             home: None,
             socket_backdrop: None,
-            sp_face: None,
             socket_chrome: Vec::new(),
             customize: None,
             fav_shelf: Shelf::new(Vec::new()),
@@ -2199,31 +2196,6 @@ impl App {
         Some(lines)
     }
 
-    /// Whether the handheld for the Socket insert is wanted.
-    pub fn wants_sp_face(&self) -> bool {
-        self.socket_look() && self.sp_face.is_none()
-    }
-
-    pub fn set_sp_face(&mut self, face: (TexId, u32, u32)) {
-        self.sp_face = Some(face);
-    }
-
-    /// How long a cart takes to go in, and when it touches the contacts.
-    fn insert_timing(&self, resumed: bool) -> (f32, f32) {
-        match self.socket_look() && !resumed {
-            true => (slot_ui::SP_INSERT_S, slot_ui::SP_SEATED_S),
-            false => (INSERT_S, SEATED_AT),
-        }
-    }
-
-    /// How long a cart takes to come out, and when it comes free.
-    fn eject_timing(&self) -> (f32, f32) {
-        match self.socket_look() {
-            true => (slot_ui::SP_EJECT_S, slot_ui::SP_RELEASE_S),
-            false => (EJECT_S, 0.0),
-        }
-    }
-
     pub fn wants_socket_backdrop(&self) -> bool {
         (self.socket_look() || self.customize.is_some() || self.inspect)
             && self.socket_backdrop.is_none()
@@ -3681,8 +3653,6 @@ impl App {
         }
         let mut touched = false;
         let at = self.shelf_at;
-        let insert_timing = self.insert_timing(false);
-        let eject_timing = self.eject_timing();
         let next = match &mut self.phase {
             Phase::Shelf => {
                 let shelf = match self.shelves.get_mut(at) {
@@ -3702,22 +3672,19 @@ impl App {
             } => {
                 let was = *t;
                 *t += dt;
-                let (len, seat_at) = insert_timing;
-                let len = if *resumed { INSERT_S } else { len };
-                let at = seat_at - Sfx::Insert.lead();
+                let at = SEATED_AT - Sfx::Insert.lead();
                 touched = !*resumed && was < at && *t >= at;
-                (*t >= len && *core_ready).then(|| Phase::Playing {
+                (*t >= INSERT_S && *core_ready).then(|| Phase::Playing {
                     cart: std::mem::take(cart),
                 })
             }
             Phase::Ejecting { t, .. } => {
-                let (len, free_at) = eject_timing;
                 if self.screen <= 0.0 {
                     let was = *t;
                     *t += dt;
-                    touched = was < free_at && *t >= free_at;
+                    touched = was < 0.0 && *t >= 0.0;
                 }
-                (*t >= len).then_some(Phase::Shelf)
+                (*t >= EJECT_S).then_some(Phase::Shelf)
             }
             _ => None,
         };
@@ -3785,15 +3752,11 @@ impl App {
             (Phase::Password { .. }, None) => Some(slot_ui::SEARCH_SPLIT),
             (Phase::QuickMenu { .. }, None) if self.socket_look() => Some(slot_ui::SETTINGS_SPLIT),
             (Phase::QuickMenu { .. }, None) => Some(slot_ui::QUICK_SPLIT),
-            // While the handheld is up the frame is a dark stage, drawn
-            // whole; the split comes and goes while it is black.
-            (Phase::Inserting { t, resumed, .. }, None) if self.socket_look() => {
-                (!resumed && *t < slot_ui::SP_FADE_S).then_some(slot_ui::SOCKET_SPLIT)
+            (Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }, None)
+                if self.socket_look() =>
+            {
+                Some(slot_ui::SOCKET_SPLIT)
             }
-            (Phase::Ejecting { t, .. }, None) if self.socket_look() => {
-                (*t >= slot_ui::SP_SHELF_BACK_S).then_some(slot_ui::SOCKET_SPLIT)
-            }
-            (Phase::Shelf, None) if self.socket_look() => Some(slot_ui::SOCKET_SPLIT),
             _ => None,
         }
     }
@@ -4165,11 +4128,7 @@ impl App {
     }
 
     fn refuse_out(&mut self, cart: String, caught: f32) {
-        let t = match self.socket_look() {
-            // The cart comes back out of the handheld, which stays put.
-            true => slot_ui::SP_RELEASE_S - 0.05,
-            false => (1.0 - caught) * EJECT_S,
-        };
+        let t = (1.0 - caught) * EJECT_S;
         self.phase = Phase::Ejecting { cart, t };
         self.refused_from = Some(t);
     }
@@ -4189,10 +4148,10 @@ impl App {
                 if *resumed {
                     1.0
                 } else {
-                    (t / self.insert_timing(false).1).clamp(0.0, 1.0)
+                    (t / SEATED_AT).clamp(0.0, 1.0)
                 }
             }
-            Phase::Ejecting { t, .. } => 1.0 - (t / self.eject_timing().0).clamp(0.0, 1.0),
+            Phase::Ejecting { t, .. } => 1.0 - (t / EJECT_S).clamp(0.0, 1.0),
             _ => 1.0,
         }
     }
@@ -4260,7 +4219,18 @@ impl App {
                 screen.draw_pills(out);
             }
             Phase::Inserting { .. } | Phase::Ejecting { .. } if self.socket_look() => {
-                self.draw_sp_scene(out)
+                let seat = self.seat();
+                let screen = self.socket_screen(seat);
+                screen.draw_backdrop(out);
+                self.shelf().draw_socket(self.now(), seat, out);
+                screen.draw_pills(out);
+                out.push(Draw::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: OUT_W as f32,
+                    h: OUT_H as f32,
+                    colour: [0.0, 0.0, 0.0, ease(seat)],
+                });
             }
             Phase::Playing { .. } if self.screen < 1.0 && self.socket_look() => {
                 self.push_game(out);
@@ -4512,62 +4482,6 @@ impl App {
         self.refusal.map_or(0.0, |r| r.offset(now))
     }
 
-    /// The Socket insert and eject: the shelf fades to black, the cart goes
-    /// into the handheld and the view zooms into its screen; and back.
-    fn draw_sp_scene(&self, out: &mut Vec<Draw>) {
-        let black = |alpha: f32, out: &mut Vec<Draw>| {
-            out.push(Draw::Rect {
-                x: 0.0,
-                y: 0.0,
-                w: OUT_W as f32,
-                h: OUT_H as f32,
-                colour: [0.0, 0.0, 0.0, alpha],
-            })
-        };
-        let shelf = |dark: f32, out: &mut Vec<Draw>| {
-            let screen = self.socket_screen(0.0);
-            screen.draw_backdrop(out);
-            self.shelf().draw_socket(self.now(), 0.0, out);
-            screen.draw_pills(out);
-            black(dark, out);
-        };
-        let (pose, cart) = match &self.phase {
-            Phase::Inserting { resumed: true, .. } => return black(1.0, out),
-            Phase::Inserting { t, cart, .. } => {
-                let dark = slot_ui::sp_shelf_dark(*t);
-                match dark < 1.0 {
-                    true => shelf(dark, out),
-                    false => black(1.0, out),
-                }
-                (slot_ui::sp_insert_pose(*t), cart)
-            }
-            Phase::Ejecting { t, cart } => {
-                if *t < 0.0 {
-                    // The game's picture goes out first.
-                    black(1.0, out);
-                    self.push_game(out);
-                    black(1.0 - self.screen, out);
-                    return;
-                }
-                let back = slot_ui::sp_shelf_back(*t);
-                match back > 0.0 {
-                    true => shelf(1.0 - back, out),
-                    false => black(1.0, out),
-                }
-                (slot_ui::sp_eject_pose(*t), cart)
-            }
-            _ => return,
-        };
-        if pose.alpha <= 0.0 {
-            return;
-        }
-        let cart = self.shelf().find(cart).and_then(|(c, face)| {
-            let (w, h) = slot_ui::cart_box(c.platform);
-            face.map(|tex| (tex, (w as f32, h as f32)))
-        });
-        slot_ui::draw_sp(self.sp_face, cart, pose, out);
-    }
-
     fn push_game(&self, out: &mut Vec<Draw>) {
         if self.game_visible() {
             out.push(Draw::Game);
@@ -4602,7 +4516,7 @@ impl App {
         let (Some(from), Phase::Ejecting { t, .. }) = (self.refused_from, &self.phase) else {
             return 0.0;
         };
-        let span = self.eject_timing().0 - from;
+        let span = EJECT_S - from;
         if span <= 0.0 {
             return 0.0;
         }

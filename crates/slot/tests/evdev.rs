@@ -412,9 +412,8 @@ fn each_trimui_trigger_uses_its_own_halfway_point() {
 #[test]
 fn digital_trimui_l2_r2_are_ignored_so_the_analog_axes_own_them() {
     use slot::input::evdev::Keymap;
-    let key = |code, value| {
-        decode(&packet(EV_KEY, code, value)).and_then(|ev| Keymap::TrimUi.to_raw(ev))
-    };
+    let key =
+        |code, value| decode(&packet(EV_KEY, code, value)).and_then(|ev| Keymap::TrimUi.to_raw(ev));
     assert_eq!(key(0x138, 1), None);
     assert_eq!(key(0x139, 1), None);
     assert_eq!(Keymap::TrimUi.btn(0x138), Some(Btn::L2));

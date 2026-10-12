@@ -65,12 +65,7 @@ pub fn console_of(rom: &Path) -> Option<Console> {
         "gbc" => Console::Gbc,
         "gb" => Console::Gb,
         "zip" => {
-            let data = std::fs::read(rom).ok()?;
-            let name = slot_store::zip::names(&data).into_iter().find(|n| {
-                slot_store::Platform::ALL
-                    .iter()
-                    .any(|p| p.accepts(Path::new(n)))
-            })?;
+            let name = slot_store::rom::zip_rom_name(rom)?;
             let inner = Path::new(&name).extension()?.to_str()?.to_ascii_lowercase();
             match inner.as_str() {
                 "gba" => Console::Gba,

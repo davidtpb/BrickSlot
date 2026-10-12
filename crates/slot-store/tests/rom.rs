@@ -24,3 +24,20 @@ fn a_zipped_rom_is_the_file_inside() {
     std::fs::write(&path, zip).unwrap();
     assert_eq!(rom::open(&path).unwrap(), b"from-zip");
 }
+
+#[test]
+fn a_zipped_rom_is_staged_to_a_file_a_path_loading_core_can_open() {
+    let d = tempfile::tempdir().unwrap();
+    let zipped = d.path().join("Emerald.zip");
+    std::fs::write(&zipped, slot_store::zip::store("Emerald.gba", b"rom-bytes")).unwrap();
+    let (path, bytes) = slot_store::rom::stage(&zipped).unwrap();
+    assert_eq!(bytes, b"rom-bytes");
+    assert_eq!(path.extension().unwrap(), "gba");
+    assert_eq!(std::fs::read(&path).unwrap(), b"rom-bytes");
+
+    let loose = d.path().join("Fusion.gba");
+    std::fs::write(&loose, b"plain").unwrap();
+    let (path, bytes) = slot_store::rom::stage(&loose).unwrap();
+    assert_eq!(path, loose, "a plain ROM was copied for nothing");
+    assert_eq!(bytes, b"plain");
+}

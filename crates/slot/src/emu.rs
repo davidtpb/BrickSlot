@@ -495,9 +495,14 @@ impl Worker {
             rom.display(),
             crate::boot_time::ms()
         );
-        let loaded = match slot_store::rom::open(&rom) {
-            Ok(bytes) => core.load_bytes(&rom, bytes),
-            Err(_) => core.load(&rom),
+        // A zipped or patched ROM is staged to a file too, so cores that
+        // load by path (gpSP) see the same game as those given the bytes.
+        let loaded = match slot_store::rom::stage(&rom) {
+            Ok((path, bytes)) => core.load_bytes(&path, bytes),
+            Err(e) => {
+                eprintln!("slot: emu: {}: {e}", rom.display());
+                core.load(&rom)
+            }
         };
         if let Err(e) = loaded {
             eprintln!("slot: {e}");

@@ -19,7 +19,8 @@ pub struct Cart {
 
 impl Cart {
     pub fn read_header(&mut self) {
-        let bytes = crate::rom::open_for(&self.rom, self.platform).ok();
+        // Only the header: reading every ROM whole made a scan crawl.
+        let bytes = crate::rom::head(&self.rom, self.platform, 0x150);
         match self.platform {
             Platform::Gba => {
                 if let Some((title, code)) = bytes

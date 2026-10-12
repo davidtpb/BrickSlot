@@ -27,6 +27,7 @@ mod silhouette;
 mod slot_chrome;
 mod socket;
 mod socket_menu;
+mod sp_device;
 mod sticker;
 pub mod text;
 mod toast;
@@ -117,6 +118,10 @@ pub use socket_menu::{
     SocketSettings, CUSTOM_CLOSE, CUSTOM_COLOUR, CUSTOM_MATERIAL, CUSTOM_TITLE, CUSTOM_TYPE,
     CUSTOM_TYPE_VALUE, INSPECT_HINTS, INSPECT_ROWS, ITEMS as SETTINGS_ITEMS, POPUP_CLOSE_SLOT,
     POPUP_OPTIONS, POPUP_TITLE_SLOT, SETTINGS_CLOSE, SETTINGS_HINT, SETTINGS_SLOTS, SETTINGS_SPLIT,
+};
+pub use sp_device::{
+    draw_sp, sp_eject_pose, sp_face, sp_insert_pose, sp_screen_rect, sp_shelf_back, sp_shelf_dark,
+    SpPose, SP_EJECT_S, SP_FADE_S, SP_INSERT_S, SP_RELEASE_S, SP_SEATED_S, SP_SHELF_BACK_S,
 };
 pub use sticker::{
     draw_sticker, head_rows, sticker_face, sticker_lines, StickerFields, COPYRIGHT, CREDITS, DC,

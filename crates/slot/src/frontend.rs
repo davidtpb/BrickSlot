@@ -334,12 +334,10 @@ impl Frontend {
             let tex = compositor.create_texture(b.w, b.h, &b.rgba);
             self.session.app_mut().set_socket_backdrop(tex);
         }
-        if self.session.app().wants_sp_faces() {
-            let faces = slot_ui::sp_faces()
-                .into_iter()
-                .map(|f| (compositor.create_texture(f.w, f.h, &f.rgba), f.w, f.h))
-                .collect();
-            self.session.app_mut().set_sp_faces(faces);
+        if self.session.app().wants_sp_face() {
+            let f = slot_ui::sp_face();
+            let tex = compositor.create_texture(f.w, f.h, &f.rgba);
+            self.session.app_mut().set_sp_face((tex, f.w, f.h));
         }
         if self.session.app().wants_socket_chrome() {
             let chrome = slot_ui::Chrome::ALL

@@ -4,8 +4,9 @@ mod power;
 mod sim;
 
 pub use device::{
-    has_bit, motor_change, read_only, read_only_in, record_first_frame, rumble_node,
-    trace_first_frame, uptime_seconds, DevicePlatform,
+    effect_colour, h700_lights, has_bit, hue_rgb, motor_change, read_only, read_only_in,
+    record_first_frame, rumble_node, trace_first_frame, uptime_seconds, Board, DevicePlatform,
+    Switch, BOARD_VAR,
 };
 pub use motor::Motor;
 pub use power::Power;
@@ -37,6 +38,69 @@ pub enum LedState {
     Charged,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum LightsMode {
+    #[default]
+    Battery,
+    Colour,
+    Off,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum LightsEffect {
+    #[default]
+    Static,
+    Breathe,
+    Blink,
+    Rainbow,
+    RainbowWave,
+    Fire,
+    Ocean,
+    Aurora,
+    Sunset,
+    Candy,
+    Police,
+    Heartbeat,
+}
+
+impl LightsEffect {
+    /// Drawn by slot over a static light, rather than by the light driver.
+    pub fn animated(self) -> bool {
+        !matches!(
+            self,
+            LightsEffect::Static | LightsEffect::Breathe | LightsEffect::Blink
+        )
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum CpuProfile {
+    /// Whatever the system set, left alone.
+    #[default]
+    Stock,
+    Saver,
+    Performance,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct Lights {
+    pub mode: LightsMode,
+    pub rgb: u32,
+    pub effect: LightsEffect,
+    pub percent: u8,
+}
+
+impl Default for Lights {
+    fn default() -> Self {
+        Lights {
+            mode: LightsMode::Battery,
+            rgb: 0xFFFFFF,
+            effect: LightsEffect::Static,
+            percent: 50,
+        }
+    }
+}
+
 pub trait Platform: Send {
     fn set_backlight(&mut self, step: u8);
     fn battery(&self) -> Option<Battery>;
@@ -50,6 +114,21 @@ pub trait Platform: Send {
     fn set_rumble(&mut self, strength: u16);
 
     fn relink_adb(&mut self) -> bool {
+        false
+    }
+
+    fn set_lights(&mut self, _lights: Lights) {}
+
+    fn set_cpu(&mut self, _profile: CpuProfile) {}
+
+    /// Whether the handheld can suspend to RAM instead of powering off
+    /// after sleeping a while.
+    fn can_deep_sleep(&self) -> bool {
+        false
+    }
+
+    /// Suspends to RAM and returns once woken. False if it never slept.
+    fn deep_sleep(&mut self) -> bool {
         false
     }
 

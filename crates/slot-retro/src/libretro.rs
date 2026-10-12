@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use libloading::Library;
 
-use crate::core::{AvInfo, ButtonMask, CoreError, RetroCore, GBA_H, GBA_W};
+use crate::core::{AvInfo, ButtonMask, CoreError, MemoryRegion, RetroCore, GBA_H, GBA_W};
 use crate::ffi::*;
 use crate::link::Link;
 use crate::rumble::Rumble;
@@ -38,6 +38,9 @@ struct Host {
     options: std::collections::HashMap<String, std::ffi::CString>,
     options_dirty: bool,
     declared: std::collections::HashMap<String, Vec<String>>,
+    /// The same, in the order the core gave them, with what each is called.
+    declared_list: Vec<(String, String, Vec<String>)>,
+    memory_maps: Vec<MemoryRegion>,
 }
 
 thread_local! {
@@ -144,9 +147,14 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
         }
         SET_VARIABLES => {
             if data.is_null() {
-                return with_host(|h| h.declared.clear()).is_some();
+                return with_host(|h| {
+                    h.declared.clear();
+                    h.declared_list.clear();
+                })
+                .is_some();
             }
             let mut list = std::collections::HashMap::new();
+            let mut ordered = Vec::new();
             let mut p = data as *const Variable;
             for _ in 0..4096 {
                 let var = &*p;
@@ -156,26 +164,34 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
                 let Ok(key) = std::ffi::CStr::from_ptr(var.key).to_str() else {
                     break;
                 };
-                let values = if var.value.is_null() {
-                    Vec::new()
+                let (desc, values) = if var.value.is_null() {
+                    (String::new(), Vec::new())
                 } else {
                     std::ffi::CStr::from_ptr(var.value)
                         .to_str()
                         .ok()
                         .and_then(|v| v.split_once(';'))
-                        .map(|(_, values)| {
-                            values
-                                .trim()
-                                .split('|')
-                                .map(|s| s.trim().to_string())
-                                .collect()
+                        .map(|(desc, values)| {
+                            (
+                                desc.trim().to_string(),
+                                values
+                                    .trim()
+                                    .split('|')
+                                    .map(|s| s.trim().to_string())
+                                    .collect(),
+                            )
                         })
                         .unwrap_or_default()
                 };
+                ordered.push((key.to_string(), desc, values.clone()));
                 list.insert(key.to_string(), values);
                 p = p.add(1);
             }
-            with_host(|h| h.declared = list).is_some()
+            with_host(|h| {
+                h.declared = list;
+                h.declared_list = ordered;
+            })
+            .is_some()
         }
         GET_RUMBLE_INTERFACE => {
             if data.is_null() {
@@ -200,6 +216,27 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             }
             let cb = std::ptr::read(data as *const AudioBufferStatusCallback);
             with_host(|h| h.audio_status = cb.callback).is_some()
+        }
+        c if c & !EXPERIMENTAL == SET_MEMORY_MAPS => {
+            if data.is_null() {
+                return false;
+            }
+            let map = &*(data as *const MemoryMap);
+            if map.descriptors.is_null() {
+                return false;
+            }
+            let descriptors =
+                std::slice::from_raw_parts(map.descriptors, map.num_descriptors as usize);
+            let regions = descriptors
+                .iter()
+                .filter(|d| !d.ptr.is_null() && d.len > 0 && d.start <= u32::MAX as usize)
+                .map(|d| MemoryRegion {
+                    start: d.start as u32,
+                    len: d.len,
+                    ptr: (d.ptr as usize) + d.offset,
+                })
+                .collect();
+            with_host(|h| h.memory_maps = regions).is_some()
         }
         SET_NETPACKET_INTERFACE => {
             if data.is_null() {
@@ -449,6 +486,12 @@ impl LibretroCore {
             .collect()
     }
 
+    /// Every option the core offers, in its order: key, what it is called,
+    /// and its values with the default first.
+    pub fn option_list(&self) -> Vec<(String, String, Vec<String>)> {
+        self.host.declared_list.clone()
+    }
+
     pub fn declared_options(&self) -> &std::collections::HashMap<String, Vec<String>> {
         &self.host.declared
     }
@@ -484,6 +527,8 @@ impl LibretroCore {
             options: std::collections::HashMap::new(),
             options_dirty: false,
             declared: std::collections::HashMap::new(),
+            declared_list: Vec::new(),
+            memory_maps: Vec::new(),
         });
         unsafe {
             let _a = Active::bind(&mut host);
@@ -553,9 +598,43 @@ impl RetroCore for LibretroCore {
         LibretroCore::set_option(self, key, value);
     }
 
+    fn option_list(&self) -> Vec<(String, String, Vec<String>)> {
+        LibretroCore::option_list(self)
+    }
+
+    fn set_cheats(&mut self, codes: &[String]) {
+        let (Some(reset), Some(set)) = (self.api.cheat_reset, self.api.cheat_set) else {
+            eprintln!("slot-retro: this core takes no cheats");
+            return;
+        };
+        unsafe { reset() };
+        for (i, code) in codes.iter().enumerate() {
+            let Ok(code) = CString::new(code.as_str()) else {
+                continue;
+            };
+            unsafe { set(i as std::ffi::c_uint, true, code.as_ptr()) };
+        }
+    }
+
+    fn option_value(&self, key: &str) -> Option<String> {
+        LibretroCore::option(self, key)
+    }
+
+    fn memory_regions(&self) -> Vec<MemoryRegion> {
+        if !self.loaded {
+            return Vec::new();
+        }
+        self.host.memory_maps.clone()
+    }
+
     fn load(&mut self, rom: &Path) -> Result<(), CoreError> {
+        let bytes = std::fs::read(rom)?;
+        self.load_bytes(rom, bytes)
+    }
+
+    fn load_bytes(&mut self, rom: &Path, bytes: Vec<u8>) -> Result<(), CoreError> {
         self.unload();
-        self.rom = std::fs::read(rom)?;
+        self.rom = bytes;
         self.rom_path = Some(
             CString::new(rom.as_os_str().as_encoded_bytes())
                 .map_err(|_| CoreError::Load("rom path contains a nul".into()))?,
@@ -715,6 +794,8 @@ mod tests {
             options,
             options_dirty,
             declared: HashMap::new(),
+            declared_list: Vec::new(),
+            memory_maps: Vec::new(),
         })
     }
 

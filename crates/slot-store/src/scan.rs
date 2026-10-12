@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::gba::header_title_code;
+use crate::gb::title_from_bytes as gb_title_from_bytes;
+use crate::gba::{header_from_bytes, header_title_code};
 use crate::platform::Platform;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -18,15 +19,25 @@ pub struct Cart {
 
 impl Cart {
     pub fn read_header(&mut self) {
+        // Only the header: reading every ROM whole made a scan crawl.
+        let bytes = crate::rom::head(&self.rom, self.platform, 0x150);
         match self.platform {
             Platform::Gba => {
-                if let Some((title, code)) = header_title_code(&self.rom) {
+                if let Some((title, code)) = bytes
+                    .as_deref()
+                    .and_then(header_from_bytes)
+                    .or_else(|| header_title_code(&self.rom))
+                {
                     self.title = title;
                     self.code = code;
                 }
             }
             _ => {
-                if let Some(title) = crate::gb::title(&self.rom) {
+                if let Some(title) = bytes
+                    .as_deref()
+                    .and_then(gb_title_from_bytes)
+                    .or_else(|| crate::gb::title(&self.rom))
+                {
                     self.title = title;
                 }
             }
@@ -79,7 +90,15 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
                 continue;
             };
             let rom = entry.path();
-            if is_hidden(&rom) || !platform.accepts(&rom) || !is_file(&entry) {
+            if is_hidden(&rom) || !is_file(&entry) {
+                continue;
+            }
+            let zip = crate::zip::is_zip(&rom);
+            if zip {
+                if !crate::rom::zip_has(&rom, platform) {
+                    continue;
+                }
+            } else if !platform.accepts(&rom) {
                 continue;
             }
             let Some(stem) = rom.file_stem().and_then(|s| s.to_str()) else {

@@ -357,6 +357,7 @@ fn a_gpsp_carts_resume_is_read_from_its_own_core_directory_through_the_session()
     use std::time::{Duration, Instant};
 
     let d = common::tmp_root_with_carts(&["Emerald", "Fusion"]);
+    common::taps_resume(d.path());
     std::fs::write(d.path().join(SELECTED_CORE_FILE), "Emerald = gpsp\n").unwrap();
 
     StateRing::new(d.path(), Platform::Gba, Core::Gpsp, "Emerald")
@@ -622,6 +623,7 @@ fn a_game_boy_carts_gpsp_line_is_dropped_and_it_runs_on_the_platform_default() {
     use std::time::{Duration, Instant};
 
     let d = common::tmp_root_with_gb_carts(&["Tetris", "Zzz"]);
+    common::taps_resume(d.path());
     std::fs::write(d.path().join(SELECTED_CORE_FILE), "Tetris = gpsp\n").unwrap();
     StateRing::new(d.path(), Platform::Gb, default, "Tetris")
         .write_resume(&700_000u64.to_le_bytes())

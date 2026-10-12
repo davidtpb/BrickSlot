@@ -2,8 +2,8 @@ mod common;
 
 use common::tmp_root;
 use slot_store::{
-    atomic_write, read_slot_state, write_slot_state, GbPalette, Platform, Shader, SlotState,
-    FF_SPEEDS, FF_SPEED_DEFAULT,
+    atomic_write, read_slot_state, write_slot_state, GbPalette, LightColour, LightEffect,
+    LightLevel, LightMode, Platform, Shader, SlotState, FF_SPEEDS, FF_SPEED_DEFAULT,
 };
 use tempfile::tempdir;
 
@@ -201,6 +201,24 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             rewind: true,
             gb_palettes: false,
             gb_palette: GbPalette::DEFAULT,
+            light_mode: LightMode::Battery,
+            light_colour: LightColour::White,
+            light_effect: LightEffect::Static,
+            light_level: LightLevel::Medium,
+            wifi: false,
+            syncthing: false,
+            achievements: false,
+            save_format: slot_store::SaveFormat::RetroArch,
+            auto_time: true,
+            cpu: slot_store::CpuMode::Stock,
+            look: slot_store::Look::Classic,
+            tint: slot_store::Tint::Default,
+            menu_sounds: true,
+            bluetooth: false,
+            clock_12h: false,
+            start_fresh: true,
+            idle_dim: true,
+            hardcore: false,
         }
     );
 }
@@ -401,4 +419,25 @@ fn a_missing_or_unknown_palette_falls_back_to_dmg_green() {
         assert!(!s.gb_palettes, "{bad:?} turned palettes on");
         assert_eq!(s.gb_palette, GbPalette::DEFAULT, "{bad:?}");
     }
+}
+
+#[test]
+fn the_light_settings_round_trip() {
+    let d = tmp_root();
+    let s = SlotState {
+        clock_set: true,
+        light_mode: LightMode::Colour,
+        light_colour: LightColour::Purple,
+        light_effect: LightEffect::Breathe,
+        light_level: LightLevel::High,
+        wifi: true,
+        syncthing: true,
+        achievements: true,
+        save_format: slot_store::SaveFormat::Slot,
+        auto_time: false,
+        cpu: slot_store::CpuMode::Saver,
+        ..SlotState::default()
+    };
+    write_slot_state(d.path(), &s).unwrap();
+    assert_eq!(read_slot_state(d.path()), s);
 }

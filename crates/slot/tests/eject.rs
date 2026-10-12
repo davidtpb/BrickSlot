@@ -1,6 +1,5 @@
 mod common;
 
-use std::path::Path;
 use std::time::{Duration, Instant};
 
 use common::{app_playing_in, boot, tmp_root_with_carts, StubSnapshot};
@@ -18,11 +17,6 @@ fn seated(cart: &str) -> SlotState {
         utc_offset_min: 0,
         ..Default::default()
     }
-}
-
-fn set_mode(dir: &Path, mode: u32) {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).expect("chmod");
 }
 
 #[test]
@@ -49,7 +43,7 @@ fn eject_clears_the_slot_only_after_the_state_is_durable() {
     let r = StateRing::new(d.path(), Platform::Gba, Core::Mgba, "Emerald");
     assert_eq!(r.read_resume().unwrap().unwrap().len(), 1024);
     assert_eq!(
-        std::fs::read(d.path().join("Saves/GBA/Emerald.sav")).unwrap(),
+        std::fs::read(d.path().join("Saves/GBA/Emerald.srm")).unwrap(),
         b"savdata"
     );
     assert!(
@@ -78,32 +72,52 @@ fn a_resume_that_cannot_be_written_leaves_the_cart_in_the_slot() {
 
 #[test]
 fn an_unchanged_battery_save_is_not_rewritten() {
+    use std::os::unix::fs::MetadataExt;
     let d = tmp_root_with_carts(&["Emerald"]);
     std::fs::create_dir_all(d.path().join("Saves/GBA")).unwrap();
-    std::fs::write(d.path().join("Saves/GBA/Emerald.sav"), b"savdata").unwrap();
-    let saves = d.path().join("Saves/GBA");
-    set_mode(&saves, 0o555);
-    let unchanged = eject(
+    // In the format saves are written in, so there is nothing to convert.
+    let sav = d.path().join(format!(
+        "Saves/GBA/Emerald.{}",
+        match slot_store::SaveFormat::default() {
+            slot_store::SaveFormat::RetroArch | slot_store::SaveFormat::RetroArchCompressed =>
+                "srm",
+            slot_store::SaveFormat::Slot => "sav",
+        }
+    ));
+    std::fs::write(&sav, b"savdata").unwrap();
+    // Every write lands through a fresh file renamed into place, so a save
+    // that was rewritten, even with the same bytes, is a different file.
+    // That holds whoever runs the test, where a read-only directory does not
+    // stop root.
+    let before = std::fs::metadata(&sav).unwrap();
+    eject(
         d.path(),
         Platform::Gba,
         Core::Mgba,
         "Emerald",
         Some(&[0u8; 8]),
         Some(b"savdata"),
+    )
+    .expect("an eject with the save unchanged");
+    let after = std::fs::metadata(&sav).unwrap();
+    assert_eq!(
+        (after.ino(), after.mtime(), after.mtime_nsec()),
+        (before.ino(), before.mtime(), before.mtime_nsec()),
+        "identical bytes were written to the card again"
     );
-    let changed = eject(
+    eject(
         d.path(),
         Platform::Gba,
         Core::Mgba,
         "Emerald",
         Some(&[0u8; 8]),
         Some(b"changed"),
-    );
-    set_mode(&saves, 0o755);
-    unchanged.expect("identical bytes must not touch the card");
-    assert!(
-        changed.is_err(),
-        "the directory stayed writable, so the first half proved nothing"
+    )
+    .expect("an eject with the save changed");
+    assert_eq!(
+        slot::persist::read_sav(d.path(), Platform::Gba, "Emerald").as_deref(),
+        Some(&b"changed"[..]),
+        "a changed save was not written, so the first half proved nothing"
     );
 }
 

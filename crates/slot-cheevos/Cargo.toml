@@ -1,0 +1,12 @@
+[package]
+name = "slot-cheevos"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+ureq = { version = "2", default-features = false, features = ["tls"] }
+
+[build-dependencies]
+cc = "1"

@@ -24,6 +24,20 @@ impl ButtonMask {
     pub const L: u16 = 1 << 10;
     pub const R: u16 = 1 << 11;
 
+    /// A and B the other way round.
+    pub fn swap_ab(self) -> ButtonMask {
+        let a = self.0 & Self::A != 0;
+        let b = self.0 & Self::B != 0;
+        let mut m = self.0 & !(Self::A | Self::B);
+        if a {
+            m |= Self::B;
+        }
+        if b {
+            m |= Self::A;
+        }
+        ButtonMask(m)
+    }
+
     pub fn without_turbo(self) -> ButtonMask {
         ButtonMask(self.0 & !(Self::X | Self::Y))
     }
@@ -39,6 +53,35 @@ impl ButtonMask {
             }
         }
         ButtonMask(mask)
+    }
+}
+
+/// A block of the emulated console's memory, by its address on the
+/// console's own bus. `ptr` points into the core and is only good while the
+/// game it came from is loaded.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct MemoryRegion {
+    pub start: u32,
+    pub len: usize,
+    pub ptr: usize,
+}
+
+impl MemoryRegion {
+    /// Copies from `address` on, as far as this block goes. Returns how many
+    /// bytes were copied, 0 if the address is not in this block.
+    ///
+    /// # Safety
+    /// `ptr` must still point at `len` live bytes.
+    pub unsafe fn read(&self, address: u32, buf: &mut [u8]) -> usize {
+        let Some(at) = address.checked_sub(self.start).map(|a| a as usize) else {
+            return 0;
+        };
+        if at >= self.len || self.ptr == 0 {
+            return 0;
+        }
+        let n = buf.len().min(self.len - at);
+        std::ptr::copy_nonoverlapping((self.ptr as *const u8).add(at), buf.as_mut_ptr(), n);
+        n
     }
 }
 
@@ -77,11 +120,28 @@ impl From<std::io::Error> for CoreError {
 
 pub trait RetroCore: Send {
     fn load(&mut self, rom: &Path) -> Result<(), CoreError>;
+    /// Load already-read ROM bytes. Cores that only look at the path can
+    /// ignore `bytes`.
+    fn load_bytes(&mut self, rom: &Path, _bytes: Vec<u8>) -> Result<(), CoreError> {
+        self.load(rom)
+    }
     fn run_frame(&mut self, input: ButtonMask);
     fn run_frame_linked(&mut self, p1: ButtonMask, _p2: ButtonMask) {
         self.run_frame(p1);
     }
     fn set_option(&mut self, _key: &str, _value: &str) {}
+    /// Every option the core offers: key, name, values with the default
+    /// first.
+    fn option_list(&self) -> Vec<(String, String, Vec<String>)> {
+        Vec::new()
+    }
+    /// Turns the given cheats on, and every other off: each is its codes,
+    /// several joined by `+`.
+    fn set_cheats(&mut self, _codes: &[String]) {}
+    /// The value an option has now.
+    fn option_value(&self, _key: &str) -> Option<String> {
+        None
+    }
     fn set_frame_skip(&mut self, _skip: bool) {}
     fn video_xrgb8888(&self) -> &[u8];
     fn take_audio(&mut self) -> Vec<i16>;
@@ -95,6 +155,9 @@ pub trait RetroCore: Send {
     }
     fn net(&self) -> Link {
         Link::default()
+    }
+    fn memory_regions(&self) -> Vec<MemoryRegion> {
+        Vec::new()
     }
     fn start_link(&mut self, _client_id: u16) {}
     fn pump_link(&mut self) {}

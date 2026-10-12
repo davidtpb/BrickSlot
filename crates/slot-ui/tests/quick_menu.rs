@@ -79,15 +79,28 @@ fn the_fast_forward_row_offers_the_four_ceilings_the_card_can_hold() {
 fn the_rows_run_in_the_order_the_user_chose() {
     assert_eq!(
         QuickRow::MAIN.map(QuickRow::label),
-        ["Screen", "Gameplay", "Date & Time", "About"]
+        [
+            "Search Games",
+            "Screen",
+            "Gameplay",
+            "Lights",
+            "Network",
+            "Tools",
+            "System"
+        ]
     );
     assert_eq!(
         QuickRow::SCREEN.map(QuickRow::label),
         [
+            "Brightness",
+            "Warmth",
+            "Style",
+            "Theme",
             "GBA Shader",
             "GB / GBC Shader",
             "Color Correction",
-            "GB Palettes"
+            "GB Palettes",
+            "Idle Dim"
         ]
     );
     assert_eq!(
@@ -98,34 +111,81 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Rewind",
             "Turbo Buttons",
             "Rumble",
-            "Auto Save on Eject"
+            "Start Fresh",
+            "Auto Save on Eject",
+            "Save Format",
+            "Performance",
+            "Hardcore"
         ]
     );
-    let opens: Vec<QuickRow> = QuickRow::ALL.into_iter().filter(|r| r.opens()).collect();
     assert_eq!(
-        opens,
+        QuickRow::NETWORK.map(QuickRow::label),
         [
-            QuickRow::Screen,
-            QuickRow::DateTime,
-            QuickRow::About,
-            QuickRow::Game
+            "Wi-Fi",
+            "Wi-Fi Status",
+            "Join Network",
+            "Bluetooth",
+            "Bluetooth Devices"
         ]
     );
-    for page in [
+    assert_eq!(
+        QuickRow::TOOLS.map(QuickRow::label),
+        [
+            "Files",
+            "Emulator Settings",
+            "Device Sync",
+            "File Transfer",
+            "Syncthing",
+            "RetroAchievements",
+            "Download Labels",
+            "Screenshots"
+        ]
+    );
+    assert_eq!(
+        QuickRow::SYSTEM.map(QuickRow::label),
+        [
+            "Date & Time",
+            "Set Time Automatically",
+            "Clock",
+            "Menu Sounds",
+            "About"
+        ]
+    );
+    assert_eq!(
+        QuickRow::LIGHTS.map(QuickRow::label),
+        ["Lights", "Light Color", "Light Effect", "Light Brightness"]
+    );
+    let pages = [
         &QuickRow::MAIN[..],
         &QuickRow::SCREEN[..],
         &QuickRow::GAME[..],
-    ] {
+        &QuickRow::LIGHTS[..],
+        &QuickRow::NETWORK[..],
+        &QuickRow::TOOLS[..],
+        &QuickRow::SYSTEM[..],
+    ];
+    for page in pages {
         for &row in page {
             assert_eq!(row.page(), page, "{row:?}");
         }
+    }
+    for row in QuickRow::ALL {
+        let on = pages.iter().filter(|p| p.contains(&row)).count();
+        assert_eq!(on, 1, "{row:?} is on {on} pages");
+    }
+    for category in &QuickRow::MAIN[1..] {
+        let first = category.child().expect("a category opens a page");
+        assert_eq!(first.parent(), Some(*category));
     }
 }
 
 #[test]
 fn the_values_read_as_the_menu_prints_them() {
     assert_eq!(
-        QuickValue::ALL.map(QuickValue::text),
+        QuickValue::ALL[..10]
+            .iter()
+            .map(|v| v.text())
+            .collect::<Vec<_>>(),
         [
             "2×",
             "3×",
@@ -139,6 +199,11 @@ fn the_values_read_as_the_menu_prints_them() {
             "Simpletex"
         ]
     );
+    for (i, v) in QuickValue::ALL.iter().enumerate() {
+        assert_eq!(v.index(), i, "{v:?} is out of place in ALL");
+    }
+    assert_eq!(QuickValue::level(7).text(), "7");
+    assert_eq!(QuickValue::level(30), QuickValue::Level9);
     assert_eq!(QuickValue::flag(true), QuickValue::On);
     assert_eq!(QuickValue::flag(false), QuickValue::Off);
 }

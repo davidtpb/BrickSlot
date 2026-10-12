@@ -7,7 +7,8 @@ use std::time::Instant;
 use slot_input::{Btn, InputSource, Millis, RawEvent};
 
 use super::evdev::{
-    decode, device_name, pick_devices, to_raw, Ev, Hat, EVENT_BYTES, EV_ABS, EV_KEY, EV_SYN,
+    decode, device_name, pick_devices, Ev, Hat, Keymap, Stick, Triggers, ABS_RZ, ABS_X, ABS_Y,
+    ABS_Z, EVENT_BYTES, EV_ABS, EV_KEY, EV_SYN, KEYMAP_VAR,
 };
 use super::trace;
 
@@ -36,11 +37,13 @@ impl DeviceInput {
 
     fn open_traced(dev: &Path, sys: &Path, trace: Option<Arc<Trace>>) -> Self {
         let pending: Arc<Mutex<Vec<RawEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let forced = std::env::var(KEYMAP_VAR).ok();
         for node in pick_devices(dev, sys) {
+            let device = device_name(sys, &node);
+            let keymap = Keymap::for_device(&device, forced.as_deref());
             eprintln!(
-                "slot: input {} ({})",
+                "slot: input {} ({device}, {keymap:?} buttons)",
                 node.display(),
-                device_name(sys, &node)
             );
             quicken_poll(sys, &node);
             let queue = pending.clone();
@@ -48,14 +51,15 @@ impl DeviceInput {
             let trace = trace.clone();
             let spawned = std::thread::Builder::new()
                 .name(format!("slot-input-{name}"))
-                .spawn(move || read_node(&node, &queue, trace.as_deref()));
+                .spawn(move || read_node(&node, keymap, &queue, trace.as_deref()));
             if let Err(e) = spawned {
                 eprintln!("slot: input {name}: {e}");
             }
         }
+        let lidless = slot_power::Board::detect().is_trimui();
         DeviceInput {
             pending,
-            hall: find_hall(Path::new(PSY)),
+            hall: (!lidless).then(|| find_hall(Path::new(PSY))).flatten(),
             lid_shut: None,
             next_lid_poll: 0,
         }
@@ -86,7 +90,36 @@ fn quicken_poll(sys: &Path, node: &Path) {
     }
 }
 
-fn read_node(node: &Path, queue: &Mutex<Vec<RawEvent>>, trace: Option<&Trace>) {
+const EVIOCGABS: std::ffi::c_ulong = 0x8018_4540;
+
+extern "C" {
+    fn ioctl(fd: i32, request: std::ffi::c_ulong, ...) -> i32;
+}
+
+fn absinfo(file: &File, axis: u16) -> Option<(i32, i32, i32)> {
+    absinfo_now(file, axis).map(|(_, min, max, flat)| (min, max, flat))
+}
+
+/// An axis's current value, then its min, max and flat.
+fn absinfo_now(file: &File, axis: u16) -> Option<(i32, i32, i32, i32)> {
+    use std::os::unix::io::AsRawFd;
+    let mut info = [0i32; 6];
+    let rc = unsafe {
+        ioctl(
+            file.as_raw_fd(),
+            EVIOCGABS + axis as std::ffi::c_ulong,
+            info.as_mut_ptr(),
+        )
+    };
+    let (value, min, max, flat) = (info[0], info[1], info[2], info[4]);
+    (rc >= 0 && max > min).then_some((value, min, max, flat))
+}
+
+fn trigger_threshold(file: &File, axis: u16) -> i32 {
+    absinfo(file, axis).map_or(1, |(min, max, _)| min + (max - min) / 2)
+}
+
+fn read_node(node: &Path, keymap: Keymap, queue: &Mutex<Vec<RawEvent>>, trace: Option<&Trace>) {
     let label = node
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -99,6 +132,19 @@ fn read_node(node: &Path, queue: &Mutex<Vec<RawEvent>>, trace: Option<&Trace>) {
             return;
         }
     };
+    let mut triggers = match keymap {
+        Keymap::TrimUi => Triggers::axes(
+            trigger_threshold(&file, ABS_Z),
+            trigger_threshold(&file, ABS_RZ),
+        ),
+        Keymap::Anbernic => Triggers::new(1),
+    };
+    let stick_x = absinfo_now(&file, ABS_X).unwrap_or((0, 0, 0, 0));
+    let stick_y = absinfo_now(&file, ABS_Y).unwrap_or((0, 0, 0, 0));
+    let mut stick = Stick::new(
+        stick_x.1, stick_x.2, stick_x.3, stick_y.1, stick_y.2, stick_y.3,
+    )
+    .rest(stick_x.0, stick_y.0);
     let mut buf = [0u8; EVENT_BYTES * 16];
     loop {
         let read = match file.read(&mut buf) {
@@ -113,14 +159,22 @@ fn read_node(node: &Path, queue: &Mutex<Vec<RawEvent>>, trace: Option<&Trace>) {
         let mut events = Vec::new();
         for ev in buf[..read].chunks_exact(EVENT_BYTES).filter_map(decode) {
             if let Some(trace) = trace {
-                trace.event(&label, ev);
+                trace.event(&label, ev, keymap);
             }
             if (ev.kind == EV_KEY && ev.value == 1) || (ev.kind == EV_ABS && ev.value != 0) {
                 crate::latency::read();
             }
             match ev.kind {
-                EV_ABS => events.extend(hat.feed(ev)),
-                _ => events.extend(to_raw(ev)),
+                EV_ABS if keymap == Keymap::TrimUi => {
+                    events.extend(hat.feed(ev));
+                    events.extend(stick.feed(ev));
+                    events.extend(triggers.feed(ev));
+                }
+                EV_ABS => {
+                    events.extend(hat.feed(ev));
+                    events.extend(stick.feed(ev));
+                }
+                _ => events.extend(keymap.to_raw(ev)),
             }
         }
         if events.is_empty() {
@@ -159,11 +213,11 @@ impl Trace {
         }))
     }
 
-    fn event(&self, node: &str, ev: Ev) {
+    fn event(&self, node: &str, ev: Ev, keymap: Keymap) {
         if ev.kind == EV_SYN {
             return;
         }
-        let line = trace::event_line(node, self.began.elapsed().as_millis(), ev);
+        let line = trace::keyed_event_line(node, self.began.elapsed().as_millis(), ev, keymap);
         let mut out = self.out.lock().unwrap_or_else(|e| e.into_inner());
         let _ = writeln!(out, "{line}");
         let _ = out.flush();

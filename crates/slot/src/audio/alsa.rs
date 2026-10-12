@@ -17,6 +17,9 @@ const CHANNELS: c_uint = 2;
 
 const LATENCY_US: c_uint = 40_000;
 
+/// Headphones buffer more than a codec, and starve without the room.
+const BLUETOOTH_LATENCY_US: c_uint = 200_000;
+
 const PERIOD_FRAMES: usize = 512;
 
 const RELEASE_AFTER: Duration = Duration::from_secs(3);
@@ -81,14 +84,34 @@ impl Alsa {
     fn open_pcm(&self, rate: u32) -> Result<*mut c_void, AudioError> {
         let mut last = AudioError::NoDevice;
         for name in DEVICES {
+            match self.open_named(name, rate, LATENCY_US) {
+                Ok(pcm) => return Ok(pcm),
+                Err(e) => last = e,
+            }
+        }
+        Err(last)
+    }
+
+    /// Opens BlueALSA's device for the headphones at `mac`.
+    fn open_bluetooth(&self, mac: &str, rate: u32) -> Result<*mut c_void, AudioError> {
+        let name = format!("bluealsa:DEV={mac},PROFILE=a2dp");
+        self.open_named(&name, rate, BLUETOOTH_LATENCY_US)
+    }
+
+    fn open_named(
+        &self,
+        name: &str,
+        rate: u32,
+        latency: c_uint,
+    ) -> Result<*mut c_void, AudioError> {
+        {
             let Ok(cname) = CString::new(name) else {
-                continue;
+                return Err(AudioError::NoDevice);
             };
             let mut pcm: *mut c_void = std::ptr::null_mut();
             let err = unsafe { (self.open)(&mut pcm, cname.as_ptr(), SND_PCM_STREAM_PLAYBACK, 0) };
             if err < 0 || pcm.is_null() {
-                last = AudioError::Device(format!("{name}: {}", self.message(err)));
-                continue;
+                return Err(AudioError::Device(format!("{name}: {}", self.message(err))));
             }
             let err = unsafe {
                 (self.set_params)(
@@ -98,18 +121,16 @@ impl Alsa {
                     CHANNELS,
                     rate,
                     1,
-                    LATENCY_US,
+                    latency,
                 )
             };
             if err < 0 {
                 unsafe { (self.close)(pcm) };
-                last = AudioError::Config(format!("{name}: {}", self.message(err)));
-                continue;
+                return Err(AudioError::Config(format!("{name}: {}", self.message(err))));
             }
             eprintln!("slot: audio {name} at {rate} Hz");
-            return Ok(pcm);
+            Ok(pcm)
         }
-        Err(last)
     }
 }
 
@@ -196,6 +217,21 @@ struct Playback {
     pcm: Option<*mut c_void>,
     rate: u32,
     failing: bool,
+    /// The speaker, kept open while headphones play where it must never
+    /// be let go.
+    parked: Option<*mut c_void>,
+    /// Whether `pcm` is the headphones.
+    on_bluetooth: bool,
+    /// The route `pcm` was opened for.
+    route: u32,
+}
+
+/// On the Brick Pro the first button press after the codec was let go froze
+/// the whole handheld, with reopening it the only thing in flight. NextUI
+/// never closes it there, so on TrimUI the device stays open through silence.
+fn keeps_device_open() -> bool {
+    static HOLD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *HOLD.get_or_init(|| slot_power::Board::detect().is_trimui())
 }
 
 fn play(ring: &Arc<Ring>, sample_rate: u32) -> Result<Playback, AudioError> {
@@ -213,6 +249,9 @@ fn play(ring: &Arc<Ring>, sample_rate: u32) -> Result<Playback, AudioError> {
         pcm,
         rate: sample_rate,
         failing: pcm.is_none(),
+        parked: None,
+        on_bluetooth: false,
+        route: super::bluetooth_route().1,
     })
 }
 
@@ -221,38 +260,87 @@ impl Playback {
         let mut buf = vec![0i16; PERIOD_FRAMES * CHANNELS as usize];
         let span = Duration::from_secs_f64(PERIOD_FRAMES as f64 / self.rate as f64);
         let mut silence = Silence::new(RELEASE_AFTER);
+        let hold_open = keeps_device_open();
         while !stop.load(Ordering::Relaxed) {
+            let route = super::bluetooth_route().1;
+            if route != self.route {
+                self.route = route;
+                self.let_go(hold_open);
+                eprintln!("slot: audio: rerouting");
+            }
             ring.fill(&mut buf);
             let hold = silence.hear(&buf, span);
             match (self.pcm, hold) {
-                (Some(_), false) => {
+                (Some(_), false) if !hold_open => {
                     self.release();
                     eprintln!("slot: audio released after silence");
                 }
-                (None, true) => match self.alsa.open_pcm(self.rate) {
-                    Ok(pcm) => {
-                        eprintln!("slot: audio reopened at {:.1} ms", crate::boot_time::ms());
-                        self.pcm = Some(pcm);
-                        self.failing = false;
+                (None, true) => {
+                    if !self.failing {
+                        eprintln!("slot: audio reopening at {:.1} ms", crate::boot_time::ms());
                     }
-                    Err(e) => {
-                        if !self.failing {
-                            eprintln!("slot: audio: {e}, retrying");
-                            self.failing = true;
+                    match self.open() {
+                        Ok(pcm) => {
+                            eprintln!("slot: audio reopened at {:.1} ms", crate::boot_time::ms());
+                            self.pcm = Some(pcm);
+                            self.failing = false;
+                        }
+                        Err(e) => {
+                            if !self.failing {
+                                eprintln!("slot: audio: {e}, retrying");
+                                self.failing = true;
+                            }
                         }
                     }
-                },
+                }
                 _ => {}
             }
             match self.pcm {
                 Some(pcm) => {
                     if !self.write(pcm, &buf) {
-                        return;
+                        if !self.on_bluetooth {
+                            return;
+                        }
+                        // The headphones went away: back to the speaker.
+                        eprintln!("slot: audio: headphones gone");
+                        super::route_bluetooth(None);
+                        self.route = super::bluetooth_route().1;
+                        self.let_go(hold_open);
                     }
                 }
                 None => std::thread::sleep(span),
             }
         }
+    }
+
+    /// Opens the headphones when sound is routed to them and they answer,
+    /// else the speaker: the parked one if there is one.
+    fn open(&mut self) -> Result<*mut c_void, AudioError> {
+        if let Some(mac) = super::bluetooth_route().0 {
+            match self.alsa.open_bluetooth(&mac, self.rate) {
+                Ok(pcm) => {
+                    self.on_bluetooth = true;
+                    return Ok(pcm);
+                }
+                Err(e) => eprintln!("slot: audio: {e}, staying on the speaker"),
+            }
+        }
+        self.on_bluetooth = false;
+        match self.parked.take() {
+            Some(pcm) => Ok(pcm),
+            None => self.alsa.open_pcm(self.rate),
+        }
+    }
+
+    /// Stops playing to the current device for a reroute: headphones are
+    /// closed, and the speaker is parked where it must stay open.
+    fn let_go(&mut self, hold_open: bool) {
+        if hold_open && !self.on_bluetooth && self.parked.is_none() {
+            self.parked = self.pcm.take();
+        } else {
+            self.release();
+        }
+        self.on_bluetooth = false;
     }
 
     fn write(&self, pcm: *mut c_void, buf: &[i16]) -> bool {
@@ -292,5 +380,11 @@ impl Playback {
 impl Drop for Playback {
     fn drop(&mut self) {
         self.release();
+        if let Some(pcm) = self.parked.take() {
+            unsafe {
+                (self.alsa.drop)(pcm);
+                (self.alsa.close)(pcm);
+            }
+        }
     }
 }

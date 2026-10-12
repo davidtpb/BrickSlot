@@ -16,6 +16,15 @@ pub fn header_code(rom: &Path) -> Option<String> {
     field(rom, CODE_OFF, &mut [0u8; CODE_LEN])
 }
 
+pub fn header_from_bytes(bytes: &[u8]) -> Option<(String, String)> {
+    let head = bytes.get(TITLE_OFF as usize..CODE_OFF as usize + CODE_LEN)?;
+    let (title, code) = head.split_at(TITLE_LEN);
+    Some((
+        text_from_bytes(title).unwrap_or_default(),
+        text_from_bytes(code).unwrap_or_default(),
+    ))
+}
+
 pub fn header_title_code(rom: &Path) -> Option<(String, String)> {
     let mut f = File::open(rom).ok()?;
     f.seek(SeekFrom::Start(TITLE_OFF)).ok()?;

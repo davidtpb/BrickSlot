@@ -5,7 +5,11 @@ use slot_ui::{
 
 fn bottom_edge(d: &Draw) -> Option<f32> {
     match *d {
-        Draw::Rect { y, h, .. } | Draw::Tex { y, h, .. } | Draw::Turned { y, h, .. } => Some(y + h),
+        Draw::Rect { y, h, .. }
+        | Draw::Tex { y, h, .. }
+        | Draw::Turned { y, h, .. }
+        | Draw::Part { y, h, .. } => Some(y + h),
+        Draw::Warp { .. } => d.bounds().map(|(_, y, _, h)| y + h),
         Draw::Game | Draw::Shot { .. } => None,
     }
 }

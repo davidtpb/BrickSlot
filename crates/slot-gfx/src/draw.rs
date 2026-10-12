@@ -1,5 +1,5 @@
 use crate::quad::Quad;
-use crate::shaders::{SPRITE_FRAG, SPRITE_VERT};
+use crate::shaders::{SPRITE_FRAG, SPRITE_VERT, WARP_FRAG, WARP_VERT};
 use crate::surface::{GfxError, OUT_H, OUT_W};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -42,6 +42,64 @@ pub enum Draw {
     Shot {
         tex: TexId,
     },
+    /// A horizontal slice of a texture, from `u0` to `u1` across its width
+    /// (0 to 1), stretched over the rectangle. Lets text wider than its box
+    /// be cut at the box's edge and slid through it.
+    Part {
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        tex: TexId,
+        alpha: f32,
+        u0: f32,
+        u1: f32,
+    },
+    /// A texture laid over four corners (top left, top right, bottom left,
+    /// bottom right) with perspective: `q` holds one over each corner's
+    /// depth. `grey` drains its colour, from 0 (none) to 1 (all).
+    Warp {
+        corners: [[f32; 2]; 4],
+        q: [f32; 4],
+        tex: TexId,
+        alpha: f32,
+        grey: f32,
+    },
+}
+
+impl Draw {
+    /// The box a drawing covers, for layout and tests.
+    pub fn bounds(&self) -> Option<(f32, f32, f32, f32)> {
+        match *self {
+            Draw::Rect { x, y, w, h, .. }
+            | Draw::Tex { x, y, w, h, .. }
+            | Draw::Turned { x, y, w, h, .. }
+            | Draw::Part { x, y, w, h, .. } => Some((x, y, w, h)),
+            Draw::Warp { corners, .. } => {
+                let xs = corners.map(|c| c[0]);
+                let ys = corners.map(|c| c[1]);
+                let (x0, x1) = (
+                    xs.iter().copied().fold(f32::MAX, f32::min),
+                    xs.iter().copied().fold(f32::MIN, f32::max),
+                );
+                let (y0, y1) = (
+                    ys.iter().copied().fold(f32::MAX, f32::min),
+                    ys.iter().copied().fold(f32::MIN, f32::max),
+                );
+                Some((x0, y0, x1 - x0, y1 - y0))
+            }
+            Draw::Game | Draw::Shot { .. } => None,
+        }
+    }
+}
+
+struct Warp {
+    prog: gl::types::GLuint,
+    u_p01: gl::types::GLint,
+    u_p23: gl::types::GLint,
+    u_q: gl::types::GLint,
+    u_colour: gl::types::GLint,
+    u_grey: gl::types::GLint,
 }
 
 pub struct Sprites {
@@ -51,6 +109,8 @@ pub struct Sprites {
     u_rect: gl::types::GLint,
     u_colour: gl::types::GLint,
     u_turn: gl::types::GLint,
+    u_span: gl::types::GLint,
+    warp: Option<Warp>,
 }
 
 impl Sprites {
@@ -64,7 +124,7 @@ impl Sprites {
             gl::RGBA,
             Some(&[255u8; 4]),
         );
-        let (u_rect, u_colour, u_turn);
+        let (u_rect, u_colour, u_turn, u_span);
         unsafe {
             gl::UseProgram(prog);
             gl::Uniform1i(crate::gl::uniform_location(prog, "u_tex"), 0);
@@ -76,14 +136,43 @@ impl Sprites {
             u_rect = crate::gl::uniform_location(prog, "u_rect");
             u_colour = crate::gl::uniform_location(prog, "u_colour");
             u_turn = crate::gl::uniform_location(prog, "u_turn");
+            u_span = crate::gl::uniform_location(prog, "u_span");
         }
+        let warp = match crate::shaders::program(WARP_VERT, WARP_FRAG) {
+            Ok(wp) => Some(wp),
+            Err(e) => {
+                eprintln!(
+                    "slot: gfx: the perspective shader would not build, carts lie flat: {e:?}"
+                );
+                None
+            }
+        };
+        let warp = warp.map(|wp| unsafe {
+            gl::UseProgram(wp);
+            gl::Uniform1i(crate::gl::uniform_location(wp, "u_tex"), 0);
+            gl::Uniform2f(
+                crate::gl::uniform_location(wp, "u_target"),
+                OUT_W as f32,
+                OUT_H as f32,
+            );
+            Warp {
+                prog: wp,
+                u_p01: crate::gl::uniform_location(wp, "u_p01"),
+                u_p23: crate::gl::uniform_location(wp, "u_p23"),
+                u_q: crate::gl::uniform_location(wp, "u_q"),
+                u_colour: crate::gl::uniform_location(wp, "u_colour"),
+                u_grey: crate::gl::uniform_location(wp, "u_grey"),
+            }
+        });
         Ok(Sprites {
+            warp,
             prog,
             white,
             textures: Vec::new(),
             u_rect,
             u_colour,
             u_turn,
+            u_span,
         })
     }
 
@@ -136,9 +225,73 @@ impl Sprites {
             gl::UseProgram(self.prog);
             gl::ActiveTexture(gl::TEXTURE0);
         }
+        let mut warping = false;
         for item in items {
+            if let Draw::Warp {
+                corners,
+                q,
+                tex,
+                alpha,
+                grey,
+            } = *item
+            {
+                let Some(t) = self.textures.get(tex.0) else {
+                    continue;
+                };
+                let Some(w) = &self.warp else {
+                    let Some((x, y, bw, bh)) = item.bounds() else {
+                        continue;
+                    };
+                    unsafe {
+                        gl::BindTexture(gl::TEXTURE_2D, *t);
+                        gl::Uniform4f(self.u_rect, x, y, bw, bh);
+                        gl::Uniform2f(self.u_turn, 1.0, 0.0);
+                        gl::Uniform2f(self.u_span, 0.0, 1.0);
+                        gl::Uniform4f(self.u_colour, 1.0, 1.0, 1.0, alpha);
+                    }
+                    let _ = grey;
+                    quad.draw();
+                    continue;
+                };
+                unsafe {
+                    if !warping {
+                        gl::UseProgram(w.prog);
+                        warping = true;
+                    }
+                    gl::BindTexture(gl::TEXTURE_2D, *t);
+                    let [a, b, c, d] = corners;
+                    gl::Uniform4f(w.u_p01, a[0], a[1], b[0], b[1]);
+                    gl::Uniform4f(w.u_p23, c[0], c[1], d[0], d[1]);
+                    gl::Uniform4f(w.u_q, q[0], q[1], q[2], q[3]);
+                    gl::Uniform4f(w.u_colour, 1.0, 1.0, 1.0, alpha);
+                    gl::Uniform1f(w.u_grey, grey);
+                }
+                quad.draw();
+                continue;
+            }
+            if warping {
+                unsafe { gl::UseProgram(self.prog) };
+                warping = false;
+            }
+            let mut span = (0.0, 1.0);
             let (x, y, w, h, tex, colour, turn) = match *item {
                 Draw::Rect { x, y, w, h, colour } => (x, y, w, h, self.white, colour, 0.0),
+                Draw::Part {
+                    x,
+                    y,
+                    w,
+                    h,
+                    tex,
+                    alpha,
+                    u0,
+                    u1,
+                } => match self.textures.get(tex.0) {
+                    Some(t) => {
+                        span = (u0, u1 - u0);
+                        (x, y, w, h, *t, [1.0, 1.0, 1.0, alpha], 0.0)
+                    }
+                    None => continue,
+                },
                 Draw::Tex {
                     x,
                     y,
@@ -162,7 +315,7 @@ impl Sprites {
                     Some(t) => (x, y, w, h, *t, [1.0, 1.0, 1.0, alpha], turn),
                     None => continue,
                 },
-                Draw::Game | Draw::Shot { .. } => continue,
+                Draw::Game | Draw::Shot { .. } | Draw::Warp { .. } => continue,
             };
             let (cos, sin) = if turn == 0.0 {
                 (1.0, 0.0)
@@ -173,6 +326,7 @@ impl Sprites {
                 gl::BindTexture(gl::TEXTURE_2D, tex);
                 gl::Uniform4f(self.u_rect, x, y, w, h);
                 gl::Uniform2f(self.u_turn, cos, sin);
+                gl::Uniform2f(self.u_span, span.0, span.1);
                 gl::Uniform4f(self.u_colour, colour[0], colour[1], colour[2], colour[3]);
             }
             quad.draw();
@@ -187,6 +341,9 @@ impl Drop for Sprites {
             gl::DeleteTextures(self.textures.len() as i32, self.textures.as_ptr());
             gl::DeleteTextures(1, &self.white);
             gl::DeleteProgram(self.prog);
+            if let Some(w) = &self.warp {
+                gl::DeleteProgram(w.prog);
+            }
         }
     }
 }

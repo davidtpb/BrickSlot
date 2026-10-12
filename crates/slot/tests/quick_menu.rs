@@ -9,7 +9,7 @@ use slot_input::{Action, Btn};
 use slot_store::{read_slot_state, write_slot_state, Shader, SlotState};
 use slot_ui::{
     edge, Draw, Icon, QuickMenuFaces, QuickRow, QuickValue, TexId, MENU_PAD, OUT_W, QUICK_EDGE,
-    QUICK_PITCH, QUICK_TOP,
+    QUICK_PITCH, QUICK_SPLIT, QUICK_TOP,
 };
 use tempfile::TempDir;
 
@@ -112,15 +112,18 @@ fn up_and_down_move_the_bar_and_wrap_at_the_ends() {
     press(&mut a, Btn::Up);
     assert_eq!(
         a.quick_menu(),
-        Some(QuickRow::About),
+        Some(QuickRow::System),
         "up from the top did not wrap to the bottom"
     );
     for want in [
+        QuickRow::Search,
         QuickRow::Screen,
         QuickRow::Game,
-        QuickRow::DateTime,
-        QuickRow::About,
-        QuickRow::Screen,
+        QuickRow::Lights,
+        QuickRow::Network,
+        QuickRow::Tools,
+        QuickRow::System,
+        QuickRow::Search,
     ] {
         press(&mut a, Btn::Down);
         assert_eq!(a.quick_menu(), Some(want));
@@ -227,8 +230,9 @@ fn the_game_page_flips_eject_save_turbo_and_rewind_and_saves_each() {
     press(&mut a, Btn::Left);
     assert_eq!(card(&d), (true, false, false));
     assert!(!a.turbo());
-    press(&mut a, Btn::Down);
-    press(&mut a, Btn::Down);
+    while a.quick_menu() != Some(QuickRow::EjectSave) {
+        press(&mut a, Btn::Down);
+    }
     press(&mut a, Btn::Right);
     assert_eq!(card(&d), (false, false, false));
     press(&mut a, Btn::B);
@@ -240,12 +244,17 @@ fn screen_opens_a_page_of_its_own_and_b_comes_back_to_it() {
     let (_d, mut a, _) = on_carousel();
     open_at(&mut a, QuickRow::Screen);
     press(&mut a, Btn::A);
-    assert_eq!(a.quick_menu(), Some(QuickRow::GbaShader));
+    assert_eq!(a.quick_menu(), Some(QuickRow::Brightness));
     for want in [
+        QuickRow::Warmth,
+        QuickRow::Look,
+        QuickRow::Tint,
+        QuickRow::GbaShader,
         QuickRow::GbShader,
         QuickRow::ColourCorrection,
         QuickRow::GbPalettes,
-        QuickRow::GbaShader,
+        QuickRow::IdleDim,
+        QuickRow::Brightness,
     ] {
         press(&mut a, Btn::Down);
         assert_eq!(
@@ -319,7 +328,9 @@ fn the_arrows_change_nothing_on_a_row_that_opens() {
         press(&mut a, Btn::Left);
         press(&mut a, Btn::Right);
         assert_eq!(a.quick_menu(), Some(row), "an arrow left {row:?}");
-        a.apply(Action::QuickMenu);
+        while a.quick_menu().is_some() {
+            a.apply(Action::QuickMenu);
+        }
     }
     assert_eq!(
         std::fs::read(d.path().join("Config/slot.state")).expect("read slot.state"),
@@ -526,19 +537,19 @@ fn the_arrows_stand_only_around_the_selected_rows_value() {
         drawn(&out, value(QuickValue::On, false)),
         "rumble's ON is not grey"
     );
-    press(&mut a, Btn::B);
-    let out = frame(&a);
-    assert!(drawn(&out, 500), "the date and time is not grey");
-
-    for _ in QuickRow::Game.position()..QuickRow::DateTime.position() {
-        press(&mut a, Btn::Down);
+    while a.quick_menu().is_some() {
+        a.apply(Action::QuickMenu);
     }
+    open_at(&mut a, QuickRow::DateTime);
     let out = frame(&a);
     assert!(
         !drawn(&out, 300) && !drawn(&out, 301),
         "arrows on a row that opens"
     );
     assert!(drawn(&out, 501), "the date and time in hand is not lit");
+    press(&mut a, Btn::Down);
+    let out = frame(&a);
+    assert!(drawn(&out, 500), "the date and time is not grey");
 }
 
 #[test]
@@ -571,7 +582,7 @@ fn labels_start_and_values_end_thirty_two_pixels_in() {
     open_at(&mut a, QuickRow::FastForward);
     let out = frame(&a);
     let right = OUT_W as f32 - QUICK_EDGE;
-    for row in QuickRow::GAME {
+    for row in &QuickRow::GAME[..slot_ui::QUICK_VISIBLE] {
         let [x, ..] = placed(&out, 100 + row.index()).expect("a label was not drawn");
         assert_eq!(x + MENU_PAD as f32, QUICK_EDGE, "{row:?}'s label");
     }
@@ -623,5 +634,193 @@ fn gb_palettes_flips_on_either_arrow_and_saves() {
             a.quick_value(QuickRow::GbPalettes),
             Some(QuickValue::flag(want))
         );
+    }
+}
+
+#[test]
+fn the_lights_page_steps_its_settings_and_saves_them() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::LightMode);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::LightMode), Some(QuickValue::Colour));
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Left);
+    assert_eq!(a.quick_value(QuickRow::LightColour), Some(QuickValue::Pink));
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Right);
+    assert_eq!(
+        a.quick_value(QuickRow::LightEffect),
+        Some(QuickValue::Breathe)
+    );
+    let saved = read_slot_state(d.path());
+    assert_eq!(saved.light_mode, slot_store::LightMode::Colour);
+    assert_eq!(saved.light_colour, slot_store::LightColour::Pink);
+    assert_eq!(saved.light_effect, slot_store::LightEffect::Breathe);
+    let lights = a.lights();
+    assert_eq!(lights.mode, slot_power::LightsMode::Colour);
+    assert_eq!(lights.rgb, 0xFF69B4);
+    press(&mut a, Btn::B);
+    assert_eq!(a.quick_menu(), Some(QuickRow::Lights));
+}
+
+#[test]
+fn brightness_and_warmth_rows_step_the_same_levels_as_the_shortcuts() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Brightness);
+    let was = a.brightness();
+    press(&mut a, Btn::Right);
+    assert_eq!(a.brightness(), was + 1);
+    assert_eq!(
+        a.quick_value(QuickRow::Brightness),
+        Some(QuickValue::level(was + 1))
+    );
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.blue_light(), 1);
+    assert_eq!(read_slot_state(d.path()).blue_light, 1);
+}
+
+#[test]
+fn syncthing_brings_wifi_with_it_and_wifi_off_takes_syncthing_down() {
+    use slot::net::NetJob;
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Syncthing);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::On));
+    assert_eq!(a.quick_value(QuickRow::Syncthing), Some(QuickValue::On));
+    press(&mut a, Btn::B);
+    press(&mut a, Btn::B);
+    open_at(&mut a, QuickRow::Wifi);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::Off));
+    assert_eq!(a.quick_value(QuickRow::Syncthing), Some(QuickValue::Off));
+    assert_eq!(a.net_jobs(), [NetJob::SyncthingStart, NetJob::WifiDown]);
+    let saved = read_slot_state(d.path());
+    assert!(!saved.wifi && !saved.syncthing);
+}
+
+#[test]
+fn syncthing_left_on_starts_again_at_boot() {
+    use slot::net::NetJob;
+    let (_d, a, _) = on_carousel_with(SlotState {
+        wifi: true,
+        syncthing: true,
+        ..SlotState::default()
+    });
+    assert_eq!(a.net_jobs(), [NetJob::SyncthingStart]);
+}
+
+#[test]
+fn retroachievements_needs_wifi_and_goes_when_wifi_does() {
+    use slot::net::NetJob;
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Achievements);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::Achievements), Some(QuickValue::On));
+    assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::On));
+    assert_eq!(a.net_jobs(), [NetJob::WifiUp]);
+    assert!(read_slot_state(d.path()).achievements);
+    press(&mut a, Btn::B);
+    press(&mut a, Btn::B);
+    open_at(&mut a, QuickRow::Wifi);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::Off));
+    assert_eq!(a.quick_value(QuickRow::Achievements), Some(QuickValue::Off));
+}
+
+#[test]
+fn save_format_flips_between_retroarch_and_slot_and_is_remembered() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::SaveFormat);
+    assert_eq!(
+        a.quick_value(QuickRow::SaveFormat),
+        Some(QuickValue::RetroArch)
+    );
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::SaveFormat), Some(QuickValue::Slot));
+    assert_eq!(
+        read_slot_state(d.path()).save_format,
+        slot_store::SaveFormat::Slot
+    );
+    press(&mut a, Btn::Left);
+    assert_eq!(
+        a.quick_value(QuickRow::SaveFormat),
+        Some(QuickValue::RetroArch)
+    );
+}
+
+#[test]
+fn set_time_automatically_is_on_by_default_and_can_be_turned_off() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::AutoTime);
+    assert_eq!(a.quick_value(QuickRow::AutoTime), Some(QuickValue::On));
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::AutoTime), Some(QuickValue::Off));
+    assert!(!read_slot_state(d.path()).auto_time);
+}
+
+#[test]
+fn file_transfer_needs_wifi_and_is_never_left_on_from_the_menu_alone() {
+    let (_d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::FileTransfer);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::FileTransfer), Some(QuickValue::Off));
+    assert_eq!(
+        a.take_message().map(|m| m.0),
+        Some("Turn on Wi-Fi first".to_string())
+    );
+}
+
+#[test]
+fn hardcore_turns_off_rewind_and_states() {
+    use slot::net::NetJob;
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Hardcore);
+    assert_eq!(a.quick_value(QuickRow::Hardcore), Some(QuickValue::Off));
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::Hardcore), Some(QuickValue::On));
+    assert_eq!(a.quick_value(QuickRow::Achievements), Some(QuickValue::On));
+    assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::On));
+    assert_eq!(a.net_jobs(), [NetJob::WifiUp]);
+    let saved = read_slot_state(d.path());
+    assert!(saved.hardcore);
+    assert!(saved.achievements);
+    assert!(!a.may_rewind());
+    assert!(!a.may_load_state());
+    assert!(!a.may_fast_forward());
+}
+
+#[test]
+fn a_long_page_scrolls_rather_than_running_under_the_legend() {
+    for page in [
+        &QuickRow::MAIN[..],
+        &QuickRow::SCREEN[..],
+        &QuickRow::GAME[..],
+        &QuickRow::LIGHTS[..],
+        &QuickRow::NETWORK[..],
+    ] {
+        let (_d, mut a, _) = on_carousel();
+        fake_faces(&mut a);
+        open_at(&mut a, page[0]);
+        for &row in page {
+            assert_eq!(a.quick_menu(), Some(row));
+            let out = frame(&a);
+            let labels: Vec<_> = page
+                .iter()
+                .filter_map(|r| placed(&out, 100 + r.index()).map(|p| (*r, p)))
+                .collect();
+            assert!(
+                labels.iter().any(|(r, _)| *r == row),
+                "{row:?} is selected but not on screen"
+            );
+            assert!(labels.len() <= slot_ui::QUICK_VISIBLE);
+            for (r, [_, y, _, h]) in labels {
+                assert!(
+                    y + h <= QUICK_SPLIT,
+                    "{r:?} runs under the legend at {y} with {row:?} selected"
+                );
+            }
+            press(&mut a, Btn::Down);
+        }
     }
 }

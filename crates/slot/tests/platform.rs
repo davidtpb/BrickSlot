@@ -65,11 +65,11 @@ fn a_game_boy_carts_autosave_lands_under_gb_and_never_under_gba() {
     );
 
     assert!(
-        d.path().join("Saves/GB/Tetris.sav").is_file(),
+        d.path().join("Saves/GB/Tetris.srm").is_file(),
         "the Game Boy cart's battery save did not land under its own platform's directory"
     );
     assert!(
-        !d.path().join("Saves/GBA/Tetris.sav").exists(),
+        !d.path().join("Saves/GBA/Tetris.srm").exists(),
         "the Game Boy cart's battery save was written where a GBA game of the same name \
          keeps its own"
     );

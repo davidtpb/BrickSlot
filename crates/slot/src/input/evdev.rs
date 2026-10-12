@@ -10,8 +10,112 @@ pub const EV_SW: u16 = 0x05;
 pub const SW_LID: u16 = 0x00;
 
 pub const EV_ABS: u16 = 0x03;
+pub const ABS_X: u16 = 0x00;
+pub const ABS_Y: u16 = 0x01;
 pub const ABS_HAT0X: u16 = 0x10;
 pub const ABS_HAT0Y: u16 = 0x11;
+pub const ABS_Z: u16 = 0x02;
+pub const ABS_RZ: u16 = 0x05;
+
+pub const KEYMAP_VAR: &str = "SLOT_KEYMAP";
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum Keymap {
+    #[default]
+    Anbernic,
+    TrimUi,
+}
+
+impl Keymap {
+    pub fn parse(s: &str) -> Option<Keymap> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "anbernic" | "h700" => Some(Keymap::Anbernic),
+            "trimui" | "tg5040" | "brick" | "brickpro" => Some(Keymap::TrimUi),
+            _ => None,
+        }
+    }
+
+    pub fn for_device(name: &str, forced: Option<&str>) -> Keymap {
+        if let Some(keymap) = forced.and_then(Keymap::parse) {
+            return keymap;
+        }
+        if name.to_ascii_lowercase().contains("trimui") {
+            Keymap::TrimUi
+        } else {
+            Keymap::Anbernic
+        }
+    }
+
+    pub fn btn(self, code: u16) -> Option<Btn> {
+        match self {
+            Keymap::Anbernic => code_to_btn(code),
+            Keymap::TrimUi => trimui_code_to_btn(code),
+        }
+    }
+
+    pub fn to_raw(self, ev: Ev) -> Option<RawEvent> {
+        let btn = match ev.kind {
+            // analog ABS_Z / ABS_RZ own L2/R2; the digital copies chatter
+            EV_KEY if self == Keymap::TrimUi && matches!(ev.code, 0x138 | 0x139) => {
+                return None;
+            }
+            EV_KEY => self.btn(ev.code)?,
+            EV_SW if ev.code == SW_LID && self == Keymap::Anbernic => Btn::Lid,
+            _ => return None,
+        };
+        match ev.value {
+            0 => Some(RawEvent::Up(btn)),
+            1 => Some(RawEvent::Down(btn)),
+            _ => None,
+        }
+    }
+}
+
+pub struct Triggers {
+    l2_at: i32,
+    r2_at: i32,
+    l2: bool,
+    r2: bool,
+}
+
+impl Default for Triggers {
+    fn default() -> Self {
+        Triggers::new(1)
+    }
+}
+
+impl Triggers {
+    pub fn new(at: i32) -> Self {
+        Triggers::axes(at, at)
+    }
+
+    pub fn axes(l2_at: i32, r2_at: i32) -> Self {
+        Triggers {
+            l2_at: l2_at.max(1),
+            r2_at: r2_at.max(1),
+            l2: false,
+            r2: false,
+        }
+    }
+
+    pub fn feed(&mut self, ev: Ev) -> Option<RawEvent> {
+        let (held, btn, at) = match ev.code {
+            ABS_Z => (&mut self.l2, Btn::L2, self.l2_at),
+            ABS_RZ => (&mut self.r2, Btn::R2, self.r2_at),
+            _ => return None,
+        };
+        let now = ev.value >= at;
+        if now == *held {
+            return None;
+        }
+        *held = now;
+        Some(if now {
+            RawEvent::Down(btn)
+        } else {
+            RawEvent::Up(btn)
+        })
+    }
+}
 
 #[derive(Default)]
 pub struct Hat {
@@ -31,6 +135,118 @@ impl Hat {
             return Vec::new();
         }
         *held = now;
+        let btn = |v: i32| ends[usize::from(v > 0)];
+        let mut out = Vec::new();
+        if was != 0 {
+            out.push(RawEvent::Up(btn(was)));
+        }
+        if now != 0 {
+            out.push(RawEvent::Down(btn(now)));
+        }
+        out
+    }
+}
+
+/// Left stick as a D-pad, using each axis's reported centre and deadzone.
+pub struct Stick {
+    x: Axis,
+    y: Axis,
+    live: bool,
+}
+
+/// One stick axis: where it rests, how far it must move to press, and
+/// whether it has been seen at rest since it was opened.
+struct Axis {
+    held: i32,
+    mid: i32,
+    dead: i32,
+    /// An axis that starts pushed (no stick behind it, or one that rests at
+    /// the end of its range) would otherwise hold a direction for good. It
+    /// presses nothing until it has once come back to the middle.
+    armed: bool,
+}
+
+impl Axis {
+    fn new(min: i32, max: i32, flat: i32) -> Self {
+        Axis {
+            held: 0,
+            mid: min / 2 + max / 2,
+            dead: flat.abs().max((max - min).abs() / 6).max(1),
+            armed: true,
+        }
+    }
+
+    fn rest(&mut self, value: i32) {
+        if (value - self.mid).abs() < self.dead {
+            // A stick that has drifted a little rests a little off the
+            // middle of its range; centre on where it actually sits.
+            self.mid = value;
+        } else {
+            self.armed = false;
+        }
+    }
+
+    /// The direction the axis now holds, -1, 0 or 1.
+    fn read(&mut self, value: i32) -> i32 {
+        let delta = value - self.mid;
+        // Letting go happens a little nearer the middle than pressing, so
+        // a stick held right at the edge of the deadzone does not chatter.
+        let release = self.dead * 3 / 4;
+        if delta.abs() < release {
+            self.armed = true;
+            return 0;
+        }
+        if !self.armed {
+            return 0;
+        }
+        match self.held {
+            h if h != 0 && delta.signum() == h => h,
+            _ if delta <= -self.dead => -1,
+            _ if delta >= self.dead => 1,
+            _ => 0,
+        }
+    }
+}
+
+impl Default for Stick {
+    fn default() -> Self {
+        Stick::new(0, 0, 0, 0, 0, 0)
+    }
+}
+
+impl Stick {
+    pub fn new(xmin: i32, xmax: i32, xflat: i32, ymin: i32, ymax: i32, yflat: i32) -> Self {
+        Stick {
+            x: Axis::new(xmin, xmax, xflat),
+            y: Axis::new(ymin, ymax, yflat),
+            live: xmax > xmin && ymax > ymin,
+        }
+    }
+
+    /// Where the axes sit when the stick is opened, as the kernel reports
+    /// them. An axis resting near the middle is centred on that; one
+    /// resting pushed is ignored until it comes back.
+    pub fn rest(mut self, x: i32, y: i32) -> Self {
+        self.x.rest(x);
+        self.y.rest(y);
+        self
+    }
+
+    pub fn feed(&mut self, ev: Ev) -> Vec<RawEvent> {
+        if !self.live {
+            return Vec::new();
+        }
+        let (axis, ends) = match ev.code {
+            ABS_X => (&mut self.x, [Btn::Left, Btn::Right]),
+            ABS_Y => (&mut self.y, [Btn::Up, Btn::Down]),
+            _ => return Vec::new(),
+        };
+        let was = axis.held;
+        let now = axis.read(ev.value);
+        if now == was {
+            return Vec::new();
+        }
+        axis.held = now;
         let btn = |v: i32| ends[usize::from(v > 0)];
         let mut out = Vec::new();
         if was != 0 {
@@ -92,9 +308,30 @@ pub fn code_to_btn(code: u16) -> Option<Btn> {
     })
 }
 
-const WANTED: [u16; 15] = [
-    0x130, 0x131, 0x132, 0x133, 0x134, 0x135, 0x136, 0x137, 0x138, 0x13a, 0x13b, 0x162, 115, 114,
-    116,
+pub fn trimui_code_to_btn(code: u16) -> Option<Btn> {
+    Some(match code {
+        0x130 => Btn::B,
+        0x131 => Btn::A,
+        0x133 => Btn::Y,
+        0x134 => Btn::X,
+        0x136 => Btn::L1,
+        0x137 => Btn::R1,
+        0x138 => Btn::L2,
+        0x139 => Btn::R2,
+        0x13a => Btn::Select,
+        0x13b => Btn::Start,
+        0x13c => Btn::Menu,
+        172 => Btn::Home,
+        115 => Btn::VolUp,
+        114 => Btn::VolDown,
+        116 => Btn::Power,
+        _ => return None,
+    })
+}
+
+const WANTED: [u16; 17] = [
+    0x130, 0x131, 0x132, 0x133, 0x134, 0x135, 0x136, 0x137, 0x138, 0x13a, 0x13b, 0x13c, 0x162, 115,
+    114, 116, 172,
 ];
 
 pub use slot_power::has_bit;

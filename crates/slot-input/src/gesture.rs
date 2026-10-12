@@ -42,6 +42,9 @@ pub enum Action {
     PalettePrev,
     ShaderNext,
     ShaderPrev,
+    Screenshot,
+    /// MENU+Y: the Home panel, for devices with no Home button.
+    HomePanel,
     PowerPress,
     PowerTap,
     PowerHold,
@@ -69,6 +72,9 @@ pub struct Gestures {
     menu_down_at: Option<Millis>,
     menu_last_tap: Option<Millis>,
     menu_eject_fired: bool,
+    menu_held: bool,
+    menu_swallow_a: bool,
+    menu_swallow_y: bool,
     power_down_at: Option<Millis>,
     power_hold_fired: bool,
     vol_up_at: Option<Millis>,
@@ -166,6 +172,18 @@ impl Gestures {
             self.chord_held |= bit;
             return vec![action];
         }
+        if b == Btn::A && self.menu_held {
+            self.menu_down_at = None;
+            self.menu_last_tap = None;
+            self.menu_swallow_a = true;
+            return vec![Action::Screenshot];
+        }
+        if b == Btn::Y && self.menu_held {
+            self.menu_down_at = None;
+            self.menu_last_tap = None;
+            self.menu_swallow_y = true;
+            return vec![Action::HomePanel];
+        }
         match b {
             Btn::Select => self.select_down(now),
             Btn::Menu => self.menu_down(now),
@@ -192,6 +210,12 @@ impl Gestures {
                 self.chord_held &= !bit;
                 return Vec::new();
             }
+        }
+        if b == Btn::A && std::mem::take(&mut self.menu_swallow_a) {
+            return Vec::new();
+        }
+        if b == Btn::Y && std::mem::take(&mut self.menu_swallow_y) {
+            return Vec::new();
         }
         match b {
             Btn::Select => self.select_up(now),
@@ -270,6 +294,7 @@ impl Gestures {
     }
 
     fn menu_down(&mut self, now: Millis) -> Vec<Action> {
+        self.menu_held = true;
         if self.chording(now) {
             self.mark_chorded();
             self.menu_down_at = None;
@@ -289,6 +314,7 @@ impl Gestures {
     }
 
     fn menu_up(&mut self, now: Millis) -> Vec<Action> {
+        self.menu_held = false;
         let Some(d) = self.menu_down_at.take() else {
             return Vec::new();
         };
@@ -314,6 +340,14 @@ impl Gestures {
     }
 
     fn volume_press(&mut self, b: Btn, now: Millis) -> Vec<Action> {
+        if self.menu_held {
+            self.menu_down_at = None;
+            self.menu_last_tap = None;
+            return vec![match b {
+                Btn::VolUp => Action::BrightnessUp,
+                _ => Action::BrightnessDown,
+            }];
+        }
         let (mine, other, action) = match b {
             Btn::VolUp => (&mut self.vol_up_at, self.vol_down_at, Action::VolumeUp),
             _ => (&mut self.vol_down_at, self.vol_up_at, Action::VolumeDown),

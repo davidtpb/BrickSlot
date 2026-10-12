@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::atomic::atomic_write;
 use crate::gb_palette::GbPalette;
+use crate::lights::{LightColour, LightEffect, LightLevel, LightMode};
 use crate::platform::Platform;
 
 pub const BRIGHTNESS_MAX: u8 = 9;
@@ -38,6 +39,173 @@ pub struct SlotState {
     pub rewind: bool,
     pub gb_palettes: bool,
     pub gb_palette: GbPalette,
+    pub light_mode: LightMode,
+    pub light_colour: LightColour,
+    pub light_effect: LightEffect,
+    pub light_level: LightLevel,
+    pub wifi: bool,
+    pub syncthing: bool,
+    pub achievements: bool,
+    pub save_format: SaveFormat,
+    pub auto_time: bool,
+    pub cpu: CpuMode,
+    pub look: Look,
+    pub tint: Tint,
+    /// Ticks and blips as the menus are used.
+    pub menu_sounds: bool,
+    pub bluetooth: bool,
+    pub clock_12h: bool,
+    pub start_fresh: bool,
+    /// Dim the backlight after half a minute without a press.
+    pub idle_dim: bool,
+    /// RetroAchievements hardcore: no rewind, states, cheats or fast-forward.
+    pub hardcore: bool,
+}
+
+/// How battery saves are written: RetroArch's `.srm` with the clock in a
+/// `.rtc` beside it, or slot's own `.sav` with the clock on the end.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum SaveFormat {
+    #[default]
+    RetroArch,
+    Slot,
+    /// RetroArch's files compressed as RZIP, as its "SaveRAM Compression"
+    /// writes them.
+    RetroArchCompressed,
+}
+
+impl SaveFormat {
+    pub fn name(self) -> &'static str {
+        match self {
+            SaveFormat::RetroArch => "retroarch",
+            SaveFormat::Slot => "slot",
+            SaveFormat::RetroArchCompressed => "retroarch-rzip",
+        }
+    }
+
+    pub const ALL: [SaveFormat; 3] = [
+        SaveFormat::RetroArch,
+        SaveFormat::Slot,
+        SaveFormat::RetroArchCompressed,
+    ];
+
+    pub fn parse(name: &str) -> Option<SaveFormat> {
+        SaveFormat::ALL.into_iter().find(|f| f.name() == name)
+    }
+
+    pub fn step(self, right: bool) -> SaveFormat {
+        let n = SaveFormat::ALL.len();
+        let at = SaveFormat::ALL.iter().position(|&f| f == self).unwrap_or(0);
+        SaveFormat::ALL[if right {
+            (at + 1) % n
+        } else {
+            (at + n - 1) % n
+        }]
+    }
+}
+
+/// How the shelf is drawn.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Look {
+    /// slot's own shelf above the console's cartridge slot.
+    Classic,
+    /// A light carousel of tilting carts, after the Socket frontend.
+    Socket,
+}
+
+impl Look {
+    pub fn name(self) -> &'static str {
+        match self {
+            Look::Classic => "classic",
+            Look::Socket => "socket",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Look> {
+        [Look::Classic, Look::Socket]
+            .into_iter()
+            .find(|l| l.name() == name)
+    }
+
+    pub fn other(self) -> Look {
+        match self {
+            Look::Classic => Look::Socket,
+            Look::Socket => Look::Classic,
+        }
+    }
+}
+
+/// The colours of the Socket look.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Tint {
+    /// Neutral greys.
+    Default,
+    /// Soft lilac and pink.
+    Pastel,
+    /// Warm browns, like an old photograph.
+    Sepia,
+}
+
+impl Tint {
+    pub const ALL: [Tint; 3] = [Tint::Default, Tint::Pastel, Tint::Sepia];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Tint::Default => "default",
+            Tint::Pastel => "pastel",
+            Tint::Sepia => "sepia",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Tint> {
+        Tint::ALL.into_iter().find(|t| t.name() == name)
+    }
+
+    pub fn step(self, right: bool) -> Tint {
+        let n = Tint::ALL.len();
+        let at = Tint::ALL.iter().position(|&t| t == self).unwrap_or(0);
+        Tint::ALL[if right {
+            (at + 1) % n
+        } else {
+            (at + n - 1) % n
+        }]
+    }
+}
+
+/// How hard the processor is driven: left as the system set it, held back
+/// for battery, or flat out.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum CpuMode {
+    #[default]
+    Stock,
+    Saver,
+    Performance,
+}
+
+impl CpuMode {
+    pub const ALL: [CpuMode; 3] = [CpuMode::Stock, CpuMode::Saver, CpuMode::Performance];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            CpuMode::Stock => "stock",
+            CpuMode::Saver => "saver",
+            CpuMode::Performance => "performance",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<CpuMode> {
+        CpuMode::ALL.into_iter().find(|m| m.name() == name)
+    }
+
+    pub fn step(self, right: bool) -> CpuMode {
+        let n = CpuMode::ALL.len();
+        let at = CpuMode::ALL.iter().position(|&m| m == self).unwrap_or(0);
+        CpuMode::ALL[if right {
+            (at + 1) % n
+        } else {
+            (at + n - 1) % n
+        }]
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -110,6 +278,24 @@ impl Default for SlotState {
             rewind: true,
             gb_palettes: false,
             gb_palette: GbPalette::DEFAULT,
+            light_mode: LightMode::Battery,
+            light_colour: LightColour::White,
+            light_effect: LightEffect::Static,
+            light_level: LightLevel::Medium,
+            wifi: false,
+            syncthing: false,
+            achievements: false,
+            save_format: SaveFormat::RetroArch,
+            auto_time: true,
+            cpu: CpuMode::Stock,
+            look: Look::Classic,
+            tint: Tint::Default,
+            menu_sounds: true,
+            bluetooth: false,
+            clock_12h: false,
+            start_fresh: true,
+            idle_dim: true,
+            hardcore: false,
         }
     }
 }
@@ -128,7 +314,7 @@ pub fn read_slot_state(root: &Path) -> SlotState {
 
 pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     let text = format!(
-        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\n",
+        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\nsave_format={}\nauto_time={}\ncpu={}\nlook={}\nclock_12h={}\nstart_fresh={}\ntint={}\nmenu_sounds={}\nbluetooth={}\nidle_dim={}\nhardcore={}\n",
         s.cart.as_deref().unwrap_or(""),
         s.cart_platform.map_or(String::new(), platform_key),
         s.brightness,
@@ -149,7 +335,25 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.turbo as u8,
         s.rewind as u8,
         s.gb_palettes as u8,
-        s.gb_palette.core_name()
+        s.gb_palette.core_name(),
+        s.light_mode.name(),
+        s.light_colour.name(),
+        s.light_effect.name(),
+        s.light_level.name(),
+        s.wifi as u8,
+        s.syncthing as u8,
+        s.achievements as u8,
+        s.save_format.name(),
+        s.auto_time as u8,
+        s.cpu.name(),
+        s.look.name(),
+        s.clock_12h,
+        s.start_fresh,
+        s.tint.name(),
+        s.menu_sounds,
+        s.bluetooth,
+        s.idle_dim,
+        s.hardcore
     );
     atomic_write(&state_path(root), text.as_bytes())
 }
@@ -176,6 +380,24 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut rewind = None;
     let mut gb_palettes = None;
     let mut gb_palette = None;
+    let mut light_mode = None;
+    let mut light_colour = None;
+    let mut light_effect = None;
+    let mut light_level = None;
+    let mut wifi = None;
+    let mut syncthing = None;
+    let mut achievements = None;
+    let mut save_format = None;
+    let mut auto_time = None;
+    let mut cpu = None;
+    let mut look = None;
+    let mut tint = None;
+    let mut menu_sounds = None;
+    let mut bluetooth = None;
+    let mut clock_12h = None;
+    let mut start_fresh = None;
+    let mut idle_dim = None;
+    let mut hardcore = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let Some((key, value)) = line.split_once('=') else {
             continue;
@@ -201,6 +423,24 @@ fn parse(text: &str) -> Option<SlotState> {
             "rewind" => rewind = flag(value),
             "gb_palettes" => gb_palettes = flag(value),
             "gb_palette" => gb_palette = GbPalette::parse(value),
+            "light_mode" => light_mode = LightMode::parse(value),
+            "light_colour" => light_colour = LightColour::parse(value),
+            "light_effect" => light_effect = LightEffect::parse(value),
+            "light_level" => light_level = LightLevel::parse(value),
+            "wifi" => wifi = flag(value),
+            "syncthing" => syncthing = flag(value),
+            "achievements" => achievements = flag(value),
+            "save_format" => save_format = SaveFormat::parse(value),
+            "auto_time" => auto_time = flag(value),
+            "cpu" => cpu = CpuMode::parse(value),
+            "look" => look = Look::parse(value),
+            "tint" => tint = Tint::parse(value),
+            "menu_sounds" => menu_sounds = value.parse().ok(),
+            "bluetooth" => bluetooth = value.parse().ok(),
+            "clock_12h" => clock_12h = value.parse().ok(),
+            "start_fresh" => start_fresh = value.parse().ok(),
+            "idle_dim" => idle_dim = value.parse().ok(),
+            "hardcore" => hardcore = value.parse().ok(),
             "shader_gb" => shader_gb = Shader::parse(value).filter(|s| Shader::GB.contains(s)),
             _ => {}
         }
@@ -229,6 +469,24 @@ fn parse(text: &str) -> Option<SlotState> {
         rewind: rewind.unwrap_or(fallback.rewind),
         gb_palettes: gb_palettes.unwrap_or(fallback.gb_palettes),
         gb_palette: gb_palette.unwrap_or(fallback.gb_palette),
+        light_mode: light_mode.unwrap_or(fallback.light_mode),
+        light_colour: light_colour.unwrap_or(fallback.light_colour),
+        light_effect: light_effect.unwrap_or(fallback.light_effect),
+        light_level: light_level.unwrap_or(fallback.light_level),
+        wifi: wifi.unwrap_or(fallback.wifi),
+        syncthing: syncthing.unwrap_or(fallback.syncthing),
+        achievements: achievements.unwrap_or(fallback.achievements),
+        save_format: save_format.unwrap_or(fallback.save_format),
+        auto_time: auto_time.unwrap_or(fallback.auto_time),
+        cpu: cpu.unwrap_or(fallback.cpu),
+        look: look.unwrap_or(fallback.look),
+        tint: tint.unwrap_or(fallback.tint),
+        menu_sounds: menu_sounds.unwrap_or(fallback.menu_sounds),
+        bluetooth: bluetooth.unwrap_or(fallback.bluetooth),
+        clock_12h: clock_12h.unwrap_or(fallback.clock_12h),
+        start_fresh: start_fresh.unwrap_or(fallback.start_fresh),
+        idle_dim: idle_dim.unwrap_or(fallback.idle_dim),
+        hardcore: hardcore.unwrap_or(fallback.hardcore),
     })
 }
 

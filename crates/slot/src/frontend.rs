@@ -55,6 +55,22 @@ pub struct Frontend {
     clocks: Clocks,
     about: AboutFace,
     quick_clock: QuickClock,
+    search_texes: Vec<SearchLine>,
+    home_texes: Vec<SearchLine>,
+    files_texes: Vec<SearchLine>,
+    files_light: Option<bool>,
+    socket_texes: Vec<SearchLine>,
+    settings_texes: Vec<SearchLine>,
+    search_light: Option<bool>,
+    home_light: Option<bool>,
+}
+
+#[derive(Clone, Default)]
+struct SearchLine {
+    text: Option<String>,
+    lit: bool,
+    tex: Option<TexId>,
+    face: Option<(TexId, u32, u32)>,
 }
 
 #[derive(Default)]
@@ -136,6 +152,14 @@ impl Frontend {
             clocks: Clocks::default(),
             about: AboutFace::default(),
             quick_clock: QuickClock::default(),
+            search_texes: Vec::new(),
+            home_texes: Vec::new(),
+            files_texes: Vec::new(),
+            files_light: None,
+            socket_texes: Vec::new(),
+            settings_texes: Vec::new(),
+            search_light: None,
+            home_light: None,
         }
     }
 
@@ -286,6 +310,129 @@ impl Frontend {
         app.set_toast_faces(toasts);
     }
 
+    /// Keeps a texture per line of the search screen, redrawing only the
+    /// lines whose text or highlight changed since the last frame.
+    fn sync_search(&mut self, compositor: &mut Compositor) {
+        let Some(lines) = self.session.app().search_lines() else {
+            return;
+        };
+        let light = self.session.app().search_light();
+        let face = match light {
+            true => slot_ui::search_face_light,
+            false => slot_ui::search_face,
+        };
+        if self.search_light != Some(light) {
+            self.search_light = Some(light);
+            self.search_texes.iter_mut().for_each(|l| l.text = None);
+        }
+        if sync_lines(&mut self.search_texes, lines, face, compositor) {
+            let faces = self.search_texes.iter().map(|l| l.face).collect();
+            self.session.app_mut().set_search_faces(faces);
+        }
+    }
+
+    /// The same for the Socket shelf's pills, and its backdrop once.
+    fn sync_socket(&mut self, compositor: &mut Compositor) {
+        if self.session.app().wants_socket_backdrop() {
+            let b = slot_ui::socket_backdrop();
+            let tex = compositor.create_texture(b.w, b.h, &b.rgba);
+            self.session.app_mut().set_socket_backdrop(tex);
+        }
+        if self.session.app().wants_socket_chrome() {
+            let chrome = slot_ui::Chrome::ALL
+                .iter()
+                .map(|c| {
+                    let f = slot_ui::chrome_face(*c);
+                    (compositor.create_texture(f.w, f.h, &f.rgba), f.w, f.h)
+                })
+                .collect();
+            self.session.app_mut().set_socket_chrome(chrome);
+        }
+        if let Some(lines) = self.session.app().settings_lines() {
+            if sync_lines(
+                &mut self.settings_texes,
+                lines,
+                slot_ui::settings_face,
+                compositor,
+            ) {
+                let faces = self.settings_texes.iter().map(|l| l.face).collect();
+                self.session.app_mut().set_settings_faces(faces);
+            }
+        }
+        let Some(lines) = self.session.app().socket_lines() else {
+            return;
+        };
+        if sync_lines(
+            &mut self.socket_texes,
+            lines,
+            slot_ui::socket_pill_face,
+            compositor,
+        ) {
+            let faces = self.socket_texes.iter().map(|l| l.face).collect();
+            self.session.app_mut().set_socket_faces(faces);
+        }
+    }
+
+    /// The same for the file explorer.
+    fn sync_files(&mut self, compositor: &mut Compositor) {
+        let Some(lines) = self.session.app().files_lines() else {
+            return;
+        };
+        let light = self.session.app().socket_look();
+        let face = match light {
+            true => slot_ui::files_face_light,
+            false => slot_ui::files_face,
+        };
+        if self.files_light != Some(light) {
+            self.files_light = Some(light);
+            self.files_texes.iter_mut().for_each(|l| l.text = None);
+        }
+        if sync_lines(&mut self.files_texes, lines, face, compositor) {
+            let faces = self.files_texes.iter().map(|l| l.face).collect();
+            self.session.app_mut().set_files_faces(faces);
+        }
+    }
+
+    /// The same for the Home panel.
+    fn sync_home(&mut self, compositor: &mut Compositor) {
+        if let Some(light) = self.session.app().wants_home_icons() {
+            let icons = slot_ui::home_icon_faces(light)
+                .into_iter()
+                .map(|f| (compositor.create_texture(f.w, f.h, &f.rgba), f.w, f.h))
+                .collect();
+            self.session.app_mut().set_home_icons(icons, light);
+        }
+        let Some(lines) = self.session.app().home_lines() else {
+            return;
+        };
+        let light = self.session.app().socket_look();
+        let face = match light {
+            true => slot_ui::home_face_light,
+            false => slot_ui::home_face,
+        };
+        if self.home_light != Some(light) {
+            self.home_light = Some(light);
+            self.home_texes.iter_mut().for_each(|l| l.text = None);
+        }
+        if sync_lines(&mut self.home_texes, lines, face, compositor) {
+            let faces = self.home_texes.iter().map(|l| l.face).collect();
+            self.session.app_mut().set_home_faces(faces);
+        }
+    }
+
+    fn show_message(&mut self, compositor: &mut Compositor) {
+        let app = self.session.app_mut();
+        let Some(tex) = app.message_tex() else {
+            return;
+        };
+        let Some((title, detail)) = app.take_message() else {
+            return;
+        };
+        let face = slot_ui::message_face(&title, &detail);
+        compositor.update_texture(tex, face.w, face.h, &face.rgba);
+        app.show_message();
+    }
+
     fn upload_wallpaper(&mut self, compositor: &mut Compositor) {
         let app = self.session.app();
         let seed = app.wall_secs().unsigned_abs();
@@ -349,6 +496,11 @@ impl Frontend {
             crate::latency::taken();
         }
         self.cart_faces.sync(self.session.app_mut(), compositor);
+        self.show_message(compositor);
+        self.sync_search(compositor);
+        self.sync_home(compositor);
+        self.sync_files(compositor);
+        self.sync_socket(compositor);
         sync_clock(self.session.app_mut(), compositor, &mut self.clocks);
         sync_about(self.session.app_mut(), compositor, &mut self.about);
         sync_quick_clock(self.session.app_mut(), compositor, &mut self.quick_clock);
@@ -771,11 +923,14 @@ fn sync_core_picker(
     lid: &mut Option<TexId>,
     built: &mut Option<String>,
 ) {
-    let highlighted = app.selected_stem().map(str::to_string);
+    let stem = app.selected_stem().map(str::to_string);
+    let highlighted = stem
+        .as_ref()
+        .map(|s| format!("{s}\u{0}{}", app.shell_generation()));
     if highlighted.is_some() && *asked != highlighted {
         if let Some(cart) = app
             .carts()
-            .find(|c| highlighted.as_deref() == Some(c.stem.as_str()))
+            .find(|c| stem.as_deref() == Some(c.stem.as_str()))
         {
             builder.request(cart.clone());
         }
@@ -784,7 +939,10 @@ fn sync_core_picker(
     let Some(faces) = builder.take() else {
         return;
     };
-    if highlighted.as_deref() != Some(faces.stem.as_str()) || *built == highlighted {
+    if stem.as_deref() != Some(faces.stem.as_str())
+        || faces.shell != app.selected_shell()
+        || *built == highlighted
+    {
         return;
     }
     let board_id = upload_rgba(
@@ -796,7 +954,7 @@ fn sync_core_picker(
     );
     let lid_id = upload_rgba(compositor, lid, faces.lid.w, faces.lid.h, &faces.lid.rgba);
     app.set_core_board_faces(board_id, lid_id);
-    *built = Some(faces.stem);
+    *built = highlighted;
 }
 
 fn upload(compositor: &mut Compositor, slot: &mut Option<TexId>, face: slot_ui::UndoFace) -> TexId {
@@ -821,4 +979,38 @@ fn upload_rgba(
             id
         }
     }
+}
+
+/// Brings a texture per line up to date with `lines`, saying whether any
+/// changed.
+fn sync_lines(
+    texes: &mut Vec<SearchLine>,
+    lines: Vec<(String, bool)>,
+    face_of: fn(usize, &str, bool) -> slot_ui::UndoFace,
+    compositor: &mut Compositor,
+) -> bool {
+    texes.resize(lines.len(), SearchLine::default());
+    let mut changed = false;
+    for (slot, (line, (text, lit))) in texes.iter_mut().zip(lines).enumerate() {
+        if line.text.as_deref() == Some(text.as_str()) && line.lit == lit {
+            continue;
+        }
+        changed = true;
+        let face = face_of(slot, &text, lit);
+        line.face = match (face.w > 0 && face.h > 0, line.tex) {
+            (false, _) => None,
+            (true, Some(tex)) => {
+                compositor.update_texture(tex, face.w, face.h, &face.rgba);
+                Some((tex, face.w, face.h))
+            }
+            (true, None) => {
+                let tex = compositor.create_texture(face.w, face.h, &face.rgba);
+                line.tex = Some(tex);
+                Some((tex, face.w, face.h))
+            }
+        };
+        line.text = Some(text);
+        line.lit = lit;
+    }
+    changed
 }

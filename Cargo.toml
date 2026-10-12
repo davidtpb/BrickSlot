@@ -8,6 +8,8 @@ rust-version = "1.96"
 license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
+miniz_oxide = "0.8"
+ruzstd = { version = "0.8", default-features = false, features = ["std"] }
 lz4_flex = { version = "0.11", default-features = false, features = ["std"] }
 png = "0.17"
 fontdue = "0.9"

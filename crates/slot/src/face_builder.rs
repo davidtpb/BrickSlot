@@ -6,6 +6,7 @@ use slot_ui::{board_face, cart_face, padded, CartFace, TURN_PAD};
 
 pub struct BuiltFaces {
     pub stem: String,
+    pub shell: Option<slot_store::ShellChoice>,
     pub board: CartFace,
     pub lid: CartFace,
 }
@@ -28,6 +29,7 @@ impl FaceBuilder {
                     }
                     let faces = BuiltFaces {
                         stem: cart.stem.clone(),
+                        shell: cart.shell,
                         board: board_face(&cart),
                         lid: padded(&cart_face(&cart), TURN_PAD),
                     };

@@ -52,7 +52,14 @@ fn quads(out: &[Draw]) -> Vec<Quad> {
             } => Quad { x, y, w, h, alpha },
             Draw::Turned {
                 x, y, w, h, alpha, ..
+            }
+            | Draw::Part {
+                x, y, w, h, alpha, ..
             } => Quad { x, y, w, h, alpha },
+            Draw::Warp { alpha, .. } => {
+                let (x, y, w, h) = d.bounds().unwrap_or_default();
+                Quad { x, y, w, h, alpha }
+            }
             Draw::Game | Draw::Shot { .. } => Quad {
                 x: 0.0,
                 y: 0.0,

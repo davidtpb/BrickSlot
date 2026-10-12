@@ -90,6 +90,7 @@ fn the_whole_pass_from_boot_to_resume() {
     }
     let d = common::tmp_root_with_real_carts(&["Advance Wars", "Emerald"]);
     let root = d.path();
+    common::taps_resume(root);
     let mut p = Pass::boot(root);
 
     assert!(matches!(p.session.app().phase(), Phase::SetClock { .. }));

@@ -80,6 +80,7 @@ enum Cmd {
     EndLink,
     BeginCable(u8, Box<dyn LinkChannel>),
     SetOption(String, String),
+    Cheats(Vec<String>),
 }
 
 struct Shared {
@@ -249,6 +250,10 @@ impl EmuHandle {
             &self.shared,
             Cmd::SetOption(key.to_owned(), value.to_owned()),
         );
+    }
+
+    pub fn set_cheats(&self, codes: Vec<String>) {
+        request(&self.cmds, &self.shared, Cmd::Cheats(codes));
     }
 
     pub fn set_driven(&self, driven: bool) {
@@ -490,7 +495,16 @@ impl Worker {
             rom.display(),
             crate::boot_time::ms()
         );
-        if let Err(e) = core.load(&rom) {
+        // A zipped or patched ROM is staged to a file too, so cores that
+        // load by path (gpSP) see the same game as those given the bytes.
+        let loaded = match slot_store::rom::stage(&rom) {
+            Ok((path, bytes)) => core.load_bytes(&path, bytes),
+            Err(e) => {
+                eprintln!("slot: emu: {}: {e}", rom.display());
+                core.load(&rom)
+            }
+        };
+        if let Err(e) = loaded {
             eprintln!("slot: {e}");
             self.shared
                 .state
@@ -519,6 +533,7 @@ impl Worker {
                 self.shared.resume_refused.store(true, Ordering::Release);
             }
         }
+        let _cheevos = crate::cheevos::begin(&rom, core.memory_regions());
         let av = core.av_info();
         let device_hz = match ring.sample_rate() {
             0 => av.sample_rate,
@@ -646,6 +661,7 @@ impl Worker {
                     .rewind_fill
                     .store(rewind.fill(), Ordering::Relaxed);
                 let _ = core.take_audio();
+                crate::cheevos::idle();
             } else if ceiling > 0 {
                 let one = FAST_TARGET.saturating_sub(post_cost);
                 if speed == Speed::Fast {
@@ -706,6 +722,7 @@ impl Worker {
                         }
                         None => core.run_frame(input),
                     }
+                    crate::cheevos::frame();
                     let took = frame_began.elapsed();
                     if last {
                         drawn = took;
@@ -915,6 +932,9 @@ impl Worker {
             }
             Cmd::SetOption(key, value) => {
                 core.set_option(&key, &value);
+            }
+            Cmd::Cheats(codes) => {
+                core.set_cheats(&codes);
             }
             Cmd::EndLink => {
                 self.shared.link_lost.store(false, Ordering::Relaxed);

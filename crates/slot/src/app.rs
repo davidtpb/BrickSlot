@@ -1,3 +1,9 @@
+#[path = "app_files.rs"]
+mod files_ui;
+#[path = "app_options.rs"]
+mod options;
+pub use files_ui::{FilesPopup, Typing};
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -5,12 +11,12 @@ use std::sync::Arc;
 
 use slot_gfx::{OUT_H, OUT_W};
 use slot_input::{Action, Btn, MUTE_CHORD_MS};
-use slot_power::{Battery, Charge, LedState, LidPolicy, Power};
+use slot_power::{Battery, Charge, LedState, LidPolicy, Lights, LightsEffect, LightsMode, Power};
 use slot_retro::LinkChannel;
 use slot_store::{
-    format_stamp, read_slot_state, scan, write_slot_state, Cart, Core, GbPalette, Platform, Shader,
-    SlotState, StateEntry, StateRing, Theme, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX,
-    VOLUME_MAX,
+    format_stamp, read_slot_state, scan, write_slot_state, Cart, Core, CpuMode, GbPalette,
+    LightColour, LightEffect, LightLevel, LightMode, Look, Platform, SaveFormat, Shader, SlotState,
+    StateEntry, StateRing, Theme, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX, VOLUME_MAX,
 };
 use slot_ui::{
     board_from, board_zoom, draw_backdrop, draw_empty_slot, draw_footer, draw_slot_name,
@@ -27,6 +33,7 @@ use crate::link_kind::{link_carried, link_kind, serial_option, LinkKind};
 use crate::link_radio::{radio_jobs, LinkRole, RadioJob, RadioJobs};
 use crate::link_screen::LinkSprites;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
+use crate::net::NetJob;
 use crate::persist::{self, Snapshot};
 use crate::video_mode::{self, VideoMode};
 
@@ -44,6 +51,8 @@ const POWER_ON_S: f32 = 0.22;
 const POWER_OFF_S: f32 = 0.16;
 
 const VOLUME_STEP: u8 = 5;
+/// How often the Home panel re-reads the temperature, clock and memory.
+const HOME_STATS_MS: Millis = 1000;
 
 const AUTOSAVE_MS: Millis = 60_000;
 const CARD_CHECK_MS: Millis = 2_000;
@@ -54,6 +63,7 @@ const BATTERY_POLL_MS: Millis = 10_000;
 
 const CHARGE_POLL_MS: Millis = 1_000;
 const HEADPHONES_POLL_MS: Millis = 500;
+const IDLE_DIM_MS: Millis = 30_000;
 
 const BATTERY_LOW: u8 = 20;
 
@@ -225,6 +235,50 @@ pub const LINKED_HOLD_MS: Millis = 1000;
 
 pub const UNPLUG_HOLD_MS: Millis = 420;
 
+pub const PLAY_GAP_MS: Millis = 1000;
+
+fn cpu_profile(mode: CpuMode) -> slot_power::CpuProfile {
+    match mode {
+        CpuMode::Stock => slot_power::CpuProfile::Stock,
+        CpuMode::Saver => slot_power::CpuProfile::Saver,
+        CpuMode::Performance => slot_power::CpuProfile::Performance,
+    }
+}
+
+pub const SCREENSHOTS: &str = "Screenshots";
+
+/// The power press that woke the handheld from deep sleep arrives too, and
+/// its release can come well after the resume; up to its release (or this
+/// long, if the release never shows) power presses are ignored, so it does
+/// not put the handheld straight back to sleep.
+pub const WAKE_GRACE_MS: Millis = 5000;
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum CheevosLogin {
+    Waiting,
+    Sent,
+    NoAccount,
+}
+
+pub const PLAY_FLUSH_MS: Millis = 60_000;
+
+/// The Customize panel while it is up: where its cursor is, and the cart's
+/// shell as it was, so an unchanged one is not written back.
+#[derive(Copy, Clone, Debug)]
+struct Customize {
+    panel: slot_ui::CustomizePanel,
+    before: Option<slot_store::ShellChoice>,
+}
+
+#[derive(Debug)]
+struct SettingsModel {
+    side: Option<usize>,
+    on_side: bool,
+    cards: Vec<(String, String, bool)>,
+    focus: Option<usize>,
+    opens: bool,
+}
+
 #[derive(Debug)]
 pub enum Phase {
     SetClock {
@@ -256,6 +310,35 @@ pub enum Phase {
     About,
     Doze {
         cart: Option<String>,
+    },
+    Search,
+    /// The networks in range, to pick one to join.
+    Networks {
+        list: Vec<crate::net::Network>,
+        at: usize,
+        scanning: bool,
+    },
+    /// The Bluetooth devices known and in range, to connect one.
+    Bluetooth {
+        list: Vec<crate::bt::BtDevice>,
+        at: usize,
+        scanning: bool,
+    },
+    /// Tools > Files: the file explorer.
+    Files {
+        ex: crate::files::Explorer,
+        popup: FilesPopup,
+    },
+    /// Device Sync: swapping saves with another handheld.
+    Sync {
+        roms: bool,
+        news: Option<crate::sync::SyncNews>,
+    },
+    /// Typing the password for a network.
+    Password {
+        ssid: String,
+        keys: crate::keyboard::Keyboard,
+        list: Vec<crate::net::Network>,
     },
 }
 
@@ -295,6 +378,56 @@ pub struct App {
     starting: Option<LinkStarting>,
     link_transport: Option<(u16, Box<dyn LinkChannel>)>,
     restarting: bool,
+    messages: std::collections::VecDeque<(String, String)>,
+    search: crate::search::Search,
+    search_faces: Vec<Option<(TexId, u32, u32)>>,
+    search_picked_at: Millis,
+    home: Option<slot_ui::HomePanel>,
+    socket_backdrop: Option<TexId>,
+    socket_chrome: Vec<(TexId, u32, u32)>,
+    customize: Option<Customize>,
+    /// The starred games, from every platform, as a shelf of their own
+    /// after the platforms' own.
+    fav_shelf: Shelf,
+    inspect: bool,
+    recent_popup: Option<(Vec<slot_store::library::Played>, usize)>,
+    picker: Option<(QuickRow, Vec<QuickValue>, usize)>,
+    /// The tint the Socket backdrop and chrome were painted in.
+    painted_tint: slot_store::Tint,
+    favorites: std::collections::HashSet<String>,
+    core_popup: Option<usize>,
+    /// The in-game menu and emulator settings, a stack of lists.
+    menu: Vec<options::Menu>,
+    running: options::Running,
+    left_off: Option<Vec<u8>>,
+    dropped_faces: Vec<TexId>,
+    shell_generation: u32,
+    settings_faces: Vec<Option<(TexId, u32, u32)>>,
+    socket_faces: Vec<Option<(TexId, u32, u32)>>,
+    home_faces: Vec<Option<(TexId, u32, u32)>>,
+    home_stats: crate::sysinfo::Stats,
+    home_stats_at: Millis,
+    net: crate::net::Net,
+    bt: crate::bt::Bt,
+    sync_job: Option<crate::sync::SyncJob>,
+    files_job: Option<files_ui::FilesBusy>,
+    files_faces: Vec<Option<(TexId, u32, u32)>>,
+    /// The Bluetooth devices last listed.
+    bt_devices: Vec<crate::bt::BtDevice>,
+    /// The Home panel's round buttons, and whether they were drawn light.
+    home_icons: Vec<(TexId, u32, u32)>,
+    home_icons_light: bool,
+    cheevos_login: CheevosLogin,
+    clock_asked: bool,
+    file_server: Option<crate::fileserver::FileServer>,
+    file_pin: Option<u16>,
+    dimmed: bool,
+    idle_at: Millis,
+    shots_popup: Option<(Vec<String>, usize)>,
+    power_quiet_until: Millis,
+    play_key: Option<String>,
+    play_ms: Millis,
+    play_tick: Option<Millis>,
     act_at: Millis,
     root: Option<PathBuf>,
     state: SlotState,
@@ -420,6 +553,50 @@ impl App {
             starting: None,
             link_transport: None,
             restarting: false,
+            messages: std::collections::VecDeque::new(),
+            search: crate::search::Search::default(),
+            search_faces: Vec::new(),
+            search_picked_at: 0,
+            home: None,
+            socket_backdrop: None,
+            socket_chrome: Vec::new(),
+            customize: None,
+            fav_shelf: Shelf::new(Vec::new()),
+            inspect: false,
+            recent_popup: None,
+            picker: None,
+            painted_tint: slot_store::Tint::Default,
+            favorites: std::collections::HashSet::new(),
+            core_popup: None,
+            menu: Vec::new(),
+            running: options::Running::default(),
+            left_off: None,
+            dropped_faces: Vec::new(),
+            shell_generation: 0,
+            settings_faces: Vec::new(),
+            socket_faces: Vec::new(),
+            home_faces: Vec::new(),
+            home_stats: crate::sysinfo::Stats::default(),
+            home_stats_at: 0,
+            net: crate::net::Net::idle(),
+            bt: crate::bt::Bt::idle(),
+            sync_job: None,
+            files_job: None,
+            files_faces: Vec::new(),
+            bt_devices: Vec::new(),
+            home_icons: Vec::new(),
+            home_icons_light: false,
+            cheevos_login: CheevosLogin::Waiting,
+            clock_asked: false,
+            file_server: None,
+            file_pin: None,
+            dimmed: false,
+            idle_at: 0,
+            shots_popup: None,
+            power_quiet_until: 0,
+            play_key: None,
+            play_ms: 0,
+            play_tick: None,
             act_at: 0,
             root: None,
             state: SlotState::default(),
@@ -483,6 +660,22 @@ impl App {
         let mut app = App::new(carts);
         app.root = Some(root.to_path_buf());
         app.state = read_slot_state(root);
+        slot_ui::set_socket_tint(app.state.tint);
+        app.painted_tint = app.state.tint;
+        app.favorites = slot_store::library::read_favorites(root);
+        app.rebuild_favorites();
+        app.net = crate::net::Net::spawn(root);
+        app.bt = crate::bt::Bt::spawn(root);
+        if app.state.bluetooth {
+            app.bt.send(crate::bt::BtJob::Up);
+        }
+        if app.state.syncthing {
+            app.net.send(NetJob::SyncthingStart);
+        } else if app.state.wifi {
+            app.net.send(NetJob::WifiUp);
+        }
+        crate::cheevos::enable(app.state.achievements);
+        crate::cheevos::set_hardcore(app.state.hardcore);
         if app.state.clock_set {
             app.start();
         } else {
@@ -504,7 +697,7 @@ impl App {
             Some((at, i)) => {
                 self.shelf_at = at;
                 self.shelf_mut().select(i);
-                self.insert(false);
+                self.insert(self.state.start_fresh);
                 if let Phase::Inserting { resumed, t, .. } = &mut self.phase {
                     *resumed = true;
                     *t = INSERT_S;
@@ -519,11 +712,95 @@ impl App {
     }
 
     fn shelf(&self) -> &Shelf {
-        &self.shelves[self.shelf_at].1
+        self.shelf_by(self.shelf_at)
     }
 
     fn shelf_mut(&mut self) -> &mut Shelf {
-        &mut self.shelves[self.shelf_at].1
+        let at = self.shelf_at;
+        self.shelf_by_mut(at)
+    }
+
+    /// A shelf by its place: the platforms' in order, then the favourites.
+    fn shelf_by(&self, at: usize) -> &Shelf {
+        match self.shelves.get(at) {
+            Some((_, shelf)) => shelf,
+            None => &self.fav_shelf,
+        }
+    }
+
+    fn shelf_by_mut(&mut self, at: usize) -> &mut Shelf {
+        match self.shelves.get_mut(at) {
+            Some((_, shelf)) => shelf,
+            None => &mut self.fav_shelf,
+        }
+    }
+
+    fn fav_at(&self) -> usize {
+        self.shelves.len()
+    }
+
+    pub fn on_favorites(&self) -> bool {
+        self.shelf_at == self.fav_at()
+    }
+
+    pub fn is_favorite(&self, cart: &Cart) -> bool {
+        self.favorites
+            .contains(&slot_store::library::game_key(cart.platform, &cart.stem))
+    }
+
+    /// Builds the favourites shelf again from the starred games, keeping the
+    /// selection where it can.
+    fn rebuild_favorites(&mut self) {
+        let keep = self
+            .on_favorites()
+            .then(|| self.selected_stem().map(str::to_owned))
+            .flatten();
+        let mut carts: Vec<Cart> = self
+            .shelves
+            .iter()
+            .flat_map(|(_, s)| s.carts.iter())
+            .filter(|c| self.is_favorite(c))
+            .cloned()
+            .collect();
+        carts.sort_by_key(|c| slot_ui::label_text(c).to_lowercase());
+        let old = std::mem::replace(&mut self.fav_shelf, Shelf::new(carts));
+        let mut old = old;
+        for i in 0..old.carts.len() {
+            self.dropped_faces.extend(old.take_face(i));
+        }
+        if let Some(i) = keep.and_then(|k| self.fav_shelf.carts.iter().position(|c| c.stem == k)) {
+            self.fav_shelf.select(i);
+        }
+        if self.on_favorites() && self.fav_shelf.carts.is_empty() {
+            if let Some(to) = self.next_shelf(1) {
+                self.shelf_at = to;
+            } else {
+                self.shelf_at = 0;
+            }
+            self.shelf_platform = slot_ui::Printed::default();
+            self.name_pending = true;
+        }
+    }
+
+    fn toggle_favorite(&mut self) {
+        let Some(cart) = self.shelf().carts.get(self.shelf().index).cloned() else {
+            return;
+        };
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        match slot_store::library::toggle_favorite(&root, cart.platform, &cart.stem) {
+            Ok(on) => {
+                let key = slot_store::library::game_key(cart.platform, &cart.stem);
+                if on {
+                    self.favorites.insert(key);
+                } else {
+                    self.favorites.remove(&key);
+                }
+                self.rebuild_favorites();
+            }
+            Err(e) => self.say("Could not save the favourite", e.to_string()),
+        }
     }
 
     fn switch_shelf(&mut self, by: i32) {
@@ -576,10 +853,10 @@ impl App {
     }
 
     fn next_shelf(&self, by: i32) -> Option<usize> {
-        let n = self.shelves.len() as i32;
+        let n = self.shelves.len() as i32 + 1;
         (1..n)
             .map(|step| (self.shelf_at as i32 + by * step).rem_euclid(n) as usize)
-            .find(|at| !self.shelves[*at].1.carts.is_empty())
+            .find(|at| !self.shelf_by(*at).carts.is_empty())
     }
 
     fn seat_of(&self, stem: &str, platform: Option<Platform>) -> Option<(usize, usize)> {
@@ -650,17 +927,110 @@ impl App {
 
     pub fn quick_value(&self, row: QuickRow) -> Option<QuickValue> {
         match row {
-            QuickRow::FastForward => QuickValue::speed(self.state.ff_speed),
-            QuickRow::FastForwardSound => Some(QuickValue::flag(self.state.ff_sound)),
-            QuickRow::ColourCorrection => Some(QuickValue::flag(self.state.colour_correction)),
-            QuickRow::GbPalettes => Some(QuickValue::flag(self.state.gb_palettes)),
-            QuickRow::GbaShader => Some(shader_value(self.state.shader_gba)),
-            QuickRow::GbShader => Some(shader_value(self.state.shader_gb)),
-            QuickRow::Rumble => Some(QuickValue::flag(self.state.rumble)),
-            QuickRow::EjectSave => Some(QuickValue::flag(self.state.eject_save)),
-            QuickRow::Turbo => Some(QuickValue::flag(self.state.turbo)),
-            QuickRow::Rewind => Some(QuickValue::flag(self.state.rewind)),
-            QuickRow::DateTime | QuickRow::About | QuickRow::Screen | QuickRow::Game => None,
+            QuickRow::FileTransfer => Some(QuickValue::flag(self.file_server.is_some())),
+            _ => setting_value(&self.state, row),
+        }
+    }
+
+    /// Every choice a setting with more than two values offers, in order, for
+    /// the Socket picker popup.
+    fn picker_choices(&self, row: QuickRow) -> Option<Vec<QuickValue>> {
+        let mut s = self.state.clone();
+        let mut each = |set: &mut dyn FnMut(&mut slot_store::SlotState, usize), n: usize| {
+            (0..n)
+                .filter_map(|i| {
+                    set(&mut s, i);
+                    setting_value(&s, row)
+                })
+                .collect::<Vec<_>>()
+        };
+        let list = match row {
+            QuickRow::SaveFormat => each(&mut |s, i| s.save_format = SaveFormat::ALL[i], 3),
+            QuickRow::Tint => each(&mut |s, i| s.tint = slot_store::Tint::ALL[i], 3),
+            QuickRow::FastForward => each(&mut |s, i| s.ff_speed = FF_SPEEDS[i], FF_SPEEDS.len()),
+            QuickRow::GbaShader => {
+                each(&mut |s, i| s.shader_gba = Shader::GBA[i], Shader::GBA.len())
+            }
+            QuickRow::GbShader => each(&mut |s, i| s.shader_gb = Shader::GB[i], Shader::GB.len()),
+            QuickRow::Performance => each(
+                &mut |s, i| s.cpu = [CpuMode::Stock, CpuMode::Saver, CpuMode::Performance][i],
+                3,
+            ),
+            QuickRow::LightMode => each(
+                &mut |s, i| s.light_mode = LightMode::ALL[i],
+                LightMode::ALL.len(),
+            ),
+            QuickRow::LightColour => each(
+                &mut |s, i| s.light_colour = LightColour::ALL[i],
+                LightColour::ALL.len(),
+            ),
+            QuickRow::LightEffect => each(
+                &mut |s, i| s.light_effect = LightEffect::ALL[i],
+                LightEffect::ALL.len(),
+            ),
+            QuickRow::LightLevel => each(
+                &mut |s, i| s.light_level = LightLevel::ALL[i],
+                LightLevel::ALL.len(),
+            ),
+            _ => return None,
+        };
+        let mut seen = Vec::new();
+        for v in list {
+            if !seen.contains(&v) {
+                seen.push(v);
+            }
+        }
+        (seen.len() > 2).then_some(seen)
+    }
+
+    pub fn picker_open(&self) -> bool {
+        self.picker.is_some()
+    }
+
+    fn open_picker(&mut self, row: QuickRow) -> bool {
+        let Some(list) = self.picker_choices(row) else {
+            return false;
+        };
+        let at = self
+            .quick_value(row)
+            .and_then(|v| list.iter().position(|&c| c == v))
+            .unwrap_or(0);
+        self.picker = Some((row, list, at));
+        true
+    }
+
+    fn picker_input(&mut self, action: Action) {
+        let Some((row, list, at)) = &mut self.picker else {
+            return;
+        };
+        let n = list.len();
+        match action {
+            Action::GbaDown(Btn::Up) => *at = (*at + n - 1) % n,
+            Action::GbaDown(Btn::Down) => *at = (*at + 1) % n,
+            Action::GbaDown(Btn::A) => {
+                let (row, list, at) = (*row, list.clone(), *at);
+                self.picker = None;
+                self.pick_setting(row, &list, at);
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => self.picker = None,
+            _ => {}
+        }
+    }
+
+    /// Steps a setting along until it shows the picked choice, so each step's
+    /// side effects (backlight, CPU, lights) run as they would from the pad.
+    fn pick_setting(&mut self, row: QuickRow, list: &[QuickValue], to: usize) {
+        for _ in 0..list.len() * 2 {
+            let Some(now) = self
+                .quick_value(row)
+                .and_then(|v| list.iter().position(|&c| c == v))
+            else {
+                return;
+            };
+            if now == to {
+                return;
+            }
+            self.change_setting(row, to > now);
         }
     }
 
@@ -718,7 +1088,10 @@ impl App {
 
     pub fn shelf_platform_name(&self) -> Option<&'static str> {
         self.next_shelf(1)?;
-        Some(self.shelves[self.shelf_at].0.name())
+        match self.shelves.get(self.shelf_at) {
+            Some((platform, _)) => Some(platform.name()),
+            None => Some("FAVORITES"),
+        }
     }
 
     pub fn set_battery_percent_face(&mut self, face: TexId, w: u32) {
@@ -768,7 +1141,7 @@ impl App {
         let screen = here.on_screen();
         let mut wants: Vec<(usize, usize)> = screen.iter().map(|i| (self.shelf_at, *i)).collect();
         for at in self.neighbour_shelves() {
-            wants.extend(self.shelves[at].1.on_screen().into_iter().map(|i| (at, i)));
+            wants.extend(self.shelf_by(at).on_screen().into_iter().map(|i| (at, i)));
         }
         wants.extend(
             here.around(FACE_AHEAD)
@@ -778,7 +1151,7 @@ impl App {
         );
         wants
             .into_iter()
-            .filter(|(at, i)| self.shelves[*at].1.face(*i).is_none())
+            .filter(|(at, i)| self.shelf_by(*at).face(*i).is_none())
             .map(|(shelf, index)| FaceWant {
                 shelf,
                 index,
@@ -788,18 +1161,31 @@ impl App {
     }
 
     pub fn face_cart(&self, shelf: usize, index: usize) -> Option<&Cart> {
-        self.shelves.get(shelf)?.1.carts.get(index)
+        if shelf > self.fav_at() {
+            return None;
+        }
+        self.shelf_by(shelf).carts.get(index)
     }
 
     pub fn set_cart_face(&mut self, shelf: usize, index: usize, tex: TexId) -> Option<TexId> {
-        self.shelves.get_mut(shelf)?.1.set_face(index, tex)
+        if shelf > self.fav_at() {
+            return None;
+        }
+        self.shelf_by_mut(shelf).set_face(index, tex)
     }
 
     pub fn shed_faces(&mut self) -> Vec<TexId> {
         let neighbours = self.neighbour_shelves();
-        let mut shed = Vec::new();
-        for (at, (_, shelf)) in self.shelves.iter_mut().enumerate() {
-            let keep = if at == self.shelf_at {
+        let mut shed = std::mem::take(&mut self.dropped_faces);
+        let shelf_at = self.shelf_at;
+        let shelves = self
+            .shelves
+            .iter_mut()
+            .map(|(_, s)| s)
+            .chain(std::iter::once(&mut self.fav_shelf));
+        for (at, shelf) in shelves.enumerate() {
+            let at_here = at == shelf_at;
+            let keep = if at_here {
                 shelf.around(FACE_KEEP)
             } else if neighbours.contains(&at) {
                 shelf.on_screen()
@@ -914,15 +1300,15 @@ impl App {
     }
 
     pub fn may_rewind(&self) -> bool {
-        self.state.rewind && !self.link_active()
+        self.state.rewind && !self.state.hardcore && !self.link_active()
     }
 
     pub fn turbo(&self) -> bool {
-        self.state.turbo
+        !self.state.hardcore && self.game_turbo().unwrap_or(self.state.turbo)
     }
 
     pub fn records_rewind(&self) -> bool {
-        self.state.rewind
+        self.state.rewind && !self.state.hardcore
     }
 
     pub fn picture_rect(&self) -> [f32; 4] {
@@ -933,11 +1319,11 @@ impl App {
     }
 
     pub fn may_load_state(&self) -> bool {
-        !self.link_active()
+        !self.link_active() && !self.state.hardcore
     }
 
     pub fn may_fast_forward(&self) -> bool {
-        !self.link_active()
+        !self.link_active() && !self.state.hardcore
     }
 
     pub fn end_link(&mut self) {
@@ -1016,10 +1402,41 @@ impl App {
         if matches!(self.phase, Phase::SetClock { .. }) || secs < CLOCK_FLOOR {
             self.phase = clock_screen(secs, 0, false);
         }
+        power.set_lights(self.lights());
+        if self.state.cpu != CpuMode::Stock {
+            power.set_cpu(cpu_profile(self.state.cpu));
+        }
         self.power = Some(power);
         self.battery_at = self.now();
         self.charge_at = self.now();
         self.last_led = None;
+    }
+
+    pub fn lights(&self) -> Lights {
+        let s = &self.state;
+        Lights {
+            mode: match s.light_mode {
+                LightMode::Battery => LightsMode::Battery,
+                LightMode::Colour => LightsMode::Colour,
+                LightMode::Off => LightsMode::Off,
+            },
+            rgb: s.light_colour.rgb(),
+            effect: match s.light_effect {
+                LightEffect::Static => LightsEffect::Static,
+                LightEffect::Breathe => LightsEffect::Breathe,
+                LightEffect::Blink => LightsEffect::Blink,
+                LightEffect::Rainbow => LightsEffect::Rainbow,
+                LightEffect::RainbowWave => LightsEffect::RainbowWave,
+                LightEffect::Fire => LightsEffect::Fire,
+                LightEffect::Ocean => LightsEffect::Ocean,
+                LightEffect::Aurora => LightsEffect::Aurora,
+                LightEffect::Sunset => LightsEffect::Sunset,
+                LightEffect::Candy => LightsEffect::Candy,
+                LightEffect::Police => LightsEffect::Police,
+                LightEffect::Heartbeat => LightsEffect::Heartbeat,
+            },
+            percent: s.light_level.percent(),
+        }
     }
 
     pub fn set_rumble(&mut self, strength: u16) {
@@ -1041,6 +1458,12 @@ impl App {
     }
 
     pub fn screen_shader(&self) -> Shader {
+        if let Some(s) = self
+            .game_shader()
+            .filter(|_| matches!(self.phase, Phase::Playing { .. } | Phase::Polaroids { .. }))
+        {
+            return s;
+        }
         match self.platform {
             Platform::Gba => self.state.shader_gba,
             Platform::Gb | Platform::Gbc => self.state.shader_gb,
@@ -1190,16 +1613,94 @@ impl App {
     }
 
     pub fn apply(&mut self, action: Action) {
+        let sound = match action {
+            Action::GbaDown(
+                Btn::Up
+                | Btn::Down
+                | Btn::Left
+                | Btn::Right
+                | Btn::L1
+                | Btn::R1
+                | Btn::L2
+                | Btn::R2,
+            ) => Some(Sfx::Move),
+            Action::GbaDown(Btn::A | Btn::X | Btn::Y | Btn::Start) | Action::HomePanel => {
+                Some(Sfx::Select)
+            }
+            Action::GbaDown(Btn::B | Btn::Select) | Action::QuickMenu => Some(Sfx::Back),
+            _ => None,
+        }
+        .filter(|_| self.state.menu_sounds);
+        let Some(sound) = sound else {
+            return self.apply_action(action);
+        };
+        let before = self.menu_fingerprint();
+        self.apply_action(action);
+        if self.sfx.is_none() && self.menu_fingerprint() != before {
+            self.sfx = Some(sound);
+        }
+    }
+
+    /// Everything a menu press can change, to tell whether a press did
+    /// anything worth a sound.
+    fn menu_fingerprint(&self) -> String {
+        if matches!(self.phase, Phase::Playing { .. })
+            && self.home.is_none()
+            && self.menu.is_empty()
+            && self.game_menu.is_none()
+        {
+            return String::new();
+        }
+        format!(
+            "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{}|{}|{}|{:?}|{:?}",
+            self.phase,
+            self.power_menu,
+            self.core_popup,
+            self.menu,
+            self.picker.as_ref().map(|p| p.2),
+            self.recent_popup.as_ref().map(|p| p.1),
+            self.inspect,
+            self.shelf_at,
+            self.shelf().index,
+            self.customize,
+            self.home,
+        )
+    }
+
+    fn apply_action(&mut self, action: Action) {
+        self.note_input();
+        let power_key = matches!(
+            action,
+            Action::PowerPress | Action::PowerTap | Action::PowerHold | Action::PowerOff
+        );
+        if power_key && self.now() < self.power_quiet_until {
+            if matches!(action, Action::PowerTap | Action::PowerOff) {
+                self.power_quiet_until = 0;
+            }
+            return;
+        }
         if self.power_menu.is_some() {
             match action {
-                Action::LidClose => return self.doze(),
-                Action::LidOpen => return self.wake(),
+                Action::LidClose => {
+                    eprintln!("slot: lid closed");
+                    return self.doze();
+                }
+                Action::LidOpen => {
+                    eprintln!("slot: lid opened");
+                    return self.wake();
+                }
                 _ => return self.power_menu_input(action),
             }
         }
         match action {
-            Action::LidClose => return self.doze(),
-            Action::LidOpen => return self.wake(),
+            Action::LidClose => {
+                eprintln!("slot: lid closed");
+                return self.doze();
+            }
+            Action::LidOpen => {
+                eprintln!("slot: lid opened");
+                return self.wake();
+            }
             Action::PowerPress => {
                 if self.link_active() {
                     self.end_link();
@@ -1215,6 +1716,48 @@ impl App {
             Action::PowerHold => return self.open_power_menu(),
             Action::PowerOff => return,
             _ => {}
+        }
+        if self.home.is_some() {
+            if self.adjust(action) {
+                return;
+            }
+            return self.home_input(action);
+        }
+        if self.customize.is_some() {
+            if self.adjust(action) {
+                return;
+            }
+            return self.customize_input(action);
+        }
+        if self.core_popup.is_some() {
+            if self.adjust(action) {
+                return;
+            }
+            return self.core_popup_input(action);
+        }
+        if self.recent_popup.is_some() {
+            if self.adjust(action) {
+                return;
+            }
+            return self.recent_input(action);
+        }
+        if self.shots_popup.is_some() {
+            if self.adjust(action) {
+                return;
+            }
+            return self.shots_input(action);
+        }
+        if self.inspect {
+            if self.adjust(action) {
+                return;
+            }
+            return self.inspect_input(action);
+        }
+        if !self.menu.is_empty() {
+            if self.adjust(action) {
+                return;
+            }
+            return self.menu_input(action);
         }
         if let Phase::SetClock {
             picker, from_menu, ..
@@ -1263,14 +1806,24 @@ impl App {
                 Action::GbaDown(Btn::A) => self.play_held = Some(now),
                 Action::GbaUp(Btn::A) => {
                     if self.play_held.take().is_some() {
-                        self.insert(!self.state.eject_save);
+                        self.insert_or_ask();
                     }
                 }
-                Action::Insert => self.insert(!self.state.eject_save),
+                Action::Insert => self.insert_or_ask(),
                 Action::GbaDown(Btn::L1) => self.switch_shelf(-1),
                 Action::GbaDown(Btn::R1) => self.switch_shelf(1),
+                Action::GbaDown(Btn::Y) => self.open_search(),
+                Action::GbaDown(Btn::X) => self.open_inspect(),
+                Action::GbaDown(Btn::Select) => self.open_recent(),
+                Action::GbaDown(Btn::Home) | Action::HomePanel => self.open_home(),
                 _ => {}
             },
+            Phase::Search => self.search_input(action),
+            Phase::Networks { .. } => self.networks_input(action),
+            Phase::Bluetooth { .. } => self.bt_input(action),
+            Phase::Sync { .. } => self.sync_input(action),
+            Phase::Files { .. } => self.files_input(action),
+            Phase::Password { .. } => self.password_input(action),
             Phase::Inserting { .. } if action == Action::Eject => self.eject(),
             Phase::Playing { .. } => match action {
                 Action::GbaDown(Btn::L1) if self.slot_owns_the_shoulders() => {
@@ -1284,6 +1837,9 @@ impl App {
                 Action::Polaroids => self.open_polaroids(),
                 Action::SaveState => self.save_state(),
                 Action::LoadState => self.load_newest(),
+                Action::Screenshot => self.screenshot(),
+                Action::GbaDown(Btn::Home) | Action::HomePanel => self.open_home(),
+                Action::QuickMenu => self.open_pause(),
                 Action::RewindStart if !self.may_rewind() => self.refuse(),
                 Action::FfStart if !self.may_fast_forward() => self.refuse(),
                 _ => {}
@@ -1307,6 +1863,1448 @@ impl App {
         }
     }
 
+    fn toggle_file_transfer(&mut self) {
+        if self.file_server.take().is_some() {
+            self.file_pin = None;
+            return self.say("File transfer off", "");
+        }
+        if !self.net.online() {
+            return self.say("Turn on Wi-Fi first", "Network > Wi-Fi");
+        }
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let pin = crate::fileserver::random_pin();
+        match crate::fileserver::FileServer::start_pin(&root, crate::fileserver::PORT, Some(pin)) {
+            Ok(server) => {
+                self.file_pin = Some(pin);
+                self.net.send(NetJob::Announce {
+                    title: format!("File transfer on · PIN {pin}"),
+                    port: server.port,
+                });
+                self.file_server = Some(server);
+            }
+            Err(e) => self.say("File transfer would not start", e.to_string()),
+        }
+    }
+
+    fn download_labels(&mut self) {
+        if !self.net.online() {
+            return self.say("Turn on Wi-Fi first", "Network > Wi-Fi");
+        }
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let wanted: Vec<crate::labels::Wanted> = self
+            .shelves
+            .iter()
+            .flat_map(|(_, s)| s.carts.iter())
+            .filter(|c| c.label.is_none())
+            .map(|c| crate::labels::Wanted {
+                platform: c.platform,
+                stem: c.stem.clone(),
+                dest: root
+                    .join("Labels")
+                    .join(c.platform.dir_name())
+                    .join(format!("{}.png", c.stem)),
+            })
+            .collect();
+        if wanted.is_empty() {
+            return self.say("Every game has a label", "");
+        }
+        self.say(
+            "Downloading labels",
+            format!("{} games without one", wanted.len()),
+        );
+        self.net.send(NetJob::Labels(wanted));
+    }
+
+    pub fn socket_look(&self) -> bool {
+        self.state.look == Look::Socket
+    }
+
+    fn socket_screen(&self, fade: f32) -> slot_ui::SocketScreen<'_> {
+        slot_ui::SocketScreen {
+            backdrop: self.socket_backdrop,
+            faces: &self.socket_faces,
+            fade,
+        }
+    }
+
+    pub fn wants_socket_chrome(&self) -> bool {
+        (self.socket_look()
+            || self.customize.is_some()
+            || self.core_popup.is_some()
+            || !self.menu.is_empty()
+            || self.files_popup_up()
+            || self.inspect
+            || self.recent_popup.is_some()
+            || matches!(
+                self.phase,
+                Phase::Networks { .. } | Phase::Bluetooth { .. } | Phase::Sync { .. }
+            ))
+            && self.socket_chrome.is_empty()
+    }
+
+    pub fn set_socket_chrome(&mut self, chrome: Vec<(TexId, u32, u32)>) {
+        self.socket_chrome = chrome;
+    }
+
+    pub fn set_settings_faces(&mut self, faces: Vec<Option<(TexId, u32, u32)>>) {
+        self.settings_faces = faces;
+    }
+
+    /// The settings as Socket lays them out for `row`: which category is lit
+    /// and whether the cursor is on it, and the cards on the right with the
+    /// first one showing and the one under the cursor.
+    fn settings_model(&self, row: QuickRow) -> SettingsModel {
+        let main = row.parent().unwrap_or(row);
+        let on_side = row.parent().is_none();
+        let (page, first, focus): (&[QuickRow], usize, Option<usize>) = match on_side {
+            true => match main.child() {
+                Some(child) => (child.page(), 0, None),
+                None => (&[], 0, None),
+            },
+            false => {
+                let (first, _) = slot_ui::quick_window(row);
+                (row.page(), first, Some(row.position() - first))
+            }
+        };
+        let mut cards: Vec<(String, String, bool)> = page
+            .iter()
+            .skip(first)
+            .take(slot_ui::SETTINGS_ITEMS)
+            .map(|r| {
+                let value = match r {
+                    QuickRow::DateTime => Some(slot_ui::date_time_text(self.wall_secs())),
+                    _ => self.quick_value(*r).map(|v| v.text().to_string()),
+                };
+                match value {
+                    Some(v) => (r.label().to_string(), v, r.opens()),
+                    None => (String::new(), r.label().to_string(), true),
+                }
+            })
+            .collect();
+        if page.is_empty() {
+            let about = match main {
+                QuickRow::DateTime => slot_ui::date_time_text(self.wall_secs()),
+                QuickRow::Search => "Find a game by name".to_string(),
+                _ => "brickslot".to_string(),
+            };
+            cards.push((main.label().to_string(), about, true));
+        }
+        SettingsModel {
+            side: QuickRow::MAIN.iter().position(|r| *r == main),
+            on_side,
+            cards,
+            focus,
+            opens: row.opens() || on_side,
+        }
+    }
+
+    fn draw_settings(&self, row: QuickRow, out: &mut Vec<Draw>) {
+        let model = self.settings_model(row);
+        let cards: Vec<slot_ui::Card> = model
+            .cards
+            .iter()
+            .map(|(_, _, opens)| slot_ui::Card { opens: *opens })
+            .collect();
+        slot_ui::SocketSettings {
+            backdrop: self.socket_backdrop,
+            chrome: &self.socket_chrome,
+            faces: &self.settings_faces,
+            sides: QuickRow::MAIN.len(),
+            side_lit: model.side,
+            side_focus: model.on_side,
+            cards: &cards,
+            card_focus: model.focus,
+        }
+        .draw(out);
+    }
+
+    /// The text for every slot of the Socket settings and power popup, while
+    /// either shows.
+    pub fn settings_lines(&self) -> Option<Vec<(String, bool)>> {
+        let row = match self.phase {
+            Phase::QuickMenu { row } => Some(row),
+            _ => None,
+        };
+        let customizing = self
+            .customize
+            .filter(|_| matches!(self.phase, Phase::Shelf));
+        let core_popup = self
+            .core_popup
+            .filter(|_| matches!(self.phase, Phase::Shelf));
+        let networks = matches!(
+            self.phase,
+            Phase::Networks { .. } | Phase::Bluetooth { .. } | Phase::Sync { .. }
+        );
+        let menu = !self.menu.is_empty();
+        let on_shelf = matches!(self.phase, Phase::Shelf);
+        let inspecting = self.inspect && on_shelf;
+        let recent = self.recent_popup.as_ref().filter(|_| on_shelf);
+        let shots = self.shots_popup.as_ref();
+        let shown = (self.socket_look() && (row.is_some() || self.power_menu.is_some()))
+            || inspecting
+            || recent.is_some()
+            || shots.is_some()
+            || customizing.is_some()
+            || core_popup.is_some()
+            || menu
+            || self.files_popup_up()
+            || networks;
+        if !shown {
+            return None;
+        }
+        let key = |k: &str, label: &str| format!("{k}{}{label}", slot_ui::KEY_SEP);
+        let mut lines = vec![(String::new(), false); slot_ui::SETTINGS_SLOTS];
+        if let Some(row) = row {
+            let model = self.settings_model(row);
+            for (i, r) in QuickRow::MAIN.iter().enumerate() {
+                let label = match r {
+                    QuickRow::Game => "Gameplay",
+                    QuickRow::Search => "Search",
+                    _ => r.label(),
+                };
+                lines[slot_ui::side_slot(i)] = (label.to_string(), model.side == Some(i));
+            }
+            for (i, (caption, value, _)) in model.cards.iter().enumerate() {
+                lines[slot_ui::caption_slot(i)] = (caption.clone(), false);
+                lines[slot_ui::value_slot(i)] = (value.clone(), model.focus == Some(i));
+            }
+            let close = if model.on_side { "Close" } else { "Back" };
+            lines[slot_ui::SETTINGS_CLOSE] = (key("B", close), true);
+            let hint = match model.opens {
+                true => key("A", "Open"),
+                false if self.picker_choices(row).is_some() => key("A", "Choose"),
+                false => key("\u{2190}\u{2192}", "Change"),
+            };
+            lines[slot_ui::SETTINGS_HINT] = (hint, true);
+            if let Some((picked, list, at)) =
+                self.picker.as_ref().filter(|_| self.power_menu.is_none())
+            {
+                let (first, shown, _) = popup_window(list.len(), *at);
+                lines[slot_ui::POPUP_TITLE_SLOT] = (picked.label().to_string(), true);
+                let now = self.quick_value(*picked);
+                for (i, v) in list.iter().skip(first).take(shown).enumerate() {
+                    let text = match now == Some(*v) {
+                        true => format!("{}  \u{2713}", v.text()),
+                        false => v.text().to_string(),
+                    };
+                    lines[slot_ui::option_slot(i)] = (text, true);
+                }
+                lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+            }
+        }
+        if let Some(c) = customizing {
+            let material = slot_ui::Material::of(self.selected_shell());
+            lines[slot_ui::CUSTOM_TITLE] = ("Customize".into(), true);
+            lines[slot_ui::CUSTOM_MATERIAL] = ("Material".into(), true);
+            lines[slot_ui::CUSTOM_COLOUR] = ("Color".into(), true);
+            lines[slot_ui::CUSTOM_TYPE] = ("Type".into(), true);
+            lines[slot_ui::CUSTOM_TYPE_VALUE] = (material.name().into(), true);
+            lines[slot_ui::CUSTOM_CLOSE] = (key("B", "Close"), true);
+            if c.panel.popup.is_some() && self.power_menu.is_none() {
+                lines[slot_ui::POPUP_TITLE_SLOT] = ("Type".into(), true);
+                for (i, m) in slot_ui::Material::ALL.iter().enumerate() {
+                    lines[slot_ui::option_slot(i)] = (m.name().to_string(), true);
+                }
+                lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+            }
+        }
+        if core_popup.is_some() && self.power_menu.is_none() {
+            let now = self
+                .root
+                .as_deref()
+                .zip(self.selected_stem())
+                .map(|(root, stem)| slot_store::core_for(root, stem));
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Core".into(), true);
+            for (i, c) in Core::ALL.iter().enumerate() {
+                let text = match now == Some(*c) {
+                    true => format!("{}  \u{2713}", c.text()),
+                    false => c.text().to_string(),
+                };
+                lines[slot_ui::option_slot(i)] = (text, true);
+            }
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+        }
+        if inspecting {
+            for (i, (caption, value)) in self.inspect_rows().into_iter().enumerate() {
+                lines[slot_ui::inspect_caption_slot(i)] = (caption.into(), true);
+                lines[slot_ui::inspect_value_slot(i)] = (value, true);
+            }
+            lines[slot_ui::CUSTOM_TITLE] = ("Inspect".into(), true);
+            let starred = self
+                .shelf()
+                .carts
+                .get(self.shelf().index)
+                .is_some_and(|c| self.is_favorite(c));
+            lines[slot_ui::inspect_hint_slot(0)] = (key("B", "Back"), true);
+            lines[slot_ui::inspect_hint_slot(1)] = (
+                key("Y", if starred { "Unstar" } else { "\u{2605} Star" }),
+                true,
+            );
+            lines[slot_ui::inspect_hint_slot(2)] = (key("X", "Customize"), true);
+            lines[slot_ui::inspect_hint_slot(3)] = (key("A", "Play"), true);
+        }
+        if let Some((list, at)) = recent.filter(|_| self.power_menu.is_none()) {
+            let (first, shown, _) = popup_window(list.len(), *at);
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Recently Played".into(), true);
+            if list.is_empty() {
+                lines[slot_ui::option_slot(0)] = ("Nothing played yet".into(), true);
+            }
+            for (i, p) in list.iter().skip(first).take(shown).enumerate() {
+                let name = slot_ui::clean_label(&p.stem);
+                lines[slot_ui::option_slot(i)] =
+                    (format!("{name}   {}", p.platform.dir_name()), true);
+            }
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+        }
+        if let Some((list, at)) = shots.filter(|_| self.power_menu.is_none()) {
+            let (first, shown, _) = popup_window(list.len(), *at);
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Screenshots".into(), true);
+            if list.is_empty() {
+                lines[slot_ui::option_slot(0)] = ("None yet. MENU+A in a game".into(), true);
+            }
+            for (i, name) in list.iter().skip(first).take(shown).enumerate() {
+                lines[slot_ui::option_slot(i)] = (name.clone(), true);
+            }
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close    Y  Delete"), true);
+        }
+        if self.files_popup_up() && self.power_menu.is_none() {
+            self.files_popup_lines(&mut lines);
+        }
+        if menu && self.power_menu.is_none() {
+            self.menu_lines(&mut lines);
+        }
+        if let Phase::Sync { .. } = &self.phase {
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Device Sync".into(), true);
+            for (i, row) in self.sync_rows().into_iter().enumerate() {
+                lines[slot_ui::option_slot(i)] = (row, true);
+            }
+            let hint = match self.sync_job.is_some() {
+                true => key("B", "Stop"),
+                false => key("B", "Close    X  ROMs    A  Start"),
+            };
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (hint, true);
+        }
+        if let Phase::Bluetooth { list, at, scanning } = &self.phase {
+            let (first, shown, _) = popup_window(list.len(), *at);
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Bluetooth Devices".into(), true);
+            if *scanning {
+                lines[slot_ui::option_slot(0)] = ("Looking for devices\u{2026}".into(), true);
+            } else if list.is_empty() {
+                lines[slot_ui::option_slot(0)] = ("No devices found".into(), true);
+            }
+            if !*scanning {
+                for (i, d) in list.iter().skip(first).take(shown).enumerate() {
+                    let state = match (d.connected, d.paired) {
+                        (true, _) => "   \u{2713} Connected",
+                        (false, true) => "   Paired",
+                        _ => "",
+                    };
+                    lines[slot_ui::option_slot(i)] = (format!("{}{state}", d.name), true);
+                }
+            }
+            let picked = list.get(*at).filter(|_| !*scanning);
+            let hint = match picked {
+                Some(d) if d.connected => "Close    Y  Scan    X  Forget    A  Disconnect",
+                Some(d) if d.paired => "Close    Y  Scan    X  Forget",
+                _ => "Close    Y  Scan again",
+            };
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", hint), true);
+        }
+        if let Phase::Networks { list, scanning, .. } = &self.phase {
+            let (first, shown, _) = self.networks_window();
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Wi-Fi Networks".into(), true);
+            if *scanning {
+                lines[slot_ui::option_slot(0)] = ("Looking for networks\u{2026}".into(), true);
+            } else if list.is_empty() {
+                lines[slot_ui::option_slot(0)] = ("No networks found".into(), true);
+            }
+            for (i, n) in list.iter().skip(first).take(shown).enumerate() {
+                let bars: String = (1..=4)
+                    .map(|b| {
+                        if b <= n.bars() {
+                            '\u{25cf}'
+                        } else {
+                            '\u{25cb}'
+                        }
+                    })
+                    .collect();
+                let open = if n.secured { "" } else { "   Open" };
+                lines[slot_ui::option_slot(i)] = (format!("{}   {bars}{open}", n.ssid), true);
+            }
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close    Y  Scan again"), true);
+        }
+        if self.power_menu.is_some() {
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Power".into(), true);
+            for (i, c) in PowerChoice::ALL.iter().enumerate() {
+                lines[slot_ui::option_slot(i)] = (c.text().to_string(), true);
+            }
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+        }
+        Some(lines)
+    }
+
+    pub fn wants_socket_backdrop(&self) -> bool {
+        (self.socket_look() || self.customize.is_some() || self.inspect)
+            && self.socket_backdrop.is_none()
+    }
+
+    pub fn set_socket_backdrop(&mut self, tex: TexId) {
+        self.socket_backdrop = Some(tex);
+    }
+
+    pub fn set_socket_faces(&mut self, faces: Vec<Option<(TexId, u32, u32)>>) {
+        self.socket_faces = faces;
+    }
+
+    /// The text for every pill of the Socket shelf, while it shows.
+    pub fn socket_lines(&self) -> Option<Vec<(String, bool)>> {
+        let shelf_up = matches!(
+            self.phase,
+            Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }
+        );
+        if !shelf_up || !(self.socket_look() || self.customize.is_some() || self.inspect) {
+            return None;
+        }
+        let key = |k: &str, label: &str| format!("{k}{}{label}", slot_ui::KEY_SEP);
+        let mut lines = vec![(String::new(), false); slot_ui::SOCKET_SLOTS];
+        lines[slot_ui::SOCKET_CLOCK] = (slot_ui::hhmm(self.wall_secs()), true);
+        if self.shelves.len() > 1 {
+            lines[slot_ui::SOCKET_L] = ("L".into(), true);
+            lines[slot_ui::SOCKET_R] = ("R".into(), true);
+        }
+        let mut tabs = 0;
+        for (i, (platform, shelf)) in self.shelves.iter().enumerate() {
+            if shelf.carts.is_empty() || tabs >= slot_ui::SOCKET_TABS {
+                continue;
+            }
+            lines[slot_ui::socket_tab_slot(tabs)] =
+                (platform.dir_name().to_string(), i == self.shelf_at);
+            tabs += 1;
+        }
+        if !self.fav_shelf.carts.is_empty() && tabs < slot_ui::SOCKET_TABS {
+            lines[slot_ui::socket_tab_slot(tabs)] =
+                ("\u{2605} FAV".to_string(), self.on_favorites());
+        }
+        let status = slot_ui::SocketStatus {
+            percent: self.battery.map(|b| b.percent),
+            charging: self
+                .battery
+                .is_some_and(|b| matches!(b.charge, Charge::Charging)),
+            wifi: self.net.online(),
+        };
+        lines[slot_ui::SOCKET_STATUS] = (status.text(), true);
+        if let Some(cart) = self.shelf().carts.get(self.shelf().index) {
+            lines[slot_ui::SOCKET_NAME] = (key("A", &slot_ui::label_text(cart)), true);
+        }
+        lines[slot_ui::socket_bottom_slot(0)] = (key("MENU", "Settings"), true);
+        lines[slot_ui::socket_bottom_slot(1)] = (key("Y", "Search"), true);
+        lines[slot_ui::socket_bottom_slot(2)] = (key("X", "Inspect"), true);
+        Some(lines)
+    }
+
+    pub fn customize_open(&self) -> bool {
+        self.customize.is_some()
+    }
+
+    /// Bumped whenever a cart's shell changes, so the faces built from the
+    /// old one are built again.
+    pub fn shell_generation(&self) -> u32 {
+        self.shell_generation
+    }
+
+    pub fn selected_shell(&self) -> Option<slot_store::ShellChoice> {
+        self.shelf()
+            .carts
+            .get(self.shelf().index)
+            .and_then(|c| c.shell)
+    }
+
+    fn open_customize(&mut self) {
+        if self.core_picker.is_some() || self.shelf().carts.is_empty() {
+            return;
+        }
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+        self.customize = Some(Customize {
+            panel: slot_ui::CustomizePanel::default(),
+            before: self.selected_shell(),
+        });
+    }
+
+    fn close_customize(&mut self) {
+        let Some(c) = self.customize.take() else {
+            return;
+        };
+        let now = self.selected_shell();
+        if now == c.before {
+            return;
+        }
+        let (Some(root), Some(stem)) = (self.root.clone(), self.selected_stem().map(str::to_owned))
+        else {
+            return;
+        };
+        if let Err(e) = slot_store::cart_shell::save(&root, &stem, now) {
+            eprintln!("slot: customize: {e}");
+            self.say("Could not save the cart's colour", e.to_string());
+        }
+    }
+
+    /// Puts `shell` on the selected cart and has its face built again.
+    fn set_shell(&mut self, shell: Option<slot_store::ShellChoice>) {
+        let shelf = self.shelf_mut();
+        let index = shelf.index;
+        let Some(cart) = shelf.carts.get_mut(index) else {
+            return;
+        };
+        if cart.shell == shell {
+            return;
+        }
+        cart.shell = shell;
+        let old = shelf.take_face(index);
+        self.dropped_faces.extend(old);
+        self.shell_generation = self.shell_generation.wrapping_add(1);
+    }
+
+    fn customize_input(&mut self, action: Action) {
+        let Some(mut c) = self.customize else {
+            return;
+        };
+        let now = self.selected_shell();
+        match action {
+            Action::GbaDown(Btn::Up) => c.panel.up(),
+            Action::GbaDown(Btn::Down) => c.panel.down(),
+            Action::GbaDown(Btn::Left)
+            | Action::ShelfLeft
+            | Action::GbaDown(Btn::Right)
+            | Action::ShelfRight => {
+                let right = matches!(action, Action::GbaDown(Btn::Right) | Action::ShelfRight);
+                if c.panel.popup.is_none() && c.panel.focus == slot_ui::CustomFocus::Material {
+                    let all = slot_ui::Material::ALL;
+                    let at = all
+                        .iter()
+                        .position(|m| *m == slot_ui::Material::of(now))
+                        .unwrap_or(0);
+                    let to = match right {
+                        true => (at + 1) % all.len(),
+                        false => (at + all.len() - 1) % all.len(),
+                    };
+                    self.set_shell(slot_ui::with_material(now, all[to]));
+                } else {
+                    c.panel.step(right);
+                }
+            }
+            Action::GbaDown(Btn::A) => match (c.panel.popup, c.panel.focus) {
+                (Some(at), _) => {
+                    self.set_shell(slot_ui::with_material(now, slot_ui::Material::ALL[at]));
+                    c.panel.popup = None;
+                }
+                (None, slot_ui::CustomFocus::Material) => {
+                    c.panel.popup = slot_ui::Material::ALL
+                        .iter()
+                        .position(|m| *m == slot_ui::Material::of(now));
+                }
+                (None, slot_ui::CustomFocus::Swatch(i)) => {
+                    self.set_shell(Some(slot_ui::with_colour(now, slot_ui::SWATCHES[i])));
+                }
+            },
+            Action::GbaDown(Btn::B) | Action::GbaDown(Btn::X) if c.panel.popup.is_some() => {
+                c.panel.popup = None;
+            }
+            Action::GbaDown(Btn::B) | Action::GbaDown(Btn::X) => return self.close_customize(),
+            _ => {}
+        }
+        if self.customize.is_some() {
+            self.customize = Some(c);
+        }
+    }
+
+    pub fn inspect_open(&self) -> bool {
+        self.inspect
+    }
+
+    pub fn recent_open(&self) -> bool {
+        self.recent_popup.is_some()
+    }
+
+    fn open_inspect(&mut self) {
+        if self.core_picker.is_some() || self.shelf().carts.is_empty() {
+            return;
+        }
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+        self.inspect = true;
+    }
+
+    fn inspect_input(&mut self, action: Action) {
+        match action {
+            Action::GbaDown(Btn::A) => {
+                self.inspect = false;
+                self.insert_or_ask();
+            }
+            Action::GbaDown(Btn::Y) => self.toggle_favorite(),
+            Action::GbaDown(Btn::X) => {
+                self.inspect = false;
+                self.open_customize();
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => self.inspect = false,
+            _ => {}
+        }
+    }
+
+    /// What Inspect says about the selected game, a caption and a value a card.
+    fn inspect_rows(&self) -> Vec<(&'static str, String)> {
+        let (Some(root), Some(cart)) = (&self.root, self.shelf().carts.get(self.shelf().index))
+        else {
+            return Vec::new();
+        };
+        let core = slot_store::core_for_platform(root, &cart.stem, cart.platform);
+        let secs = crate::playtime::read(root, &crate::playtime::key(cart.platform, &cart.stem));
+        let played = match secs {
+            0 => "Not played yet".to_string(),
+            s if s < 60 => "Under a minute".to_string(),
+            s if s < 3600 => format!("{} min", s / 60),
+            s => format!("{}h {:02}m", s / 3600, s / 60 % 60),
+        };
+        let last = slot_store::library::last_played(root, cart.platform, &cart.stem)
+            .map_or("Never".to_string(), slot_ui::date_time_text);
+        let save = match persist::read_sav(root, cart.platform, &cart.stem) {
+            Some(b) if b.len() >= 1024 => format!("{} KB", b.len() / 1024),
+            Some(b) => format!("{} bytes", b.len()),
+            None => "None yet".to_string(),
+        };
+        let states = StateRing::new(root, cart.platform, core, &cart.stem)
+            .list()
+            .map_or(0, |l| l.len());
+        vec![
+            ("System", cart.platform.name().to_string()),
+            (
+                "Core",
+                match slot_store::rom::patch_label(&cart.rom) {
+                    Some(p) => format!("{} · {p}", core.text()),
+                    None => core.text().to_string(),
+                },
+            ),
+            ("Play time", played),
+            ("Last played", last),
+            ("Battery save", save),
+            (
+                "Save states",
+                match states {
+                    0 => "None".to_string(),
+                    1 => "1 state".to_string(),
+                    n => format!("{n} states"),
+                },
+            ),
+        ]
+    }
+
+    fn open_recent(&mut self) {
+        let Some(root) = &self.root else {
+            return;
+        };
+        let list: Vec<_> = slot_store::library::read_recent(root)
+            .into_iter()
+            .filter(|p| self.seat_of(&p.stem, Some(p.platform)).is_some())
+            .collect();
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+        self.recent_popup = Some((list, 0));
+    }
+
+    fn recent_input(&mut self, action: Action) {
+        let Some((list, at)) = &mut self.recent_popup else {
+            return;
+        };
+        let n = list.len();
+        match action {
+            Action::GbaDown(Btn::Up) if n > 0 => *at = (*at + n - 1) % n,
+            Action::GbaDown(Btn::Down) if n > 0 => *at = (*at + 1) % n,
+            Action::GbaDown(Btn::A) if n > 0 => {
+                let picked = list[*at].clone();
+                self.recent_popup = None;
+                if let Some((shelf, i)) = self.seat_of(&picked.stem, Some(picked.platform)) {
+                    if shelf != self.shelf_at {
+                        self.shelf_at = shelf;
+                        self.shelf_platform = slot_ui::Printed::default();
+                        self.slot_letter = None;
+                    }
+                    self.shelf_mut().select(i);
+                    self.name_pending = true;
+                    self.insert_or_ask();
+                }
+            }
+            Action::GbaDown(Btn::B) | Action::GbaDown(Btn::Select) | Action::QuickMenu => {
+                self.recent_popup = None
+            }
+            _ => {}
+        }
+    }
+
+    fn open_shots(&mut self) {
+        let Some(root) = &self.root else {
+            return;
+        };
+        let dir = root.join(SCREENSHOTS);
+        let mut list: Vec<String> = std::fs::read_dir(&dir)
+            .map(|d| {
+                d.flatten()
+                    .filter_map(|e| {
+                        let name = e.file_name().to_string_lossy().into_owned();
+                        name.to_ascii_lowercase().ends_with(".png").then_some(name)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        list.sort();
+        list.reverse();
+        self.shelf_mut().release_hold();
+        self.shots_popup = Some((list, 0));
+    }
+
+    fn shots_input(&mut self, action: Action) {
+        let Some((list, at)) = &mut self.shots_popup else {
+            return;
+        };
+        let n = list.len();
+        match action {
+            Action::GbaDown(Btn::Up) if n > 0 => *at = (*at + n - 1) % n,
+            Action::GbaDown(Btn::Down) if n > 0 => *at = (*at + 1) % n,
+            Action::GbaDown(Btn::Y) if n > 0 => {
+                if let Some(root) = &self.root {
+                    let name = list[*at].clone();
+                    let _ = std::fs::remove_file(root.join(SCREENSHOTS).join(&name));
+                }
+                list.remove(*at);
+                if list.is_empty() {
+                    self.shots_popup = None;
+                } else {
+                    *at = (*at).min(list.len() - 1);
+                }
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => self.shots_popup = None,
+            _ => {}
+        }
+    }
+
+    fn note_input(&mut self) {
+        self.idle_at = self.now();
+        if !self.dimmed {
+            return;
+        }
+        self.dimmed = false;
+        if let Some(power) = &mut self.power {
+            power.set_backlight(self.state.brightness);
+        }
+    }
+
+    /// Whether the screen is dimmed for want of a press.
+    pub fn idle_dimmed(&self) -> bool {
+        self.dimmed
+    }
+
+    fn idle_tick(&mut self) {
+        if !self.state.idle_dim || matches!(self.phase, Phase::Doze { .. }) {
+            return;
+        }
+        // A game can go a long while between presses, a run held down or a
+        // page of text read: it is never dimmed, and the wait starts again
+        // when it is left.
+        if matches!(
+            self.phase,
+            Phase::Inserting { .. } | Phase::Playing { .. } | Phase::Polaroids { .. }
+        ) {
+            self.idle_at = self.now();
+            return;
+        }
+        if self.idle_at == 0 {
+            self.idle_at = self.now();
+            return;
+        }
+        if self.dimmed || self.now().saturating_sub(self.idle_at) < IDLE_DIM_MS {
+            return;
+        }
+        self.dimmed = true;
+        if let Some(power) = &mut self.power {
+            power.set_backlight(self.state.brightness.min(1));
+        }
+    }
+
+    fn draw_inspect(&self, out: &mut Vec<Draw>) {
+        let screen = self.socket_screen(0.0);
+        screen.draw_backdrop(out);
+        self.shelf()
+            .draw_socket_solo(self.now(), slot_ui::CUSTOM_CART_X, out);
+        screen.draw_clock(out);
+        screen.draw_name_at(slot_ui::CUSTOM_CART_X, out);
+        slot_ui::InspectScreen {
+            chrome: &self.socket_chrome,
+            faces: &self.settings_faces,
+            rows: slot_ui::INSPECT_ROWS,
+        }
+        .draw(out);
+    }
+
+    fn draw_customize(&self, out: &mut Vec<Draw>) {
+        let Some(c) = self.customize else {
+            return;
+        };
+        let screen = self.socket_screen(0.0);
+        screen.draw_backdrop(out);
+        self.shelf()
+            .draw_socket_solo(self.now(), slot_ui::CUSTOM_CART_X, out);
+        screen.draw_clock(out);
+        screen.draw_name_at(slot_ui::CUSTOM_CART_X, out);
+        let chosen = self
+            .selected_shell()
+            .and_then(|s| slot_ui::SWATCHES.iter().position(|w| *w == s.colour));
+        slot_ui::CustomizeScreen {
+            chrome: &self.socket_chrome,
+            faces: &self.settings_faces,
+            panel: c.panel,
+            chosen,
+        }
+        .draw(out);
+        if let Some(Some((tex, w, h))) = self.settings_faces.get(slot_ui::CUSTOM_CLOSE).copied() {
+            out.push(Draw::Tex {
+                x: 12.0,
+                y: (OUT_H - 12) as f32 - h as f32,
+                w: w as f32,
+                h: h as f32,
+                tex,
+                alpha: 1.0,
+            });
+        }
+    }
+
+    pub fn home_open(&self) -> bool {
+        self.home.is_some()
+    }
+
+    pub fn home_focus(&self) -> Option<slot_ui::HomeFocus> {
+        self.home.map(|p| p.focus())
+    }
+
+    fn open_home(&mut self) {
+        if self.core_picker.is_some() || self.link_active() {
+            return;
+        }
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+        self.home = Some(slot_ui::HomePanel::new());
+        self.home_stats = crate::sysinfo::Stats::read();
+        self.home_stats_at = self.now();
+    }
+
+    fn close_home(&mut self) {
+        self.home = None;
+    }
+
+    fn home_tick(&mut self) {
+        let now = self.now();
+        if self.home.is_some() && now.saturating_sub(self.home_stats_at) >= HOME_STATS_MS {
+            self.home_stats = crate::sysinfo::Stats::read();
+            self.home_stats_at = now;
+        }
+    }
+
+    fn home_input(&mut self, action: Action) {
+        let Some(mut panel) = self.home else {
+            return;
+        };
+        let focus = panel.focus();
+        match action {
+            Action::GbaDown(Btn::Up) => panel.up(),
+            Action::GbaDown(Btn::Down) => panel.down(),
+            Action::GbaDown(Btn::Left)
+            | Action::ShelfLeft
+            | Action::GbaDown(Btn::Right)
+            | Action::ShelfRight => {
+                let right = matches!(action, Action::GbaDown(Btn::Right) | Action::ShelfRight);
+                if !panel.step(right) {
+                    let step = match (focus, right) {
+                        (slot_ui::HomeFocus::Brightness, true) => Action::BrightnessUp,
+                        (slot_ui::HomeFocus::Brightness, false) => Action::BrightnessDown,
+                        (_, true) => Action::VolumeUp,
+                        (_, false) => Action::VolumeDown,
+                    };
+                    self.adjust(step);
+                }
+            }
+            Action::GbaDown(Btn::A) => match focus {
+                slot_ui::HomeFocus::Tile(tile) => return self.home_tile(tile),
+                slot_ui::HomeFocus::Volume => self.mute_toggle(),
+                slot_ui::HomeFocus::Brightness => {}
+            },
+            Action::GbaDown(Btn::B) | Action::GbaDown(Btn::Home) | Action::HomePanel => {
+                return self.close_home()
+            }
+            Action::QuickMenu if self.on_shelf() => {
+                self.close_home();
+                return self.open_quick_menu();
+            }
+            _ => {}
+        }
+        if self.home.is_some() {
+            self.home = Some(panel);
+        }
+    }
+
+    fn home_tile(&mut self, tile: slot_ui::HomeTile) {
+        match tile {
+            slot_ui::HomeTile::Screenshot => {
+                if !matches!(self.phase, Phase::Playing { .. }) {
+                    return self.say("Screenshots are taken in a game", "");
+                }
+                self.close_home();
+                self.screenshot();
+            }
+            slot_ui::HomeTile::Sound => self.mute_toggle(),
+            slot_ui::HomeTile::Rumble => self.change_setting(QuickRow::Rumble, true),
+            slot_ui::HomeTile::Wifi => self.change_setting(QuickRow::Wifi, true),
+            slot_ui::HomeTile::Bluetooth => self.change_setting(QuickRow::Bluetooth, true),
+            slot_ui::HomeTile::Lights => self.change_setting(QuickRow::LightMode, true),
+            slot_ui::HomeTile::Power => {
+                self.close_home();
+                self.open_power_menu();
+            }
+        }
+    }
+
+    fn home_tiles_on(&self) -> [bool; slot_ui::HomeTile::ALL.len()] {
+        slot_ui::HomeTile::ALL.map(|tile| match tile {
+            slot_ui::HomeTile::Screenshot => matches!(self.phase, Phase::Playing { .. }),
+            slot_ui::HomeTile::Sound => !self.muted(),
+            slot_ui::HomeTile::Rumble => self.state.rumble,
+            slot_ui::HomeTile::Wifi => self.state.wifi,
+            slot_ui::HomeTile::Bluetooth => self.state.bluetooth,
+            slot_ui::HomeTile::Lights => self.state.light_mode != LightMode::Off,
+            slot_ui::HomeTile::Power => false,
+        })
+    }
+
+    /// The text for every slot of the Home panel and whether it is lit,
+    /// while the panel is up.
+    pub fn home_lines(&self) -> Option<Vec<(String, bool)>> {
+        self.home?;
+        let on = self.home_tiles_on();
+        let mut lines = vec![(String::new(), false); slot_ui::HOME_SLOTS];
+        let title = match self.phase {
+            Phase::Playing { .. } => self.seated().unwrap_or("brickslot").to_string(),
+            _ => "brickslot".to_string(),
+        };
+        lines[slot_ui::HOME_TITLE] = (title, true);
+        lines[slot_ui::HOME_CLOCK] = (slot_ui::hhmm(self.wall_secs()), true);
+        for (i, tile) in slot_ui::HomeTile::ALL.iter().enumerate() {
+            let state = match tile {
+                slot_ui::HomeTile::Screenshot if on[i] => "Take",
+                slot_ui::HomeTile::Screenshot => "In game",
+                slot_ui::HomeTile::Wifi if on[i] && !self.net.online() => "Joining",
+                slot_ui::HomeTile::Bluetooth if on[i] => {
+                    match self.bt_devices.iter().find(|d| d.connected) {
+                        Some(_) => "Connected",
+                        None => "On",
+                    }
+                }
+                slot_ui::HomeTile::Lights => match self.state.light_mode {
+                    LightMode::Battery => "Battery",
+                    LightMode::Colour => "Colour",
+                    LightMode::Off => "Off",
+                },
+                slot_ui::HomeTile::Power => "Menu",
+                _ if on[i] => "On",
+                _ => "Off",
+            };
+            lines[slot_ui::home_tile_name_slot(i)] = (tile.name().to_string(), true);
+            lines[slot_ui::home_tile_state_slot(i)] = (state.to_string(), on[i]);
+        }
+        let focus = self.home.map(|p| p.focus());
+        lines[slot_ui::home_slider_name_slot(0)] = (
+            "Brightness".into(),
+            focus == Some(slot_ui::HomeFocus::Brightness),
+        );
+        lines[slot_ui::home_slider_name_slot(1)] =
+            ("Volume".into(), focus == Some(slot_ui::HomeFocus::Volume));
+        lines[slot_ui::home_slider_value_slot(0)] = (
+            format!("{}/{}", self.state.brightness, BRIGHTNESS_MAX),
+            true,
+        );
+        let volume = match self.muted() {
+            true => "Muted".to_string(),
+            false => format!("{}%", self.level()),
+        };
+        lines[slot_ui::home_slider_value_slot(1)] = (volume, true);
+        let stats = &self.home_stats;
+        let battery = self
+            .battery
+            .map_or("--".to_string(), |b| format!("{}%", b.percent));
+        let named = [
+            ("Temp", crate::sysinfo::temp_text(stats)),
+            ("CPU", crate::sysinfo::cpu_text(stats)),
+            ("RAM", crate::sysinfo::ram_text(stats)),
+            ("Battery", battery),
+        ];
+        for (i, (name, value)) in named.into_iter().enumerate() {
+            lines[slot_ui::home_stat_name_slot(i)] = (name.to_string(), false);
+            lines[slot_ui::home_stat_value_slot(i)] = (value, true);
+        }
+        let legend = match self.on_shelf() {
+            true => "MENU  Settings      B  Close      A  Select",
+            false => "B  Resume      A  Select",
+        };
+        lines[slot_ui::HOME_LEGEND] = (legend.to_string(), false);
+        Some(lines)
+    }
+
+    /// Whether the Home panel's buttons are wanted, and drawn light: when
+    /// it is up without them, or with them drawn for the other look.
+    pub fn wants_home_icons(&self) -> Option<bool> {
+        let light = self.socket_look();
+        (self.home.is_some() && (self.home_icons.is_empty() || self.home_icons_light != light))
+            .then_some(light)
+    }
+
+    pub fn set_home_icons(&mut self, icons: Vec<(TexId, u32, u32)>, light: bool) {
+        let old = std::mem::replace(&mut self.home_icons, icons);
+        self.dropped_faces
+            .extend(old.into_iter().map(|(t, _, _)| t));
+        self.home_icons_light = light;
+    }
+
+    pub fn set_files_faces(&mut self, faces: Vec<Option<(TexId, u32, u32)>>) {
+        self.files_faces = faces;
+    }
+
+    pub fn set_home_faces(&mut self, faces: Vec<Option<(TexId, u32, u32)>>) {
+        self.home_faces = faces;
+    }
+
+    pub fn search_light(&self) -> bool {
+        self.socket_look() || matches!(self.phase, Phase::Password { .. })
+    }
+
+    fn open_networks(&mut self) {
+        if !self.state.wifi {
+            self.state.wifi = true;
+            self.persist();
+        }
+        self.net.send(NetJob::Scan);
+        self.phase = Phase::Networks {
+            list: Vec::new(),
+            at: 0,
+            scanning: true,
+        };
+    }
+
+    /// The first network the list shows, how many it shows, and which of
+    /// them the cursor is on.
+    fn networks_window(&self) -> (usize, usize, Option<usize>) {
+        let Phase::Networks { list, at, scanning } = &self.phase else {
+            return (0, 0, None);
+        };
+        if *scanning || list.is_empty() {
+            return (0, 0, None);
+        }
+        let shown = list.len().min(slot_ui::POPUP_OPTIONS);
+        let first = at.saturating_sub(shown - 1).min(list.len() - shown);
+        (first, shown, Some(at - first))
+    }
+
+    /// Puts a finished scan's networks on the list, while it is up.
+    pub fn networks_found(&mut self, found: Vec<crate::net::Network>) {
+        if let Phase::Networks { list, at, scanning } = &mut self.phase {
+            *list = found;
+            *at = 0;
+            *scanning = false;
+        }
+    }
+
+    fn open_bluetooth(&mut self) {
+        if !self.state.bluetooth {
+            self.state.bluetooth = true;
+            self.persist();
+            self.bt.send(crate::bt::BtJob::Up);
+        }
+        self.bt.send(crate::bt::BtJob::Scan);
+        self.phase = Phase::Bluetooth {
+            list: Vec::new(),
+            at: 0,
+            scanning: true,
+        };
+    }
+
+    /// Puts a device list on the Bluetooth screen, while it is up, keeping
+    /// the cursor on the device it was on.
+    pub fn bt_found(&mut self, found: Vec<crate::bt::BtDevice>) {
+        self.bt_devices = found.clone();
+        if let Phase::Bluetooth { list, at, scanning } = &mut self.phase {
+            let was = list.get(*at).map(|d| d.mac.clone());
+            *at = was
+                .and_then(|mac| found.iter().position(|d| d.mac == mac))
+                .unwrap_or(0);
+            *list = found;
+            *scanning = false;
+        }
+    }
+
+    pub fn bt_jobs(&self) -> &[crate::bt::BtJob] {
+        self.bt.sent()
+    }
+
+    fn bt_input(&mut self, action: Action) {
+        use crate::bt::BtJob;
+        let Phase::Bluetooth { list, at, scanning } = &mut self.phase else {
+            return;
+        };
+        let n = list.len();
+        let picked = list.get(*at).cloned().filter(|_| !*scanning);
+        match action {
+            Action::GbaDown(Btn::Up) if n > 0 && !*scanning => *at = (*at + n - 1) % n,
+            Action::GbaDown(Btn::Down) if n > 0 && !*scanning => *at = (*at + 1) % n,
+            Action::GbaDown(Btn::Y) if !*scanning => {
+                *scanning = true;
+                self.bt.send(BtJob::Scan);
+            }
+            Action::GbaDown(Btn::A) => {
+                let Some(d) = picked else {
+                    return;
+                };
+                if d.connected {
+                    self.say(format!("Disconnecting {}", d.name), "");
+                    self.bt.send(BtJob::Disconnect { mac: d.mac });
+                } else {
+                    self.say(
+                        format!("Connecting {}\u{2026}", d.name),
+                        "Keep it in pairing mode",
+                    );
+                    self.bt.send(BtJob::Connect {
+                        mac: d.mac,
+                        name: d.name,
+                    });
+                }
+            }
+            Action::GbaDown(Btn::X) => {
+                if let Some(d) = picked.filter(|d| d.paired) {
+                    self.say(format!("Forgot {}", d.name), "");
+                    self.bt.send(BtJob::Forget { mac: d.mac });
+                }
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::BtDevices,
+                };
+            }
+            _ => {}
+        }
+    }
+
+    fn sync_rows(&self) -> Vec<String> {
+        use crate::sync::SyncNews;
+        let Phase::Sync { roms, news } = &self.phase else {
+            return Vec::new();
+        };
+        let status = match news {
+            None => "Start Device Sync on both handhelds".to_string(),
+            Some(SyncNews::Looking) => "Looking for the other handheld\u{2026}".into(),
+            Some(SyncNews::Found(name)) => format!("Syncing with {name}\u{2026}"),
+            Some(SyncNews::Moving { got, .. }) => format!("Received {got} files\u{2026}"),
+            Some(SyncNews::Done { sent, got }) => format!("Done: sent {sent}, received {got}"),
+            Some(SyncNews::Failed(why)) => why.clone(),
+        };
+        vec![
+            status,
+            "Saves, states, cheats and settings".into(),
+            format!("ROMs   {}", if *roms { "On" } else { "Off" }),
+        ]
+    }
+
+    fn device_name() -> String {
+        match slot_power::Board::detect() {
+            slot_power::Board::TrimUiBrick => "Brick",
+            slot_power::Board::TrimUiBrickPro => "Brick Pro",
+            slot_power::Board::TrimUiSmartPro => "Smart Pro",
+            slot_power::Board::Anbernic => "Anbernic",
+        }
+        .to_string()
+    }
+
+    fn sync_input(&mut self, action: Action) {
+        let Phase::Sync { roms, news } = &mut self.phase else {
+            return;
+        };
+        let running = self.sync_job.is_some();
+        match action {
+            Action::GbaDown(Btn::X) if !running => *roms = !*roms,
+            Action::GbaDown(Btn::A) if !running => {
+                let roms = *roms;
+                *news = Some(crate::sync::SyncNews::Looking);
+                let Some(root) = self.root.clone() else {
+                    return;
+                };
+                if !self.state.wifi {
+                    self.state.wifi = true;
+                    self.net.send(NetJob::WifiUp);
+                    self.persist();
+                }
+                let opts = crate::sync::SyncOptions::lan(roms, Self::device_name());
+                self.sync_job = Some(crate::sync::SyncJob::start(&root, opts));
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.sync_job = None;
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::DeviceSync,
+                };
+            }
+            _ => {}
+        }
+    }
+
+    /// Takes in what the sync has to say, and lets it go once it is over.
+    fn sync_tick(&mut self) {
+        use crate::sync::SyncNews;
+        let Some(job) = &self.sync_job else {
+            return;
+        };
+        let heard: Vec<SyncNews> = job.news.try_iter().collect();
+        let mut over = false;
+        for n in heard {
+            over |= matches!(n, SyncNews::Done { .. } | SyncNews::Failed(_));
+            if let SyncNews::Done { got, .. } = n {
+                if got > 0 {
+                    self.reload_after_sync();
+                }
+            }
+            if let Phase::Sync { news, .. } = &mut self.phase {
+                *news = Some(n);
+            }
+        }
+        if over {
+            self.sync_job = None;
+        }
+    }
+
+    /// Favourites and cart colours may have come from the other device.
+    fn reload_after_sync(&mut self) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        self.favorites = slot_store::library::read_favorites(&root);
+        self.rebuild_favorites();
+        self.say("Device Sync done", "New games show after a restart");
+    }
+
+    pub fn sync_running(&self) -> bool {
+        self.sync_job.is_some()
+    }
+
+    fn back_to_join(&mut self) {
+        self.phase = Phase::QuickMenu {
+            row: QuickRow::JoinNetwork,
+        };
+    }
+
+    fn join(&mut self, ssid: String, psk: String) {
+        self.say(format!("Joining {ssid}"), "");
+        self.net.send(NetJob::Join { ssid, psk });
+        self.back_to_join();
+    }
+
+    fn networks_input(&mut self, action: Action) {
+        let Phase::Networks { list, at, scanning } = &mut self.phase else {
+            return;
+        };
+        let n = list.len();
+        match action {
+            Action::GbaDown(Btn::Up) if n > 0 && !*scanning => *at = (*at + n - 1) % n,
+            Action::GbaDown(Btn::Down) if n > 0 && !*scanning => *at = (*at + 1) % n,
+            Action::GbaDown(Btn::Y) if !*scanning => {
+                *scanning = true;
+                self.net.send(NetJob::Scan);
+            }
+            Action::GbaDown(Btn::A) if n > 0 && !*scanning => {
+                let picked = list[*at].clone();
+                let list = std::mem::take(list);
+                if picked.secured {
+                    self.phase = Phase::Password {
+                        ssid: picked.ssid,
+                        keys: crate::keyboard::Keyboard::default(),
+                        list,
+                    };
+                } else {
+                    self.join(picked.ssid, String::new());
+                }
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => self.back_to_join(),
+            _ => {}
+        }
+    }
+
+    fn password_input(&mut self, action: Action) {
+        let Phase::Password { ssid, keys, list } = &mut self.phase else {
+            return;
+        };
+        match action {
+            Action::GbaDown(Btn::Up) => keys.step(0, -1),
+            Action::GbaDown(Btn::Down) => keys.step(0, 1),
+            Action::GbaDown(Btn::Left) | Action::ShelfLeft => keys.step(-1, 0),
+            Action::GbaDown(Btn::Right) | Action::ShelfRight => keys.step(1, 0),
+            Action::GbaDown(Btn::A) => keys.type_key(),
+            Action::GbaDown(Btn::X) => keys.space(),
+            Action::GbaDown(Btn::Y) => keys.next_layer(),
+            Action::GbaDown(Btn::B) => {
+                if !keys.delete() {
+                    let at = list.iter().position(|n| n.ssid == *ssid).unwrap_or(0);
+                    self.phase = Phase::Networks {
+                        list: std::mem::take(list),
+                        at,
+                        scanning: false,
+                    };
+                }
+            }
+            Action::GbaDown(Btn::Start) if !keys.text.is_empty() => {
+                let (ssid, psk) = (ssid.clone(), keys.text.clone());
+                self.join(ssid, psk);
+            }
+            Action::QuickMenu => self.back_to_join(),
+            _ => {}
+        }
+    }
+
+    fn open_search(&mut self) {
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+        self.refresh_search();
+        self.phase = Phase::Search;
+    }
+
+    fn refresh_search(&mut self) {
+        self.search_picked_at = self.now();
+        let stems: Vec<(Platform, Vec<String>)> = self
+            .shelves
+            .iter()
+            .map(|(p, s)| (*p, s.carts.iter().map(|c| c.stem.clone()).collect()))
+            .collect();
+        self.search
+            .refresh(stems.iter().map(|(p, s)| (*p, s.as_slice())));
+    }
+
+    fn search_input(&mut self, action: Action) {
+        let changed = match action {
+            Action::GbaDown(Btn::Up) => {
+                self.search.step(0, -1);
+                false
+            }
+            Action::GbaDown(Btn::Down) => {
+                self.search.step(0, 1);
+                false
+            }
+            Action::GbaDown(Btn::Left) | Action::ShelfLeft => {
+                self.search.step(-1, 0);
+                false
+            }
+            Action::GbaDown(Btn::Right) | Action::ShelfRight => {
+                self.search.step(1, 0);
+                false
+            }
+            Action::GbaDown(Btn::A) => self.search.type_key(),
+            Action::GbaDown(Btn::B) => {
+                if !self.search.delete() {
+                    self.phase = Phase::Shelf;
+                    return;
+                }
+                true
+            }
+            Action::GbaDown(Btn::L1) => {
+                self.search.pick_by(-1);
+                self.search_picked_at = self.now();
+                false
+            }
+            Action::GbaDown(Btn::R1) => {
+                self.search.pick_by(1);
+                self.search_picked_at = self.now();
+                false
+            }
+            Action::GbaDown(Btn::Start) => {
+                self.go_to_hit();
+                return;
+            }
+            Action::QuickMenu | Action::GbaDown(Btn::Home) => {
+                self.phase = Phase::Shelf;
+                return;
+            }
+            _ => false,
+        };
+        if changed {
+            self.refresh_search();
+        }
+    }
+
+    fn go_to_hit(&mut self) {
+        let Some(hit) = self.search.picked().cloned() else {
+            return;
+        };
+        self.phase = Phase::Shelf;
+        if hit.shelf != self.shelf_at {
+            self.shelf_at = hit.shelf;
+            self.shelf_platform = slot_ui::Printed::default();
+            self.slot_letter = None;
+        }
+        self.shelf_mut().select(hit.index);
+        self.shelf_named = None;
+        self.name_pending = true;
+    }
+
+    /// The text for every slot of the search screen and whether it is lit,
+    /// while the screen is up.
+    pub fn search_lines(&self) -> Option<Vec<(String, bool)>> {
+        if let Phase::Password { ssid, keys, .. } = &self.phase {
+            return Some(password_lines(ssid, keys));
+        }
+        if let Some(lines) = self.files_typing_lines() {
+            return Some(lines);
+        }
+        if !matches!(self.phase, Phase::Search) {
+            return None;
+        }
+        let s = &self.search;
+        let mut lines = vec![(String::new(), false); slot_ui::SEARCH_SLOTS];
+        lines[slot_ui::SEARCH_QUERY] = (format!("Search: {}_", s.query), true);
+        for i in 0..slot_ui::SEARCH_HITS {
+            let text = match s.hits.get(i) {
+                Some(hit) => format!("{}  ({})", hit.name, hit.platform.dir_name()),
+                None if i == 0 && !s.query.trim().is_empty() => "No games found".to_string(),
+                None => String::new(),
+            };
+            lines[slot_ui::search_hit_slot(i)] = (text, s.pick == i);
+        }
+        for (row, keys) in crate::search::KEYS.iter().enumerate() {
+            for (col, key) in keys.iter().enumerate() {
+                let lit = (row, col) == (s.row, s.col);
+                lines[slot_ui::search_key_slot(row, col)] = (key.to_string(), lit);
+            }
+        }
+        let more = match s.hits.len() {
+            n if n > slot_ui::SEARCH_HITS => format!("   {n} found"),
+            _ => String::new(),
+        };
+        lines[slot_ui::SEARCH_LEGEND] = (
+            format!("A type   B delete   L/R pick   START go{more}"),
+            false,
+        );
+        Some(lines)
+    }
+
+    pub fn set_search_faces(&mut self, faces: Vec<Option<(TexId, u32, u32)>>) {
+        self.search_faces = faces;
+    }
+
+    pub fn search(&self) -> &crate::search::Search {
+        &self.search
+    }
+
     fn open_quick_menu(&mut self) {
         self.phase = Phase::QuickMenu {
             row: QuickRow::MAIN[0],
@@ -1314,11 +3312,20 @@ impl App {
     }
 
     fn quick_menu_input(&mut self, row: QuickRow, action: Action) {
+        if self.picker.is_some() {
+            return self.picker_input(action);
+        }
         let row = match action {
             Action::GbaDown(Btn::Up) => row.up(),
             Action::GbaDown(Btn::Down) => row.down(),
             Action::GbaDown(Btn::Left) => return self.change_setting(row, false),
             Action::GbaDown(Btn::Right) => return self.change_setting(row, true),
+            Action::GbaDown(Btn::A) if self.socket_look() && !row.opens() => {
+                if !self.open_picker(row) && self.quick_value(row).is_some() {
+                    self.change_setting(row, true);
+                }
+                return;
+            }
             Action::GbaDown(Btn::A) => return self.open_quick_row(row),
             Action::GbaDown(Btn::B) | Action::QuickMenu => {
                 self.phase = match row.parent() {
@@ -1338,12 +3345,40 @@ impl App {
                 self.phase = clock_screen(self.utc_secs(), self.state.utc_offset_min, true);
             }
             QuickRow::About => self.phase = Phase::About,
-            QuickRow::Screen | QuickRow::Game => {
+            QuickRow::Search => self.open_search(),
+            QuickRow::Labels => self.download_labels(),
+            QuickRow::JoinNetwork => self.open_networks(),
+            QuickRow::BtDevices => self.open_bluetooth(),
+            QuickRow::Files => self.open_files(),
+            QuickRow::DeviceSync => {
+                self.phase = Phase::Sync {
+                    roms: false,
+                    news: None,
+                }
+            }
+            QuickRow::EmulatorSettings => self.open_emulator_settings(Platform::Gba),
+            QuickRow::Screenshots => self.open_shots(),
+            QuickRow::WifiStatus => {
+                self.say("Checking Wi-Fi\u{2026}", "");
+                self.net.send(NetJob::Status);
+            }
+            QuickRow::Screen
+            | QuickRow::Game
+            | QuickRow::Lights
+            | QuickRow::Network
+            | QuickRow::Tools
+            | QuickRow::System => {
                 if let Some(row) = row.child() {
                     self.phase = Phase::QuickMenu { row };
                 }
             }
             QuickRow::EjectSave
+            | QuickRow::Look
+            | QuickRow::Tint
+            | QuickRow::MenuSounds
+            | QuickRow::Bluetooth
+            | QuickRow::ClockFormat
+            | QuickRow::StartFresh
             | QuickRow::Turbo
             | QuickRow::Rewind
             | QuickRow::FastForward
@@ -1352,6 +3387,21 @@ impl App {
             | QuickRow::GbaShader
             | QuickRow::GbShader
             | QuickRow::GbPalettes
+            | QuickRow::Brightness
+            | QuickRow::Warmth
+            | QuickRow::LightMode
+            | QuickRow::LightColour
+            | QuickRow::LightEffect
+            | QuickRow::LightLevel
+            | QuickRow::Wifi
+            | QuickRow::Syncthing
+            | QuickRow::Achievements
+            | QuickRow::SaveFormat
+            | QuickRow::AutoTime
+            | QuickRow::Performance
+            | QuickRow::FileTransfer
+            | QuickRow::IdleDim
+            | QuickRow::Hardcore
             | QuickRow::Rumble => {}
         }
     }
@@ -1387,10 +3437,140 @@ impl App {
             }
             QuickRow::Rumble => s.rumble = !s.rumble,
             QuickRow::EjectSave => s.eject_save = !s.eject_save,
+            QuickRow::StartFresh => s.start_fresh = !s.start_fresh,
             QuickRow::Turbo => s.turbo = !s.turbo,
             QuickRow::Rewind => s.rewind = !s.rewind,
             QuickRow::GbPalettes => s.gb_palettes = !s.gb_palettes,
-            QuickRow::DateTime | QuickRow::About | QuickRow::Screen | QuickRow::Game => return,
+            QuickRow::Brightness => {
+                let to = match right {
+                    true => up(s.brightness, 1, BRIGHTNESS_MAX),
+                    false => s.brightness.saturating_sub(1),
+                };
+                if to == s.brightness {
+                    return;
+                }
+                s.brightness = to;
+                if let Some(power) = &mut self.power {
+                    power.set_backlight(to);
+                }
+            }
+            QuickRow::Warmth => {
+                let to = match right {
+                    true => up(s.blue_light, 1, BLUE_LIGHT_MAX),
+                    false => s.blue_light.saturating_sub(1),
+                };
+                if to == s.blue_light {
+                    return;
+                }
+                s.blue_light = to;
+            }
+            QuickRow::LightMode => s.light_mode = s.light_mode.step(right),
+            QuickRow::LightColour => s.light_colour = s.light_colour.step(right),
+            QuickRow::LightEffect => s.light_effect = s.light_effect.step(right),
+            QuickRow::LightLevel => s.light_level = s.light_level.step(right),
+            QuickRow::Bluetooth => {
+                s.bluetooth = !s.bluetooth;
+                self.bt.send(match s.bluetooth {
+                    true => crate::bt::BtJob::Up,
+                    false => crate::bt::BtJob::Down,
+                });
+            }
+            QuickRow::Wifi => {
+                s.wifi = !s.wifi;
+                if s.wifi {
+                    self.net.send(NetJob::WifiUp);
+                } else {
+                    s.syncthing = false;
+                    s.achievements = false;
+                    self.file_server = None;
+                    self.file_pin = None;
+                    crate::cheevos::enable(false);
+                    self.cheevos_login = CheevosLogin::Waiting;
+                    self.net.send(NetJob::WifiDown);
+                }
+            }
+            QuickRow::SaveFormat => s.save_format = s.save_format.step(right),
+            QuickRow::Look => s.look = s.look.other(),
+            QuickRow::Tint => s.tint = s.tint.step(right),
+            QuickRow::MenuSounds => s.menu_sounds = !s.menu_sounds,
+            QuickRow::ClockFormat => {
+                s.clock_12h = !s.clock_12h;
+                slot_ui::set_twelve_hour(s.clock_12h);
+            }
+            QuickRow::FileTransfer => return self.toggle_file_transfer(),
+            QuickRow::AutoTime => {
+                s.auto_time = !s.auto_time;
+                self.clock_asked = false;
+            }
+            QuickRow::Performance => {
+                s.cpu = s.cpu.step(right);
+                let profile = cpu_profile(s.cpu);
+                if let Some(power) = &mut self.power {
+                    power.set_cpu(profile);
+                }
+            }
+            QuickRow::Achievements => {
+                s.achievements = !s.achievements;
+                crate::cheevos::enable(s.achievements);
+                crate::cheevos::set_hardcore(s.hardcore);
+                self.cheevos_login = CheevosLogin::Waiting;
+                if s.achievements && !s.wifi {
+                    s.wifi = true;
+                    self.net.send(NetJob::WifiUp);
+                }
+            }
+            QuickRow::IdleDim => s.idle_dim = !s.idle_dim,
+            QuickRow::Hardcore => {
+                s.hardcore = !s.hardcore;
+                crate::cheevos::set_hardcore(s.hardcore);
+                if s.hardcore {
+                    s.achievements = true;
+                    crate::cheevos::enable(true);
+                    self.cheevos_login = CheevosLogin::Waiting;
+                    if !s.wifi {
+                        s.wifi = true;
+                        self.net.send(NetJob::WifiUp);
+                    }
+                    if matches!(self.phase, Phase::Playing { .. }) {
+                        self.say(
+                            "Hardcore on after eject",
+                            "Rewind, states and cheats stay off",
+                        );
+                    }
+                }
+            }
+            QuickRow::Syncthing => {
+                s.syncthing = !s.syncthing;
+                if s.syncthing {
+                    s.wifi = true;
+                    self.net.send(NetJob::SyncthingStart);
+                } else {
+                    self.net.send(NetJob::SyncthingStop);
+                }
+            }
+            QuickRow::DateTime
+            | QuickRow::About
+            | QuickRow::Screen
+            | QuickRow::Game
+            | QuickRow::Lights
+            | QuickRow::Network
+            | QuickRow::Search
+            | QuickRow::Labels
+            | QuickRow::JoinNetwork
+            | QuickRow::BtDevices
+            | QuickRow::EmulatorSettings
+            | QuickRow::DeviceSync
+            | QuickRow::Files
+            | QuickRow::Tools
+            | QuickRow::System
+            | QuickRow::WifiStatus
+            | QuickRow::Screenshots => return,
+        }
+        if QuickRow::LIGHTS.contains(&row) {
+            let lights = self.lights();
+            if let Some(power) = &mut self.power {
+                power.set_lights(lights);
+            }
         }
         self.persist();
     }
@@ -1604,12 +3784,42 @@ impl App {
 
     pub fn update(&mut self, dt: f32) {
         self.clock += dt as f64 * 1000.0;
+        if !matches!(self.phase, Phase::QuickMenu { .. }) {
+            self.picker = None;
+        }
+        if !matches!(self.phase, Phase::QuickMenu { .. } | Phase::Playing { .. }) {
+            self.menu.clear();
+        }
         if self.name_pending && self.shelf_platform.face.is_some() {
             self.name_pending = false;
             self.shelf_named = Some(self.now());
         }
         self.timers();
         self.poll_link();
+        self.home_tick();
+        if matches!(self.phase, Phase::Networks { scanning: true, .. }) {
+            if let Some(found) = self.net.networks() {
+                self.networks_found(found);
+            }
+        }
+        while let Some(found) = self.bt.devices() {
+            self.bt_found(found);
+        }
+        self.sync_tick();
+        self.files_tick();
+        if slot_ui::twelve_hour() != self.state.clock_12h {
+            slot_ui::set_twelve_hour(self.state.clock_12h);
+        }
+        slot_ui::set_socket_tint(self.state.tint);
+        if self.painted_tint != self.state.tint {
+            self.painted_tint = self.state.tint;
+            self.dropped_faces.extend(self.socket_backdrop.take());
+            let icons = std::mem::take(&mut self.home_icons);
+            self.dropped_faces
+                .extend(icons.into_iter().map(|(t, _, _)| t));
+            self.dropped_faces
+                .extend(self.socket_chrome.drain(..).map(|(t, _, _)| t));
+        }
         let now = self.now();
         let ready = self.core_faces_ready();
         if let Some(picker) = &mut self.core_picker {
@@ -1627,7 +3837,10 @@ impl App {
         let at = self.shelf_at;
         let next = match &mut self.phase {
             Phase::Shelf => {
-                let shelf = &mut self.shelves[at].1;
+                let shelf = match self.shelves.get_mut(at) {
+                    Some((_, shelf)) => shelf,
+                    None => &mut self.fav_shelf,
+                };
                 shelf.tick(now);
                 shelf.update(dt);
                 None
@@ -1687,6 +3900,9 @@ impl App {
         };
         self.screen = (self.screen + step).clamp(0.0, 1.0);
         let docked = self.power_menu.is_none()
+            && !self.socket_look()
+            && self.customize.is_none()
+            && !self.inspect
             && matches!(
                 self.phase,
                 Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }
@@ -1708,7 +3924,24 @@ impl App {
 
     pub fn frame_split(&self) -> Option<f32> {
         match (&self.phase, self.power_menu) {
+            (Phase::Shelf, None) if self.customize.is_some() || self.inspect => {
+                Some(slot_ui::SOCKET_SPLIT)
+            }
+            (Phase::Shelf, None) if self.socket_look() && self.home.is_some() => {
+                Some(slot_ui::HOME_SPLIT)
+            }
+            (Phase::Search, None) if self.socket_look() => Some(slot_ui::SEARCH_SPLIT),
+            (Phase::Password { .. }, None) => Some(slot_ui::SEARCH_SPLIT),
+            (Phase::Files { .. }, None) if self.files_typing().is_some() || self.socket_look() => {
+                Some(slot_ui::SEARCH_SPLIT)
+            }
+            (Phase::QuickMenu { .. }, None) if self.socket_look() => Some(slot_ui::SETTINGS_SPLIT),
             (Phase::QuickMenu { .. }, None) => Some(slot_ui::QUICK_SPLIT),
+            (Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }, None)
+                if self.socket_look() =>
+            {
+                Some(slot_ui::SOCKET_SPLIT)
+            }
             _ => None,
         }
     }
@@ -1738,8 +3971,168 @@ impl App {
         self.timers();
     }
 
+    pub fn say(&mut self, title: impl Into<String>, detail: impl Into<String>) {
+        self.messages.push_back((title.into(), detail.into()));
+    }
+
+    pub fn take_message(&mut self) -> Option<(String, String)> {
+        if self.hud.said(self.now()) == Some(Toast::Message) {
+            return None;
+        }
+        self.messages.pop_front()
+    }
+
+    pub fn show_message(&mut self) {
+        let now = self.now();
+        self.hud.toast(Toast::Message, now);
+    }
+
+    pub fn message_tex(&self) -> Option<TexId> {
+        self.hud.toast_tex(Toast::Message)
+    }
+
+    fn track_play(&mut self) {
+        let now = self.now();
+        let playing = matches!(self.phase, Phase::Playing { .. })
+            && self.game_menu.is_none()
+            && self.home.is_none();
+        if playing {
+            if let Some(last) = self.play_tick {
+                self.play_ms += now.saturating_sub(last).min(PLAY_GAP_MS);
+            }
+            self.play_tick = Some(now);
+        } else {
+            self.play_tick = None;
+        }
+        if playing && self.play_key.is_none() {
+            if let Some(cart) = self.seated_cart() {
+                let key = crate::playtime::key(cart.platform, &cart.stem);
+                let title = cart.stem.clone();
+                if let Some(root) = &self.root {
+                    let secs = crate::playtime::read(root, &key);
+                    if secs >= 60 {
+                        self.say(format!("Played {}", crate::playtime::format(secs)), title);
+                    }
+                }
+                self.play_key = Some(key);
+            }
+        }
+        if self.play_ms >= PLAY_FLUSH_MS || (!playing && self.play_ms >= 1000) {
+            self.flush_play();
+        }
+        if matches!(self.phase, Phase::Shelf | Phase::Ejecting { .. }) {
+            self.flush_play();
+            self.play_key = None;
+        }
+    }
+
+    fn flush_play(&mut self) {
+        let secs = self.play_ms / 1000;
+        if secs == 0 {
+            return;
+        }
+        let (Some(root), Some(key)) = (self.root.clone(), self.play_key.clone()) else {
+            self.play_ms = 0;
+            return;
+        };
+        self.play_ms -= secs * 1000;
+        let _ = std::thread::Builder::new()
+            .name("slot-playtime".into())
+            .spawn(move || {
+                if let Err(e) = crate::playtime::add(&root, &key, secs) {
+                    eprintln!("slot: playtime {key}: {e}");
+                }
+            });
+    }
+
+    fn clock_tick(&mut self) {
+        if !self.state.auto_time {
+            return;
+        }
+        if !self.clock_asked && self.net.online() {
+            self.clock_asked = true;
+            self.net.send(NetJob::SyncClock);
+        }
+        if let Some(utc) = self.net.clock() {
+            self.set_network_time(utc);
+        }
+    }
+
+    /// Takes the time a time server gave. The time zone stays the one picked
+    /// under Date & Time, so only the UTC clock moves.
+    pub fn set_network_time(&mut self, utc: i64) {
+        if let Some(power) = &mut self.power {
+            power.set_clock(utc);
+        }
+        let was_set = self.state.clock_set;
+        self.state.clock_set = true;
+        self.persist();
+        if matches!(
+            self.phase,
+            Phase::SetClock {
+                from_menu: false,
+                ..
+            }
+        ) {
+            self.start();
+        }
+        let local = utc + i64::from(self.state.utc_offset_min) * 60;
+        let (h, m) = (local.rem_euclid(86_400) / 3600, local.rem_euclid(3600) / 60);
+        let detail = match was_set {
+            true => format!("{h:02}:{m:02}"),
+            false => format!("{h:02}:{m:02} UTC, set your time zone in Date & Time"),
+        };
+        self.say("Clock set from the internet", detail);
+    }
+
+    fn cheevos_tick(&mut self) {
+        if !self.state.achievements {
+            return;
+        }
+        if self.cheevos_login == CheevosLogin::Waiting && self.net.online() {
+            if let Some(root) = self.root.clone() {
+                self.cheevos_login = match crate::cheevos::login(&root) {
+                    crate::cheevos::Login::Started => CheevosLogin::Sent,
+                    crate::cheevos::Login::NoAccount => {
+                        self.say(
+                            "RetroAchievements needs an account",
+                            "Put username= and password= in Config/retroachievements.txt",
+                        );
+                        CheevosLogin::NoAccount
+                    }
+                };
+            }
+        }
+        for event in crate::cheevos::take() {
+            if let slot_cheevos::Event::LoggedIn { user, token } = &event {
+                if let Some(root) = &self.root {
+                    if let Err(e) = crate::cheevos::remember(root, user, token) {
+                        eprintln!("slot: cheevos: {e}");
+                    }
+                }
+            }
+            if let Some((title, detail)) = crate::cheevos::words(&event) {
+                self.say(title, detail);
+            }
+        }
+    }
+
+    pub fn net_jobs(&self) -> &[NetJob] {
+        self.net.sent()
+    }
+
     fn timers(&mut self) {
         self.play_hold();
+        self.track_play();
+        while let Some((title, detail)) = self.net.heard() {
+            self.say(title, detail);
+        }
+        while let Some((title, detail)) = self.bt.heard() {
+            self.say(title, detail);
+        }
+        self.cheevos_tick();
+        self.clock_tick();
+        self.idle_tick();
         let offer = self.undo_label();
         if let Some(p) = &mut self.polaroids {
             p.set_undo(offer);
@@ -1812,6 +4205,9 @@ impl App {
     }
 
     pub fn led_state(&self) -> LedState {
+        if matches!(self.phase, Phase::Doze { .. }) {
+            return LedState::Off;
+        }
         let Some(b) = self.battery else {
             return LedState::Running;
         };
@@ -1947,7 +4343,7 @@ impl App {
     }
 
     pub fn draw(&self, out: &mut Vec<Draw>) {
-        if let Some(index) = self.power_menu {
+        if let Some(index) = self.power_menu.filter(|_| !self.socket_look()) {
             self.draw_power_menu(index, out);
             return;
         }
@@ -1992,6 +4388,7 @@ impl App {
                 picker.draw(line, hint, back, out);
                 return;
             }
+            Phase::QuickMenu { row } if self.socket_look() => self.draw_settings(*row, out),
             Phase::QuickMenu { row } => QuickMenu {
                 row: *row,
                 values: QuickRow::ALL.map(|r| self.quick_value(r)),
@@ -1999,6 +4396,38 @@ impl App {
                 faces: self.quick_menu_faces.as_ref(),
             }
             .draw(out),
+            Phase::Shelf if self.customize.is_some() => self.draw_customize(out),
+            Phase::Shelf if self.inspect => self.draw_inspect(out),
+            Phase::Shelf if self.socket_look() => {
+                let screen = self.socket_screen(0.0);
+                screen.draw_backdrop(out);
+                self.shelf().draw_socket(self.now(), 0.0, out);
+                screen.draw_pills(out);
+            }
+            Phase::Inserting { .. } | Phase::Ejecting { .. } if self.socket_look() => {
+                let seat = self.seat();
+                let screen = self.socket_screen(seat);
+                screen.draw_backdrop(out);
+                self.shelf().draw_socket(self.now(), seat, out);
+                screen.draw_pills(out);
+                out.push(Draw::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: OUT_W as f32,
+                    h: OUT_H as f32,
+                    colour: [0.0, 0.0, 0.0, ease(seat)],
+                });
+            }
+            Phase::Playing { .. } if self.screen < 1.0 && self.socket_look() => {
+                self.push_game(out);
+                out.push(Draw::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: OUT_W as f32,
+                    h: OUT_H as f32,
+                    colour: [0.0, 0.0, 0.0, 1.0 - self.screen],
+                });
+            }
             Phase::Shelf => {
                 draw_backdrop(self.wallpaper, out);
                 match (self.core_picker_shown(), self.selected_stem()) {
@@ -2065,12 +4494,193 @@ impl App {
                 });
                 return;
             }
+            Phase::Search => slot_ui::SearchScreen {
+                faces: &self.search_faces,
+                row: self.search.row,
+                col: self.search.col,
+                pick: (!self.search.hits.is_empty()).then_some(self.search.pick),
+                picked_ms: self.now().saturating_sub(self.search_picked_at),
+                light: self.socket_look(),
+                backdrop: self.socket_backdrop,
+            }
+            .draw(out),
+            Phase::Files { .. } => match self.files_typing() {
+                Some(keys) => slot_ui::SearchScreen {
+                    faces: &self.search_faces,
+                    row: keys.row,
+                    col: keys.col,
+                    pick: Some(1),
+                    picked_ms: 0,
+                    light: true,
+                    backdrop: self.socket_backdrop.filter(|_| self.socket_look()),
+                }
+                .draw(out),
+                None => {
+                    let (_, _, cursor) = self.files_window();
+                    slot_ui::FilesScreen {
+                        faces: &self.files_faces,
+                        cursor,
+                        ticked: self.files_ticked_rows(),
+                        progress: self.files_progress(),
+                        light: self.socket_look(),
+                        backdrop: self.socket_backdrop,
+                    }
+                    .draw(out)
+                }
+            },
+            Phase::Password { keys, .. } => slot_ui::SearchScreen {
+                faces: &self.search_faces,
+                row: keys.row,
+                col: keys.col,
+                pick: Some(1),
+                picked_ms: 0,
+                light: true,
+                backdrop: self.socket_backdrop.filter(|_| self.socket_look()),
+            }
+            .draw(out),
+            Phase::Networks { .. } | Phase::Bluetooth { .. } | Phase::Sync { .. } => {
+                match self.socket_backdrop.filter(|_| self.socket_look()) {
+                    Some(tex) => out.push(Draw::Tex {
+                        x: 0.0,
+                        y: 0.0,
+                        w: OUT_W as f32,
+                        h: OUT_H as f32,
+                        tex,
+                        alpha: 1.0,
+                    }),
+                    None => out.push(Draw::Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: OUT_W as f32,
+                        h: OUT_H as f32,
+                        colour: [0.2, 0.2, 0.2, 1.0],
+                    }),
+                }
+                let (_, shown, focus) = match &self.phase {
+                    Phase::Bluetooth {
+                        list,
+                        at,
+                        scanning: false,
+                    } => popup_window(list.len(), *at),
+                    Phase::Bluetooth { .. } => (0, 0, None),
+                    Phase::Sync { .. } => (0, self.sync_rows().len(), None),
+                    _ => self.networks_window(),
+                };
+                slot_ui::SocketPopup {
+                    chrome: &self.socket_chrome,
+                    faces: &self.settings_faces,
+                    options: shown.max(1),
+                    focus: focus.unwrap_or(usize::MAX),
+                }
+                .draw(out);
+            }
         }
         if let Some(picker) = self.core_picker_shown() {
             self.draw_core_picker(&picker, out);
         }
         if let Some(menu) = self.game_menu {
             self.draw_game_menu(menu, out);
+        }
+        if let Some(at) = self
+            .customize
+            .and_then(|c| c.panel.popup)
+            .filter(|_| matches!(self.phase, Phase::Shelf) && self.power_menu.is_none())
+        {
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: slot_ui::Material::ALL.len(),
+                focus: at,
+            }
+            .draw(out);
+        }
+        if let Some((shown, focus)) = self
+            .files_popup_window()
+            .filter(|_| self.power_menu.is_none())
+        {
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: shown.max(1),
+                focus: focus.unwrap_or(usize::MAX),
+            }
+            .draw(out);
+        }
+        if !self.menu.is_empty() && self.power_menu.is_none() {
+            let (_, shown, focus) = self.menu_window();
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: shown.max(1),
+                focus: focus.unwrap_or(usize::MAX),
+            }
+            .draw(out);
+        }
+        if let Some((_, list, at)) = self
+            .picker
+            .as_ref()
+            .filter(|_| matches!(self.phase, Phase::QuickMenu { .. }) && self.power_menu.is_none())
+        {
+            let (_, shown, focus) = popup_window(list.len(), *at);
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: shown,
+                focus: focus.unwrap_or(usize::MAX),
+            }
+            .draw(out);
+        }
+        if let Some((list, at)) = self
+            .recent_popup
+            .as_ref()
+            .filter(|_| matches!(self.phase, Phase::Shelf) && self.power_menu.is_none())
+        {
+            let (_, shown, focus) = popup_window(list.len(), *at);
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: shown.max(1),
+                focus: focus.unwrap_or(usize::MAX),
+            }
+            .draw(out);
+        }
+        if let Some(focus) = self
+            .core_popup
+            .filter(|_| matches!(self.phase, Phase::Shelf) && self.power_menu.is_none())
+        {
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: Core::ALL.len(),
+                focus,
+            }
+            .draw(out);
+        }
+        if let Some(focus) = self.power_menu {
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: PowerChoice::ALL.len(),
+                focus,
+            }
+            .draw(out);
+        }
+        if let Some(panel) = self.home {
+            slot_ui::HomeScreen {
+                icons: &self.home_icons,
+                faces: &self.home_faces,
+                panel,
+                on: self.home_tiles_on(),
+                levels: [
+                    f32::from(self.state.brightness) / f32::from(BRIGHTNESS_MAX),
+                    match self.muted() {
+                        true => 0.0,
+                        false => f32::from(self.level()) / f32::from(VOLUME_MAX),
+                    },
+                ],
+                light: self.socket_look(),
+            }
+            .draw(out);
         }
         self.hud.draw(self.now(), out);
     }
@@ -2448,6 +5058,13 @@ impl App {
         if !self.on_shelf() {
             return;
         }
+        self.left_off = clean.then(|| self.selected_resume()).flatten();
+        if let (Some(root), Some(cart)) = (&self.root, self.shelf().carts.get(self.shelf().index)) {
+            let at = self.wall_secs();
+            if let Err(e) = slot_store::library::note_played(root, cart.platform, &cart.stem, at) {
+                eprintln!("slot: recent: {e}");
+            }
+        }
         let at = self.shelf().index;
         let Some(cart) = self.shelf_mut().carts.get_mut(at).map(|c| {
             c.read_header();
@@ -2498,6 +5115,8 @@ impl App {
         };
         self.end_link();
         self.close_game_menu();
+        self.left_off = None;
+        self.menu.clear();
         self.flush_eject(&cart);
         self.pending = None;
         self.refusal = None;
@@ -2519,13 +5138,14 @@ impl App {
         };
         let (state, sav) = trusted_write(snapshot.as_ref(), state, "eject");
         let state = state.filter(|_| self.state.eject_save);
-        match persist::eject(
+        match persist::eject_as(
             root,
             self.platform,
             self.core,
             stem,
             state.as_deref(),
             sav.as_deref(),
+            self.state.save_format,
         ) {
             Ok(()) => {
                 self.state.cart = None;
@@ -2555,8 +5175,10 @@ impl App {
             _ => None,
         };
         self.polaroids = None;
+        eprintln!("slot: doze at {:.1} ms", crate::boot_time::ms());
         self.phase = Phase::Doze { cart };
         self.dozed_at = self.now();
+        self.set_led(LedState::Off);
         self.radio.ask(RadioJob::Cool);
         if let Some(power) = &mut self.power {
             power.on_close();
@@ -2567,10 +5189,13 @@ impl App {
         let Phase::Doze { cart } = &mut self.phase else {
             return;
         };
+        eprintln!("slot: wake at {:.1} ms", crate::boot_time::ms());
         self.phase = match cart.take() {
             Some(cart) => Phase::Playing { cart },
             None => Phase::Shelf,
         };
+        let lit = self.led_state();
+        self.set_led(lit);
         if let Some(power) = &mut self.power {
             power.on_open();
         }
@@ -2580,7 +5205,30 @@ impl App {
         if !matches!(self.phase, Phase::Doze { .. }) {
             return;
         }
+        if self.power.as_ref().is_some_and(|p| p.can_deep_sleep()) {
+            if matches!(
+                self.power.as_ref().map(|p| p.charge()),
+                Some(Charge::Charging)
+            ) {
+                self.dozed_at = self.now();
+                return;
+            }
+            self.settle_saves();
+            eprintln!("slot: deep sleep at {:.1} ms", crate::boot_time::ms());
+            let slept = self.power.as_mut().is_some_and(|p| p.deep_sleep());
+            if slept {
+                return self.resumed();
+            }
+        }
         self.begin_power_off();
+    }
+
+    /// Back from deep sleep: the screen comes on, and the press that woke
+    /// the handheld is not taken as a new one.
+    pub fn resumed(&mut self) {
+        eprintln!("slot: back from deep sleep");
+        self.power_quiet_until = self.now() + WAKE_GRACE_MS;
+        self.wake();
     }
 
     fn power_press(&mut self) {
@@ -2637,6 +5285,9 @@ impl App {
         let Some(root) = self.root.clone() else {
             return;
         };
+        if self.socket_look() {
+            return self.open_core_popup(&root);
+        }
         let Some(cart) = self.shelf().carts.get(self.shelf().index) else {
             return;
         };
@@ -2652,6 +5303,67 @@ impl App {
         self.core_picker = Some(picker);
         self.shelf_mut().release_hold();
         self.play_held = None;
+    }
+
+    /// The core choice as a Socket popup: the cores in a list, the cursor on
+    /// the one the game runs on now.
+    fn open_core_popup(&mut self, root: &Path) {
+        let Some(cart) = self.shelf().carts.get(self.shelf().index) else {
+            return;
+        };
+        if cart.platform != Platform::Gba {
+            return;
+        }
+        let now = slot_store::core_for(root, &cart.stem);
+        self.core_popup = Core::ALL.iter().position(|c| *c == now);
+        self.shelf_mut().release_hold();
+        self.play_held = None;
+    }
+
+    fn core_popup_input(&mut self, action: Action) {
+        let Some(at) = self.core_popup else {
+            return;
+        };
+        let n = Core::ALL.len();
+        match action {
+            Action::GbaDown(Btn::Up) => self.core_popup = Some((at + n - 1) % n),
+            Action::GbaDown(Btn::Down) => self.core_popup = Some((at + 1) % n),
+            Action::GbaDown(Btn::A) => {
+                self.write_core(Core::ALL[at]);
+                self.core_popup = None;
+                self.say(format!("Plays on {}", Core::ALL[at].text()), "");
+            }
+            Action::GbaDown(Btn::B) | Action::GbaDown(Btn::Start) => self.core_popup = None,
+            _ => {}
+        }
+    }
+
+    /// Puts the selected game in: fresh from its save, keeping where it was
+    /// left to load from the menu, or straight back where it was left.
+    fn insert_or_ask(&mut self) {
+        let fresh = !self.state.eject_save || self.state.start_fresh;
+        self.insert(fresh);
+    }
+
+    /// Where the selected game was left, if it was.
+    fn selected_resume(&self) -> Option<Vec<u8>> {
+        let root = self.root.as_ref()?;
+        let cart = self.shelf().carts.get(self.shelf().index)?;
+        let core = slot_store::core_for_platform(root, &cart.stem, cart.platform);
+        persist::read_resume(root, cart.platform, core, &cart.stem)
+    }
+
+    pub fn can_load_left_off(&self) -> bool {
+        self.left_off.is_some()
+    }
+
+    /// Whether the in-game menu (or the emulator settings) is up.
+    pub fn resume_popup_open(&self) -> bool {
+        !self.menu.is_empty()
+    }
+
+    pub fn core_popup_open(&self) -> bool {
+        self.core_popup.is_some()
     }
 
     fn core_faces_ready(&self) -> bool {
@@ -3020,6 +5732,12 @@ impl App {
 
     pub fn settle_saves(&mut self) {
         self.state_writer.flush();
+        let secs = std::mem::take(&mut self.play_ms) / 1000;
+        if let (Some(root), Some(key), true) = (&self.root, &self.play_key, secs > 0) {
+            if let Err(e) = crate::playtime::add(root, key, secs) {
+                eprintln!("slot: playtime {key}: {e}");
+            }
+        }
         if let Some(h) = self.pending_save.take() {
             let _ = h.join();
         }
@@ -3039,15 +5757,17 @@ impl App {
         let (state, sav) = trusted_write(snapshot.as_ref(), state, "autosave");
         let (root, platform, core, cart) =
             (root.clone(), self.platform, self.core, cart.to_owned());
+        let format = self.state.save_format;
         let failing = self.card_failing.clone();
         let write = move || {
-            let written = persist::flush(
+            let written = persist::flush_as(
                 &root,
                 platform,
                 core,
                 &cart,
                 state.as_deref(),
                 sav.as_deref(),
+                format,
             );
             if let Err(e) = &written {
                 eprintln!("slot: autosave: {e}");
@@ -3075,13 +5795,14 @@ impl App {
             return;
         };
         let (state, sav) = trusted_write(snapshot.as_ref(), state, "flush");
-        let written = persist::flush(
+        let written = persist::flush_as(
             root,
             self.platform,
             self.core,
             cart,
             state.as_deref(),
             sav.as_deref(),
+            self.state.save_format,
         );
         if let Err(e) = &written {
             eprintln!("slot: flush: {e}");
@@ -3108,7 +5829,7 @@ impl App {
     }
 
     fn open_polaroids(&mut self) {
-        if self.link_active() {
+        if self.link_active() || self.state.hardcore {
             return self.refuse();
         }
         let entries = self.entries();
@@ -3201,6 +5922,18 @@ impl App {
                 return false;
             }
         };
+        let _ = snapshot;
+        self.load_bytes(bytes)
+    }
+
+    fn load_bytes(&mut self, bytes: Vec<u8>) -> bool {
+        if !self.may_load_state() {
+            self.refuse();
+            return false;
+        }
+        let Some(snapshot) = &self.snapshot else {
+            return false;
+        };
         let prior = snapshot.state();
         snapshot.load(bytes);
         self.hud.toast(Toast::StateLoaded, self.now());
@@ -3210,7 +5943,34 @@ impl App {
         true
     }
 
+    fn screenshot(&mut self) {
+        let (Some(root), Some(snapshot), Some(stem)) = (
+            self.root.clone(),
+            &self.snapshot,
+            self.seated().map(str::to_owned),
+        ) else {
+            return;
+        };
+        let Some(frame) = snapshot.thumb() else {
+            eprintln!("slot: screenshot: the core gave up no frame");
+            return;
+        };
+        let (w, h) = self.platform.picture();
+        let png = crate::thumb::crop_png(&frame, w, h).unwrap_or(frame);
+        let dir = root.join(SCREENSHOTS);
+        let name = format!("{stem} {}.png", format_stamp(self.wall_secs()));
+        let written = std::fs::create_dir_all(&dir)
+            .and_then(|()| slot_store::atomic_write(&dir.join(&name), &png));
+        match written {
+            Ok(()) => self.say("Screenshot saved", format!("{SCREENSHOTS}/{name}")),
+            Err(e) => eprintln!("slot: screenshot: {e}"),
+        }
+    }
+
     fn save_state(&mut self) {
+        if self.state.hardcore {
+            return self.refuse();
+        }
         let (Some(ring), Some(snapshot)) = (self.ring(), &self.snapshot) else {
             return;
         };
@@ -3471,5 +6231,157 @@ fn draw_menu_rows(
             tex,
             alpha: 1.0,
         });
+    }
+}
+
+/// The search screen's slots, filled for typing a network's password.
+fn password_lines(ssid: &str, keys: &crate::keyboard::Keyboard) -> Vec<(String, bool)> {
+    keyboard_lines(&format!("Join {ssid}"), "Password", "join", keys)
+}
+
+/// The on-screen keyboard's text: a title, what is being typed and what
+/// START does with it.
+fn keyboard_lines(
+    title: &str,
+    label: &str,
+    done: &str,
+    keys: &crate::keyboard::Keyboard,
+) -> Vec<(String, bool)> {
+    let mut lines = vec![(String::new(), false); slot_ui::SEARCH_SLOTS];
+    lines[slot_ui::SEARCH_QUERY] = (title.to_string(), true);
+    lines[slot_ui::search_hit_slot(0)] = (label.to_string(), false);
+    lines[slot_ui::search_hit_slot(1)] = (format!("{}_", keys.text), true);
+    let layers: Vec<String> = crate::keyboard::LAYER_NAMES
+        .iter()
+        .enumerate()
+        .map(|(i, n)| match i == keys.layer {
+            true => format!("[{n}]"),
+            false => n.to_string(),
+        })
+        .collect();
+    lines[slot_ui::search_hit_slot(3)] = (format!("Y  {}", layers.join("  ")), false);
+    for (row, ks) in crate::keyboard::LAYERS[keys.layer].iter().enumerate() {
+        for (col, k) in ks.iter().enumerate() {
+            let lit = (row, col) == (keys.row, keys.col);
+            lines[slot_ui::search_key_slot(row, col)] = (k.to_string(), lit);
+        }
+    }
+    lines[slot_ui::SEARCH_LEGEND] = (
+        format!("A type   B delete   X space   Y shift   START {done}"),
+        false,
+    );
+    lines
+}
+
+/// The first option a popup list shows, how many it shows, and which of them
+/// the cursor is on.
+fn popup_window(len: usize, at: usize) -> (usize, usize, Option<usize>) {
+    if len == 0 {
+        return (0, 0, None);
+    }
+    let shown = len.min(slot_ui::POPUP_OPTIONS);
+    let first = at.saturating_sub(shown - 1).min(len - shown);
+    (first, shown, Some(at - first))
+}
+
+fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue> {
+    match row {
+        QuickRow::FastForward => QuickValue::speed(s.ff_speed),
+        QuickRow::FastForwardSound => Some(QuickValue::flag(s.ff_sound)),
+        QuickRow::ColourCorrection => Some(QuickValue::flag(s.colour_correction)),
+        QuickRow::GbPalettes => Some(QuickValue::flag(s.gb_palettes)),
+        QuickRow::GbaShader => Some(shader_value(s.shader_gba)),
+        QuickRow::GbShader => Some(shader_value(s.shader_gb)),
+        QuickRow::Rumble => Some(QuickValue::flag(s.rumble)),
+        QuickRow::EjectSave => Some(QuickValue::flag(s.eject_save)),
+        QuickRow::StartFresh => Some(QuickValue::flag(s.start_fresh)),
+        QuickRow::Turbo => Some(QuickValue::flag(s.turbo)),
+        QuickRow::Rewind => Some(QuickValue::flag(s.rewind)),
+        QuickRow::Brightness => Some(QuickValue::level(s.brightness)),
+        QuickRow::Warmth => Some(QuickValue::level(s.blue_light)),
+        QuickRow::Wifi => Some(QuickValue::flag(s.wifi)),
+        QuickRow::Syncthing => Some(QuickValue::flag(s.syncthing)),
+        QuickRow::Achievements => Some(QuickValue::flag(s.achievements)),
+        QuickRow::IdleDim => Some(QuickValue::flag(s.idle_dim)),
+        QuickRow::Hardcore => Some(QuickValue::flag(s.hardcore)),
+        QuickRow::AutoTime => Some(QuickValue::flag(s.auto_time)),
+        QuickRow::FileTransfer => None,
+        QuickRow::Performance => Some(match s.cpu {
+            CpuMode::Stock => QuickValue::CpuStock,
+            CpuMode::Saver => QuickValue::CpuSaver,
+            CpuMode::Performance => QuickValue::CpuPerformance,
+        }),
+        QuickRow::ClockFormat => Some(match s.clock_12h {
+            true => QuickValue::Hour12,
+            false => QuickValue::Hour24,
+        }),
+        QuickRow::MenuSounds => Some(QuickValue::flag(s.menu_sounds)),
+        QuickRow::Bluetooth => Some(QuickValue::flag(s.bluetooth)),
+        QuickRow::Tint => Some(match s.tint {
+            slot_store::Tint::Default => QuickValue::TintDefault,
+            slot_store::Tint::Pastel => QuickValue::TintPastel,
+            slot_store::Tint::Sepia => QuickValue::TintSepia,
+        }),
+        QuickRow::Look => Some(match s.look {
+            Look::Classic => QuickValue::LookClassic,
+            Look::Socket => QuickValue::LookSocket,
+        }),
+        QuickRow::SaveFormat => Some(match s.save_format {
+            SaveFormat::RetroArch => QuickValue::RetroArch,
+            SaveFormat::Slot => QuickValue::Slot,
+            SaveFormat::RetroArchCompressed => QuickValue::RetroArchCompressed,
+        }),
+        QuickRow::LightMode => Some(match s.light_mode {
+            LightMode::Battery => QuickValue::Battery,
+            LightMode::Colour => QuickValue::Colour,
+            LightMode::Off => QuickValue::Off,
+        }),
+        QuickRow::LightColour => Some(match s.light_colour {
+            LightColour::White => QuickValue::White,
+            LightColour::Red => QuickValue::Red,
+            LightColour::Orange => QuickValue::Orange,
+            LightColour::Yellow => QuickValue::Yellow,
+            LightColour::Green => QuickValue::Green,
+            LightColour::Cyan => QuickValue::Cyan,
+            LightColour::Blue => QuickValue::Blue,
+            LightColour::Purple => QuickValue::Purple,
+            LightColour::Pink => QuickValue::Pink,
+        }),
+        QuickRow::LightEffect => Some(match s.light_effect {
+            LightEffect::Static => QuickValue::Static,
+            LightEffect::Breathe => QuickValue::Breathe,
+            LightEffect::Blink => QuickValue::Blink,
+            LightEffect::Rainbow => QuickValue::Rainbow,
+            LightEffect::RainbowWave => QuickValue::RainbowWave,
+            LightEffect::Fire => QuickValue::Fire,
+            LightEffect::Ocean => QuickValue::Ocean,
+            LightEffect::Aurora => QuickValue::Aurora,
+            LightEffect::Sunset => QuickValue::Sunset,
+            LightEffect::Candy => QuickValue::Candy,
+            LightEffect::Police => QuickValue::Police,
+            LightEffect::Heartbeat => QuickValue::Heartbeat,
+        }),
+        QuickRow::LightLevel => Some(match s.light_level {
+            LightLevel::Low => QuickValue::Low,
+            LightLevel::Medium => QuickValue::Medium,
+            LightLevel::High => QuickValue::High,
+        }),
+        QuickRow::DateTime
+        | QuickRow::About
+        | QuickRow::Screen
+        | QuickRow::Game
+        | QuickRow::Lights
+        | QuickRow::Network
+        | QuickRow::Search
+        | QuickRow::Labels
+        | QuickRow::JoinNetwork
+        | QuickRow::BtDevices
+        | QuickRow::EmulatorSettings
+        | QuickRow::DeviceSync
+        | QuickRow::Files
+        | QuickRow::Tools
+        | QuickRow::System
+        | QuickRow::WifiStatus
+        | QuickRow::Screenshots => None,
     }
 }

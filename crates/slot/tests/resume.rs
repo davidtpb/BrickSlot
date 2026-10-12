@@ -106,15 +106,71 @@ fn srm_bytes_on_disk_reach_the_cores_save_ram() {
 }
 
 #[test]
-fn a_sav_wins_over_an_srm_when_both_exist() {
+fn an_srm_wins_over_an_old_sav_when_both_exist() {
     let d = common::tmp_root_with_carts(&["Emerald"]);
     std::fs::create_dir_all(d.path().join("Saves/GBA")).unwrap();
     std::fs::write(d.path().join("Saves/GBA/Emerald.srm"), b"srm bytes").unwrap();
     std::fs::write(d.path().join("Saves/GBA/Emerald.sav"), b"sav bytes").unwrap();
     assert_eq!(
         persist::read_sav(d.path(), Platform::Gba, "Emerald").as_deref(),
+        Some(&b"srm bytes"[..])
+    );
+}
+
+#[test]
+fn an_old_sav_is_still_read_when_there_is_no_srm() {
+    let d = common::tmp_root_with_carts(&["Emerald"]);
+    std::fs::create_dir_all(d.path().join("Saves/GBA")).unwrap();
+    std::fs::write(d.path().join("Saves/GBA/Emerald.sav"), b"sav bytes").unwrap();
+    assert_eq!(
+        persist::read_sav(d.path(), Platform::Gba, "Emerald").as_deref(),
         Some(&b"sav bytes"[..])
     );
+}
+
+#[test]
+fn a_save_is_written_as_retroarch_writes_it_and_the_old_sav_kept_aside() {
+    let d = common::tmp_root_with_carts(&["Emerald"]);
+    let saves = d.path().join("Saves/GBA");
+    std::fs::create_dir_all(&saves).unwrap();
+    std::fs::write(saves.join("Emerald.sav"), b"old").unwrap();
+    let ram = vec![0x11u8; 0x8000];
+    let mut blob = ram.clone();
+    blob.extend_from_slice(&[0x22u8; 48]);
+    assert!(persist::write_sav(d.path(), Platform::Gba, "Emerald", &blob).unwrap());
+    assert_eq!(std::fs::read(saves.join("Emerald.srm")).unwrap(), ram);
+    assert_eq!(
+        std::fs::read(saves.join("Emerald.rtc")).unwrap(),
+        vec![0x22u8; 48]
+    );
+    assert!(
+        !saves.join("Emerald.sav").exists(),
+        "the old .sav would shadow nothing but confuse"
+    );
+    assert_eq!(
+        std::fs::read(saves.join("Emerald.sav.bak")).unwrap(),
+        b"old"
+    );
+    assert_eq!(
+        persist::read_sav(d.path(), Platform::Gba, "Emerald"),
+        Some(blob)
+    );
+    assert!(!persist::write_sav(
+        d.path(),
+        Platform::Gba,
+        "Emerald",
+        &persist::read_sav(d.path(), Platform::Gba, "Emerald").unwrap()
+    )
+    .unwrap());
+}
+
+#[test]
+fn only_a_small_tail_past_a_power_of_two_is_taken_for_the_clock() {
+    assert_eq!(persist::split_rtc(&[0u8; 0x20000]).1.len(), 0);
+    assert_eq!(persist::split_rtc(&[0u8; 0x8000 + 48]).1.len(), 48);
+    assert_eq!(persist::split_rtc(&[0u8; 0x8000 + 500]).1.len(), 0);
+    assert_eq!(persist::split_rtc(&[0u8; 48]).1.len(), 0);
+    assert_eq!(persist::split_rtc(&[]).0.len(), 0);
 }
 
 #[test]
@@ -174,7 +230,7 @@ fn a_power_press_does_not_let_a_refusing_mock_overwrite_a_real_save() {
     a.apply(slot_input::Action::PowerPress);
 
     assert_eq!(
-        std::fs::read(d.path().join("Saves/GBA/Emerald.sav")).unwrap(),
+        persist::read_sav(d.path(), Platform::Gba, "Emerald").unwrap(),
         real_sav,
         "the mock's own save ram overwrote the real one"
     );
@@ -217,7 +273,7 @@ fn an_eject_does_not_let_a_refusing_mock_overwrite_a_real_save() {
     a.apply(slot_input::Action::Eject);
 
     assert_eq!(
-        std::fs::read(d.path().join("Saves/GBA/Emerald.sav")).unwrap(),
+        persist::read_sav(d.path(), Platform::Gba, "Emerald").unwrap(),
         real_sav,
         "the mock's own save ram overwrote the real one on eject"
     );
@@ -410,5 +466,72 @@ fn a_stand_in_core_refusing_a_resume_leaves_it_alone() {
     assert!(
         retired_states(d.path(), "Emerald").is_empty(),
         "a stand-in's refusal filed the state away"
+    );
+}
+
+#[test]
+fn the_slot_format_writes_one_sav_with_the_clock_on_the_end_and_sets_the_srm_aside() {
+    let d = common::tmp_root_with_carts(&["Crystal"]);
+    let saves = d.path().join("Saves/GBA");
+    std::fs::create_dir_all(&saves).unwrap();
+    std::fs::write(saves.join("Crystal.srm"), b"ra").unwrap();
+    std::fs::write(saves.join("Crystal.rtc"), b"clock").unwrap();
+    let mut blob = vec![0x33u8; 0x8000];
+    blob.extend_from_slice(&[0x44u8; 48]);
+    assert!(persist::write_sav_as(
+        d.path(),
+        Platform::Gba,
+        "Crystal",
+        &blob,
+        slot_store::SaveFormat::Slot
+    )
+    .unwrap());
+    assert_eq!(std::fs::read(saves.join("Crystal.sav")).unwrap(), blob);
+    assert!(!saves.join("Crystal.srm").exists() && !saves.join("Crystal.rtc").exists());
+    assert_eq!(std::fs::read(saves.join("Crystal.srm.bak")).unwrap(), b"ra");
+    assert_eq!(
+        std::fs::read(saves.join("Crystal.rtc.bak")).unwrap(),
+        b"clock"
+    );
+    assert_eq!(
+        persist::read_sav(d.path(), Platform::Gba, "Crystal"),
+        Some(blob.clone())
+    );
+
+    assert!(
+        persist::write_sav_as(
+            d.path(),
+            Platform::Gba,
+            "Crystal",
+            &blob,
+            slot_store::SaveFormat::RetroArch
+        )
+        .unwrap(),
+        "switching back left the save in the old format"
+    );
+    assert_eq!(
+        std::fs::read(saves.join("Crystal.srm")).unwrap(),
+        vec![0x33u8; 0x8000]
+    );
+    assert!(!saves.join("Crystal.sav").exists());
+}
+
+#[test]
+fn a_sav_newer_than_the_srm_beside_it_is_the_one_read() {
+    let d = common::tmp_root_with_carts(&["Emerald"]);
+    let saves = d.path().join("Saves/GBA");
+    std::fs::create_dir_all(&saves).unwrap();
+    std::fs::write(saves.join("Emerald.srm"), b"older").unwrap();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options()
+        .write(true)
+        .open(saves.join("Emerald.srm"))
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    std::fs::write(saves.join("Emerald.sav"), b"newer").unwrap();
+    assert_eq!(
+        persist::read_sav(d.path(), Platform::Gba, "Emerald").as_deref(),
+        Some(&b"newer"[..])
     );
 }

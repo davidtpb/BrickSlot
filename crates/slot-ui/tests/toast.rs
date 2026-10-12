@@ -1,6 +1,7 @@
 use slot_store::GbPalette;
 use slot_ui::{
-    toast_face, toast_rect, Draw, Hud, HudKind, Toast, ALARM_BAND_H, OUT_H, OUT_W, PLATE_H,
+    toast_box, toast_face, toast_rect, Draw, Hud, HudKind, Toast, ALARM_BAND_H, OUT_H, OUT_W,
+    PLATE_H,
 };
 
 #[test]
@@ -47,6 +48,8 @@ fn the_banner_says_what_happened_and_never_what_is_on_screen() {
         ],
         "a banner was added or dropped: every face is uploaded by its place in this list"
     );
+    assert_eq!(all.last(), Some(&Toast::Message));
+    let all = &all[..all.len() - 1];
     assert_eq!(
         all[15..],
         GbPalette::all().map(Toast::Palette).collect::<Vec<_>>()[..],
@@ -74,7 +77,10 @@ fn no_toast_is_shrunk_to_fit_its_box() {
         (first, last)
     };
     let (top, bottom) = rows(Toast::StateSaved);
-    for t in Toast::all().into_iter().filter(|t| !t.alarm()) {
+    for t in Toast::all()
+        .into_iter()
+        .filter(|t| !t.alarm() && *t != Toast::Message)
+    {
         let (a, b) = rows(t);
         assert!(
             a.abs_diff(top) <= 1 && b.abs_diff(bottom) <= 1,
@@ -281,4 +287,15 @@ fn the_card_alarm_inks_both_of_its_lines() {
     let half = f.h / 2;
     assert!(inked(0..half), "the first line is blank");
     assert!(inked(half + 8..f.h), "the second line is blank");
+}
+
+#[test]
+fn a_message_is_drawn_into_the_box_its_slot_was_cut_for() {
+    let f = slot_ui::message_face("Achievement Unlocked", "Beat the first gym");
+    assert_eq!((f.w, f.h), toast_box(Toast::Message));
+    assert_eq!(
+        (f.w, f.h),
+        (toast_face(Toast::Message).w, toast_face(Toast::Message).h)
+    );
+    assert!(f.rgba.chunks(4).any(|px| px[3] > 0), "the message is blank");
 }

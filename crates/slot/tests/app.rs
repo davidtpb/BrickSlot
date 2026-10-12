@@ -584,12 +584,15 @@ fn a_cart_in_flight_is_not_also_left_standing_on_the_shelf() {
     let carts = out
         .iter()
         .filter(|d| match **d {
-            Draw::Rect { w, h, .. } | Draw::Tex { w, h, .. } | Draw::Turned { w, h, .. } => {
+            Draw::Rect { w, h, .. }
+            | Draw::Tex { w, h, .. }
+            | Draw::Turned { w, h, .. }
+            | Draw::Part { w, h, .. } => {
                 w > 200.0
                     && w <= CART_W as f32 + 0.01
                     && (w / h - CART_W as f32 / CART_H as f32).abs() < 0.05
             }
-            Draw::Game | Draw::Shot { .. } => false,
+            Draw::Game | Draw::Shot { .. } | Draw::Warp { .. } => false,
         })
         .count();
     assert_eq!(
@@ -742,6 +745,12 @@ fn both_b_and_menu_take_the_about_screen_back_to_the_quick_menu() {
     ] {
         let (mut s, _motor) = common::session_with_platform(d.path());
         s.app_mut().apply(slot_input::Action::QuickMenu);
+        for _ in 0..slot_ui::QuickRow::System.position() {
+            s.app_mut()
+                .apply(slot_input::Action::GbaDown(slot_input::Btn::Down));
+        }
+        s.app_mut()
+            .apply(slot_input::Action::GbaDown(slot_input::Btn::A));
         for _ in 0..slot_ui::QuickRow::About.position() {
             s.app_mut()
                 .apply(slot_input::Action::GbaDown(slot_input::Btn::Down));
@@ -2022,6 +2031,7 @@ fn a_chorded_select_never_reaches_the_pad() {
 #[test]
 fn a_latched_fast_forward_does_not_outlive_the_cart() {
     let d = common::tmp_root_with_carts(&["Emerald", "Zzz"]);
+    common::taps_resume(d.path());
     let mut s = session_playing(d.path());
     s.feed([RawEvent::Down(Btn::R2)], 1000);
     s.feed([RawEvent::Up(Btn::R2)], 1050);

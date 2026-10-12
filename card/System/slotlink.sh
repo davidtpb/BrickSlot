@@ -15,6 +15,7 @@ LINK_RESCAN="${AGS_LINK_RESCAN:-2}"
 LINK_AP_GLOBAL="${AGS_LINK_AP_GLOBAL:-}"
 LINK_TRACE="${AGS_LINK_TRACE:-}"
 LINK_MARK="$RUN/slotlink.session"
+NET_SH="${AGS_NET_SH:-$(dirname "$0")/net.sh}"
 
 WPA_SUPPLICANT="${AGS_WPA_SUPPLICANT:-wpa_supplicant}"
 WPA_CLI="${AGS_WPA_CLI:-wpa_cli}"
@@ -58,6 +59,11 @@ supplicant_stop() {
 	return 0
 }
 
+net() {
+	[ -f "$NET_SH" ] && sh "$NET_SH" "$1" > /dev/null 2>&1
+	return 0
+}
+
 link_clear() {
 	supplicant_stop "$RUN/wpa_ap" wlan1
 	$IP addr flush dev wlan1 2>/dev/null || true
@@ -96,6 +102,7 @@ link_wait() {
 link_host() {
 	echo "$$" > "$LINK_MARK"
 	trace "host: asked"
+	net pause
 	link_clear
 	wifi_up
 	wait_dev wlan1 4 || return 1
@@ -146,6 +153,7 @@ link_sta_conf() {
 link_join() {
 	echo "$$" > "$LINK_MARK"
 	trace "join: asked"
+	net pause
 	link_clear
 	wifi_up
 	[ -d "$NET/wlan0" ] || return 1
@@ -184,6 +192,7 @@ link_down() {
 	$IP link set wlan1 down 2>/dev/null || true
 	rmdir "$RUN/wpa_ap" 2>/dev/null || true
 	/bin/rm -f "$LINK_MARK"
+	net resume
 	return 0
 }
 

@@ -224,8 +224,8 @@ fn one_stem_on_two_platforms_writes_two_saves() {
         persist::read_sav(d.path(), Platform::Gb, "Tetris").unwrap(),
         vec![2u8; 8]
     );
-    assert!(d.path().join("Saves/GBA/Tetris.sav").is_file());
-    assert!(d.path().join("Saves/GB/Tetris.sav").is_file());
+    assert!(d.path().join("Saves/GBA/Tetris.srm").is_file());
+    assert!(d.path().join("Saves/GB/Tetris.srm").is_file());
 }
 
 #[test]

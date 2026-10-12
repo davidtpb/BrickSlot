@@ -267,3 +267,45 @@ fn a_cart_sound_is_silent_when_muted() {
     let muted = sfx_peak(|s| s.app_mut().apply(slot_input::Action::MuteToggle));
     assert_eq!(muted, 0, "the cart was heard through a mute");
 }
+
+#[test]
+fn the_menu_sounds_are_short_and_quiet() {
+    for s in [Sfx::Move, Sfx::Select, Sfx::Back] {
+        let v = s.render(48_000);
+        assert!(!v.is_empty(), "{s:?} is silent");
+        assert!(v.len() / 2 <= 48_000 / 10, "{s:?} is longer than 100 ms");
+        let peak = v.iter().map(|x| x.unsigned_abs()).max().unwrap();
+        assert!(peak < 8_000, "{s:?} is loud: {peak}");
+        assert_eq!(s.lead(), 0.0);
+    }
+}
+
+#[test]
+fn moving_on_the_shelf_ticks_and_a_dead_press_is_quiet() {
+    let d = tmp_root_with_carts(&["Fusion", "Pokémon Emerald", "Zero Mission"]);
+    let mut st = slot_store::read_slot_state(d.path());
+    st.clock_set = true;
+    slot_store::write_slot_state(d.path(), &st).unwrap();
+    let mut a = slot::app::App::boot(d.path());
+    a.take_sfx();
+    a.apply(slot_input::Action::GbaDown(slot_input::Btn::Right));
+    assert_eq!(a.take_sfx(), Some(Sfx::Move));
+    a.apply(slot_input::Action::GbaUp(slot_input::Btn::Right));
+    a.apply(slot_input::Action::GbaDown(slot_input::Btn::B));
+    assert_eq!(a.take_sfx(), None, "B on the shelf does nothing");
+    a.apply(slot_input::Action::QuickMenu);
+    assert_eq!(a.take_sfx(), Some(Sfx::Back));
+}
+
+#[test]
+fn menu_sounds_can_be_switched_off() {
+    let d = tmp_root_with_carts(&["Fusion", "Pokémon Emerald", "Zero Mission"]);
+    let mut st = slot_store::read_slot_state(d.path());
+    st.clock_set = true;
+    st.menu_sounds = false;
+    slot_store::write_slot_state(d.path(), &st).unwrap();
+    let mut a = slot::app::App::boot(d.path());
+    a.take_sfx();
+    a.apply(slot_input::Action::GbaDown(slot_input::Btn::Right));
+    assert_eq!(a.take_sfx(), None);
+}

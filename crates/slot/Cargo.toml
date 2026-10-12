@@ -12,6 +12,7 @@ device = ["slot-gfx/device"]
 
 [dependencies]
 slot-gfx = { path = "../slot-gfx", default-features = false }
+slot-cheevos = { path = "../slot-cheevos" }
 slot-input = { path = "../slot-input" }
 slot-power = { path = "../slot-power" }
 slot-retro = { path = "../slot-retro" }
@@ -24,6 +25,8 @@ libloading = { workspace = true }
 libc = { workspace = true }
 lz4_flex = { workspace = true }
 png = { workspace = true }
+unicode-normalization = { workspace = true }
+ureq = { version = "2", default-features = false, features = ["tls"] }
 
 [dev-dependencies]
 slot-gfx = { path = "../slot-gfx", default-features = false, features = ["test-support"] }

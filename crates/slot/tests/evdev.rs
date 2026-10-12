@@ -284,6 +284,68 @@ fn the_d_pad_arrives_as_a_hat_rather_than_as_keys() {
 }
 
 #[test]
+fn the_left_stick_is_a_d_pad_past_its_deadzone() {
+    use slot::input::evdev::{Ev, Stick, ABS_X, ABS_Y, EV_ABS};
+    let mut stick = Stick::new(0, 255, 16, 0, 255, 16);
+    let ev = |code, value| Ev {
+        kind: EV_ABS,
+        code,
+        value,
+    };
+    assert_eq!(stick.feed(ev(ABS_X, 128)), vec![]);
+    assert_eq!(stick.feed(ev(ABS_X, 220)), vec![RawEvent::Down(Btn::Right)]);
+    assert_eq!(stick.feed(ev(ABS_X, 128)), vec![RawEvent::Up(Btn::Right)]);
+    assert_eq!(stick.feed(ev(ABS_Y, 20)), vec![RawEvent::Down(Btn::Up)]);
+}
+
+#[test]
+fn a_stick_axis_resting_pushed_holds_nothing_until_it_comes_back() {
+    use slot::input::evdev::{Ev, Stick, ABS_X, EV_ABS};
+    // X rests jammed at its minimum, as an axis with no stick behind it can.
+    let mut stick = Stick::new(0, 255, 16, 0, 255, 16).rest(0, 128);
+    let ev = |value| Ev {
+        kind: EV_ABS,
+        code: ABS_X,
+        value,
+    };
+    assert_eq!(stick.feed(ev(0)), vec![], "Left was held from the start");
+    assert_eq!(stick.feed(ev(2)), vec![]);
+    // Once it has been to the middle it works as normal.
+    assert_eq!(stick.feed(ev(128)), vec![]);
+    assert_eq!(stick.feed(ev(10)), vec![RawEvent::Down(Btn::Left)]);
+    assert_eq!(stick.feed(ev(128)), vec![RawEvent::Up(Btn::Left)]);
+}
+
+#[test]
+fn a_drifted_stick_is_centred_where_it_rests() {
+    use slot::input::evdev::{Ev, Stick, ABS_X, EV_ABS};
+    // Rests at 160 of 0..255: still inside the deadzone, but off-centre.
+    let mut stick = Stick::new(0, 255, 0, 0, 255, 0).rest(160, 128);
+    let ev = |value| Ev {
+        kind: EV_ABS,
+        code: ABS_X,
+        value,
+    };
+    assert_eq!(stick.feed(ev(170)), vec![]);
+    assert_eq!(stick.feed(ev(210)), vec![RawEvent::Down(Btn::Right)]);
+}
+
+#[test]
+fn a_stick_at_the_edge_of_its_deadzone_does_not_chatter() {
+    use slot::input::evdev::{Ev, Stick, ABS_X, EV_ABS};
+    let mut stick = Stick::new(0, 255, 0, 0, 255, 0);
+    let ev = |value| Ev {
+        kind: EV_ABS,
+        code: ABS_X,
+        value,
+    };
+    // Dead is 42 either side of 127.
+    assert_eq!(stick.feed(ev(170)), vec![RawEvent::Down(Btn::Right)]);
+    assert_eq!(stick.feed(ev(166)), vec![], "a wobble let go of Right");
+    assert_eq!(stick.feed(ev(150)), vec![RawEvent::Up(Btn::Right)]);
+}
+
+#[test]
 fn a_hat_swung_end_to_end_releases_before_it_presses() {
     let mut hat = slot::input::evdev::Hat::default();
     let ev = |code, value| slot::input::evdev::Ev {
@@ -329,4 +391,110 @@ fn a_hat_axis_is_traced_as_the_axis_it_is() {
     );
     assert!(line.contains("hat0y"), "{line}");
     assert!(!line.contains("ignored"), "{line}");
+}
+
+#[test]
+fn a_trimui_pad_is_recognised_by_its_name() {
+    use slot::input::evdev::Keymap;
+    assert_eq!(Keymap::for_device("TRIMUI Player1", None), Keymap::TrimUi);
+    assert_eq!(Keymap::for_device("H700 Gamepad", None), Keymap::Anbernic);
+    assert_eq!(
+        Keymap::for_device("H700 Gamepad", Some("trimui")),
+        Keymap::TrimUi
+    );
+    assert_eq!(
+        Keymap::for_device("TRIMUI Player1", Some("anbernic")),
+        Keymap::Anbernic
+    );
+    assert_eq!(
+        Keymap::for_device("TRIMUI Player1", Some("nonsense")),
+        Keymap::TrimUi
+    );
+}
+
+#[test]
+fn the_trimui_face_buttons_land_where_they_are_printed() {
+    use slot::input::evdev::Keymap;
+    let expected = [
+        (0x130, Btn::B),
+        (0x131, Btn::A),
+        (0x133, Btn::Y),
+        (0x134, Btn::X),
+        (0x136, Btn::L1),
+        (0x137, Btn::R1),
+        (0x13a, Btn::Select),
+        (0x13b, Btn::Start),
+        (0x13c, Btn::Menu),
+        (115, Btn::VolUp),
+        (114, Btn::VolDown),
+        (116, Btn::Power),
+    ];
+    for (code, want) in expected {
+        assert_eq!(Keymap::TrimUi.btn(code), Some(want), "code {code:#x}");
+    }
+    let down = decode(&packet(EV_KEY, 0x131, 1)).and_then(|ev| Keymap::TrimUi.to_raw(ev));
+    assert_eq!(down, Some(RawEvent::Down(Btn::A)));
+}
+
+#[test]
+fn trimui_triggers_press_past_half_travel_and_release_below_it() {
+    use slot::input::evdev::{Ev, Triggers, ABS_RZ, ABS_Z, EV_ABS};
+    let ev = |code, value| Ev {
+        kind: EV_ABS,
+        code,
+        value,
+    };
+    let mut t = Triggers::new(128);
+    assert_eq!(t.feed(ev(ABS_Z, 40)), None);
+    assert_eq!(t.feed(ev(ABS_Z, 255)), Some(RawEvent::Down(Btn::L2)));
+    assert_eq!(t.feed(ev(ABS_Z, 200)), None);
+    assert_eq!(t.feed(ev(ABS_Z, 0)), Some(RawEvent::Up(Btn::L2)));
+    assert_eq!(t.feed(ev(ABS_RZ, 255)), Some(RawEvent::Down(Btn::R2)));
+    assert_eq!(t.feed(ev(0x10, 1)), None, "a hat is not a trigger");
+}
+
+#[test]
+fn each_trimui_trigger_uses_its_own_halfway_point() {
+    use slot::input::evdev::{Ev, Triggers, ABS_RZ, ABS_Z, EV_ABS};
+    let ev = |code, value| Ev {
+        kind: EV_ABS,
+        code,
+        value,
+    };
+    let mut t = Triggers::axes(128, 2000);
+    assert_eq!(t.feed(ev(ABS_Z, 128)), Some(RawEvent::Down(Btn::L2)));
+    assert_eq!(
+        t.feed(ev(ABS_RZ, 1999)),
+        None,
+        "R2 is still below its own half"
+    );
+    assert_eq!(t.feed(ev(ABS_RZ, 2000)), Some(RawEvent::Down(Btn::R2)));
+}
+
+#[test]
+fn digital_trimui_l2_r2_are_ignored_so_the_analog_axes_own_them() {
+    use slot::input::evdev::Keymap;
+    let key =
+        |code, value| decode(&packet(EV_KEY, code, value)).and_then(|ev| Keymap::TrimUi.to_raw(ev));
+    assert_eq!(key(0x138, 1), None);
+    assert_eq!(key(0x139, 1), None);
+    assert_eq!(Keymap::TrimUi.btn(0x138), Some(Btn::L2));
+    assert_eq!(Keymap::TrimUi.btn(0x139), Some(Btn::R2));
+}
+
+#[test]
+fn a_trimui_switch_event_is_never_taken_for_a_lid() {
+    use slot::input::evdev::Keymap;
+    let shut = decode(&packet(EV_SW, SW_LID, 1)).unwrap();
+    assert_eq!(Keymap::TrimUi.to_raw(shut), None, "the Brick has no lid");
+    assert_eq!(
+        Keymap::Anbernic.to_raw(shut),
+        Some(RawEvent::Down(Btn::Lid))
+    );
+}
+
+#[test]
+fn the_brick_pros_home_button_is_home() {
+    use slot::input::evdev::Keymap;
+    assert_eq!(Keymap::TrimUi.btn(172), Some(Btn::Home));
 }

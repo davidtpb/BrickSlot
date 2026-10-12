@@ -26,6 +26,30 @@ impl StubSink {
         sink
     }
 
+    /// A stand-in for a sound card that plays what it is given at the rate
+    /// it was opened at, so what is queued drains as it would on a device.
+    pub fn realtime() -> Self {
+        let sink = StubSink::new();
+        let ring = sink.ring.clone();
+        std::thread::spawn(move || {
+            let mut last = std::time::Instant::now();
+            let mut owed = 0.0f64;
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                let now = std::time::Instant::now();
+                owed += now.duration_since(last).as_secs_f64() * f64::from(ring.sample_rate());
+                last = now;
+                let frames = (owed as usize).min(ring.queued_frames());
+                owed -= frames as f64;
+                owed = owed.min(f64::from(ring.sample_rate()) / 10.0);
+                if frames > 0 {
+                    ring.fill(&mut vec![0i16; frames * 2]);
+                }
+            }
+        });
+        sink
+    }
+
     pub fn muted(&self) -> bool {
         self.ring.muted()
     }

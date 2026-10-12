@@ -20,10 +20,44 @@ pub enum QuickRow {
     Turbo,
     Rewind,
     GbPalettes,
+    Lights,
+    LightMode,
+    LightColour,
+    LightEffect,
+    LightLevel,
+    Brightness,
+    Warmth,
+    Network,
+    Wifi,
+    Syncthing,
+    Achievements,
+    SaveFormat,
+    AutoTime,
+    Search,
+    Performance,
+    Labels,
+    FileTransfer,
+    Look,
+    Tint,
+    MenuSounds,
+    Bluetooth,
+    BtDevices,
+    EmulatorSettings,
+    DeviceSync,
+    Files,
+    ClockFormat,
+    JoinNetwork,
+    StartFresh,
+    WifiStatus,
+    Tools,
+    System,
+    IdleDim,
+    Hardcore,
+    Screenshots,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 14] = [
+    pub const ALL: [QuickRow; 48] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -38,29 +72,111 @@ impl QuickRow {
         QuickRow::Turbo,
         QuickRow::Rewind,
         QuickRow::GbPalettes,
+        QuickRow::Lights,
+        QuickRow::LightMode,
+        QuickRow::LightColour,
+        QuickRow::LightEffect,
+        QuickRow::LightLevel,
+        QuickRow::Brightness,
+        QuickRow::Warmth,
+        QuickRow::Network,
+        QuickRow::Wifi,
+        QuickRow::Syncthing,
+        QuickRow::Achievements,
+        QuickRow::SaveFormat,
+        QuickRow::AutoTime,
+        QuickRow::Search,
+        QuickRow::Performance,
+        QuickRow::Labels,
+        QuickRow::FileTransfer,
+        QuickRow::Look,
+        QuickRow::Tint,
+        QuickRow::MenuSounds,
+        QuickRow::Bluetooth,
+        QuickRow::BtDevices,
+        QuickRow::EmulatorSettings,
+        QuickRow::DeviceSync,
+        QuickRow::ClockFormat,
+        QuickRow::JoinNetwork,
+        QuickRow::StartFresh,
+        QuickRow::WifiStatus,
+        QuickRow::Tools,
+        QuickRow::System,
+        QuickRow::Files,
+        QuickRow::IdleDim,
+        QuickRow::Hardcore,
+        QuickRow::Screenshots,
     ];
 
-    pub const MAIN: [QuickRow; 4] = [
+    pub const MAIN: [QuickRow; 7] = [
+        QuickRow::Search,
         QuickRow::Screen,
         QuickRow::Game,
-        QuickRow::DateTime,
-        QuickRow::About,
+        QuickRow::Lights,
+        QuickRow::Network,
+        QuickRow::Tools,
+        QuickRow::System,
     ];
 
-    pub const SCREEN: [QuickRow; 4] = [
+    pub const SCREEN: [QuickRow; 9] = [
+        QuickRow::Brightness,
+        QuickRow::Warmth,
+        QuickRow::Look,
+        QuickRow::Tint,
         QuickRow::GbaShader,
         QuickRow::GbShader,
         QuickRow::ColourCorrection,
         QuickRow::GbPalettes,
+        QuickRow::IdleDim,
     ];
 
-    pub const GAME: [QuickRow; 6] = [
+    pub const GAME: [QuickRow; 10] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Rewind,
         QuickRow::Turbo,
         QuickRow::Rumble,
+        QuickRow::StartFresh,
         QuickRow::EjectSave,
+        QuickRow::SaveFormat,
+        QuickRow::Performance,
+        QuickRow::Hardcore,
+    ];
+
+    pub const LIGHTS: [QuickRow; 4] = [
+        QuickRow::LightMode,
+        QuickRow::LightColour,
+        QuickRow::LightEffect,
+        QuickRow::LightLevel,
+    ];
+
+    pub const NETWORK: [QuickRow; 5] = [
+        QuickRow::Wifi,
+        QuickRow::WifiStatus,
+        QuickRow::JoinNetwork,
+        QuickRow::Bluetooth,
+        QuickRow::BtDevices,
+    ];
+
+    /// What the frontend does besides play: emulator settings, moving
+    /// files and progress about, achievements and labels.
+    pub const TOOLS: [QuickRow; 8] = [
+        QuickRow::Files,
+        QuickRow::EmulatorSettings,
+        QuickRow::DeviceSync,
+        QuickRow::FileTransfer,
+        QuickRow::Syncthing,
+        QuickRow::Achievements,
+        QuickRow::Labels,
+        QuickRow::Screenshots,
+    ];
+
+    pub const SYSTEM: [QuickRow; 5] = [
+        QuickRow::DateTime,
+        QuickRow::AutoTime,
+        QuickRow::ClockFormat,
+        QuickRow::MenuSounds,
+        QuickRow::About,
     ];
 
     pub fn index(self) -> usize {
@@ -68,35 +184,42 @@ impl QuickRow {
     }
 
     pub fn page(self) -> &'static [QuickRow] {
-        match self {
-            QuickRow::GbaShader
-            | QuickRow::GbShader
-            | QuickRow::ColourCorrection
-            | QuickRow::GbPalettes => &QuickRow::SCREEN,
-            QuickRow::FastForward
-            | QuickRow::FastForwardSound
-            | QuickRow::Rewind
-            | QuickRow::Turbo
-            | QuickRow::Rumble
-            | QuickRow::EjectSave => &QuickRow::GAME,
-            _ => &QuickRow::MAIN,
-        }
+        [
+            &QuickRow::SCREEN[..],
+            &QuickRow::GAME,
+            &QuickRow::LIGHTS,
+            &QuickRow::NETWORK,
+            &QuickRow::TOOLS,
+            &QuickRow::SYSTEM,
+        ]
+        .into_iter()
+        .find(|page| page.contains(&self))
+        .unwrap_or(&QuickRow::MAIN)
     }
 
+    /// The categories on the first page, and the page each opens.
+    const CATEGORIES: [(QuickRow, &'static [QuickRow]); 6] = [
+        (QuickRow::Screen, &QuickRow::SCREEN),
+        (QuickRow::Game, &QuickRow::GAME),
+        (QuickRow::Lights, &QuickRow::LIGHTS),
+        (QuickRow::Network, &QuickRow::NETWORK),
+        (QuickRow::Tools, &QuickRow::TOOLS),
+        (QuickRow::System, &QuickRow::SYSTEM),
+    ];
+
     pub fn parent(self) -> Option<QuickRow> {
-        match self.page()[0] {
-            QuickRow::GbaShader => Some(QuickRow::Screen),
-            QuickRow::FastForward => Some(QuickRow::Game),
-            _ => None,
-        }
+        let page = self.page();
+        QuickRow::CATEGORIES
+            .iter()
+            .find(|(_, p)| p[0] == page[0])
+            .map(|(c, _)| *c)
     }
 
     pub fn child(self) -> Option<QuickRow> {
-        match self {
-            QuickRow::Screen => Some(QuickRow::SCREEN[0]),
-            QuickRow::Game => Some(QuickRow::GAME[0]),
-            _ => None,
-        }
+        QuickRow::CATEGORIES
+            .iter()
+            .find(|(c, _)| *c == self)
+            .map(|(_, p)| p[0])
     }
 
     pub fn position(self) -> usize {
@@ -119,13 +242,63 @@ impl QuickRow {
             QuickRow::Turbo => "Turbo Buttons",
             QuickRow::Rewind => "Rewind",
             QuickRow::GbPalettes => "GB Palettes",
+            QuickRow::Lights => "Lights",
+            QuickRow::LightMode => "Lights",
+            QuickRow::LightColour => "Light Color",
+            QuickRow::LightEffect => "Light Effect",
+            QuickRow::LightLevel => "Light Brightness",
+            QuickRow::Brightness => "Brightness",
+            QuickRow::Warmth => "Warmth",
+            QuickRow::Network => "Network",
+            QuickRow::Wifi => "Wi-Fi",
+            QuickRow::Syncthing => "Syncthing",
+            QuickRow::Achievements => "RetroAchievements",
+            QuickRow::SaveFormat => "Save Format",
+            QuickRow::AutoTime => "Set Time Automatically",
+            QuickRow::Search => "Search Games",
+            QuickRow::Performance => "Performance",
+            QuickRow::Look => "Style",
+            QuickRow::Tint => "Theme",
+            QuickRow::MenuSounds => "Menu Sounds",
+            QuickRow::ClockFormat => "Clock",
+            QuickRow::Labels => "Download Labels",
+            QuickRow::JoinNetwork => "Join Network",
+            QuickRow::StartFresh => "Start Fresh",
+            QuickRow::WifiStatus => "Wi-Fi Status",
+            QuickRow::Bluetooth => "Bluetooth",
+            QuickRow::BtDevices => "Bluetooth Devices",
+            QuickRow::EmulatorSettings => "Emulator Settings",
+            QuickRow::DeviceSync => "Device Sync",
+            QuickRow::Files => "Files",
+            QuickRow::FileTransfer => "File Transfer",
+            QuickRow::Tools => "Tools",
+            QuickRow::System => "System",
+            QuickRow::IdleDim => "Idle Dim",
+            QuickRow::Hardcore => "Hardcore",
+            QuickRow::Screenshots => "Screenshots",
         }
     }
 
     pub fn opens(self) -> bool {
         matches!(
             self,
-            QuickRow::DateTime | QuickRow::About | QuickRow::Screen | QuickRow::Game
+            QuickRow::DateTime
+                | QuickRow::About
+                | QuickRow::Screen
+                | QuickRow::Game
+                | QuickRow::Lights
+                | QuickRow::Network
+                | QuickRow::Tools
+                | QuickRow::System
+                | QuickRow::Search
+                | QuickRow::Labels
+                | QuickRow::JoinNetwork
+                | QuickRow::WifiStatus
+                | QuickRow::BtDevices
+                | QuickRow::EmulatorSettings
+                | QuickRow::DeviceSync
+                | QuickRow::Files
+                | QuickRow::Screenshots
         )
     }
 
@@ -152,10 +325,72 @@ pub enum QuickValue {
     Grid,
     Dot,
     Simpletex,
+    Battery,
+    Colour,
+    White,
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Cyan,
+    Blue,
+    Purple,
+    Pink,
+    Static,
+    Breathe,
+    Blink,
+    Rainbow,
+    Low,
+    Medium,
+    High,
+    Level0,
+    Level1,
+    Level2,
+    Level3,
+    Level4,
+    Level5,
+    Level6,
+    Level7,
+    Level8,
+    Level9,
+    RetroArch,
+    Slot,
+    RetroArchCompressed,
+    RainbowWave,
+    Fire,
+    Ocean,
+    Aurora,
+    Sunset,
+    Candy,
+    Police,
+    Heartbeat,
+    CpuStock,
+    CpuSaver,
+    CpuPerformance,
+    LookClassic,
+    LookSocket,
+    TintDefault,
+    TintPastel,
+    TintSepia,
+    Hour12,
+    Hour24,
 }
 
 impl QuickValue {
-    pub const ALL: [QuickValue; 10] = [
+    pub const LEVELS: [QuickValue; 10] = [
+        QuickValue::Level0,
+        QuickValue::Level1,
+        QuickValue::Level2,
+        QuickValue::Level3,
+        QuickValue::Level4,
+        QuickValue::Level5,
+        QuickValue::Level6,
+        QuickValue::Level7,
+        QuickValue::Level8,
+        QuickValue::Level9,
+    ];
+
+    pub const ALL: [QuickValue; 59] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -166,6 +401,55 @@ impl QuickValue {
         QuickValue::Grid,
         QuickValue::Dot,
         QuickValue::Simpletex,
+        QuickValue::Battery,
+        QuickValue::Colour,
+        QuickValue::White,
+        QuickValue::Red,
+        QuickValue::Orange,
+        QuickValue::Yellow,
+        QuickValue::Green,
+        QuickValue::Cyan,
+        QuickValue::Blue,
+        QuickValue::Purple,
+        QuickValue::Pink,
+        QuickValue::Static,
+        QuickValue::Breathe,
+        QuickValue::Blink,
+        QuickValue::Rainbow,
+        QuickValue::Low,
+        QuickValue::Medium,
+        QuickValue::High,
+        QuickValue::Level0,
+        QuickValue::Level1,
+        QuickValue::Level2,
+        QuickValue::Level3,
+        QuickValue::Level4,
+        QuickValue::Level5,
+        QuickValue::Level6,
+        QuickValue::Level7,
+        QuickValue::Level8,
+        QuickValue::Level9,
+        QuickValue::RetroArch,
+        QuickValue::Slot,
+        QuickValue::RetroArchCompressed,
+        QuickValue::RainbowWave,
+        QuickValue::Fire,
+        QuickValue::Ocean,
+        QuickValue::Aurora,
+        QuickValue::Sunset,
+        QuickValue::Candy,
+        QuickValue::Police,
+        QuickValue::Heartbeat,
+        QuickValue::CpuStock,
+        QuickValue::CpuSaver,
+        QuickValue::CpuPerformance,
+        QuickValue::LookClassic,
+        QuickValue::LookSocket,
+        QuickValue::TintDefault,
+        QuickValue::TintPastel,
+        QuickValue::TintSepia,
+        QuickValue::Hour12,
+        QuickValue::Hour24,
     ];
 
     pub fn index(self) -> usize {
@@ -184,6 +468,55 @@ impl QuickValue {
             QuickValue::Grid => "Grid",
             QuickValue::Dot => "Dot",
             QuickValue::Simpletex => "Simpletex",
+            QuickValue::Battery => "Battery",
+            QuickValue::Colour => "Color",
+            QuickValue::White => "White",
+            QuickValue::Red => "Red",
+            QuickValue::Orange => "Orange",
+            QuickValue::Yellow => "Yellow",
+            QuickValue::Green => "Green",
+            QuickValue::Cyan => "Cyan",
+            QuickValue::Blue => "Blue",
+            QuickValue::Purple => "Purple",
+            QuickValue::Pink => "Pink",
+            QuickValue::Static => "Static",
+            QuickValue::Breathe => "Breathe",
+            QuickValue::Blink => "Blink",
+            QuickValue::Rainbow => "Rainbow",
+            QuickValue::Low => "Low",
+            QuickValue::Medium => "Medium",
+            QuickValue::High => "High",
+            QuickValue::Level0 => "0",
+            QuickValue::Level1 => "1",
+            QuickValue::Level2 => "2",
+            QuickValue::Level3 => "3",
+            QuickValue::Level4 => "4",
+            QuickValue::Level5 => "5",
+            QuickValue::Level6 => "6",
+            QuickValue::Level7 => "7",
+            QuickValue::Level8 => "8",
+            QuickValue::Level9 => "9",
+            QuickValue::RetroArch => "RetroArch (.srm)",
+            QuickValue::Slot => "slot (.sav)",
+            QuickValue::RetroArchCompressed => "RetroArch, compressed",
+            QuickValue::RainbowWave => "Rainbow Wave",
+            QuickValue::Fire => "Fire",
+            QuickValue::Ocean => "Ocean",
+            QuickValue::Aurora => "Aurora",
+            QuickValue::Sunset => "Sunset",
+            QuickValue::Candy => "Candy",
+            QuickValue::Police => "Police",
+            QuickValue::Heartbeat => "Heartbeat",
+            QuickValue::CpuStock => "Default",
+            QuickValue::CpuSaver => "Battery Saver",
+            QuickValue::CpuPerformance => "Performance",
+            QuickValue::LookClassic => "Slot",
+            QuickValue::LookSocket => "Socket",
+            QuickValue::TintDefault => "Default",
+            QuickValue::TintPastel => "Pastel",
+            QuickValue::TintSepia => "Sepia",
+            QuickValue::Hour12 => "12-hour",
+            QuickValue::Hour24 => "24-hour",
         }
     }
 
@@ -195,6 +528,10 @@ impl QuickValue {
             6 => Some(QuickValue::Speed6),
             _ => None,
         }
+    }
+
+    pub fn level(n: u8) -> QuickValue {
+        QuickValue::LEVELS[usize::from(n.min(9))]
     }
 
     pub fn flag(on: bool) -> QuickValue {
@@ -209,6 +546,9 @@ impl QuickValue {
 pub const QUICK_PITCH: f32 = 52.0;
 pub const QUICK_TOP: f32 = (OUT_H as f32 - QUICK_PITCH * QuickRow::MAIN.len() as f32) / 2.0;
 pub const QUICK_EDGE: f32 = 32.0;
+/// The most rows a page shows at once. Below the legend split the frame is
+/// drawn differently, so a longer page scrolls instead of running into it.
+pub const QUICK_VISIBLE: usize = QuickRow::MAIN.len();
 const BAR_INSET: f32 = 4.0;
 const TYPE_DROP: f32 = 4.0;
 const CARET_GAP: f32 = 14.0;
@@ -312,7 +652,7 @@ impl QuickMenu<'_> {
         });
         out.push(Draw::Rect {
             x: 0.0,
-            y: row_top(self.row) + BAR_INSET,
+            y: row_top(self.row, window(self.row).0) + BAR_INSET,
             w: OUT_W as f32,
             h: QUICK_PITCH - 2.0 * BAR_INSET,
             colour: edge(),
@@ -321,8 +661,9 @@ impl QuickMenu<'_> {
             return;
         };
         let (right, pad) = (OUT_W as f32 - QUICK_EDGE, MENU_PAD as f32);
-        for &row in self.row.page() {
-            let y = row_top(row) + TYPE_DROP;
+        let (first, shown) = window(self.row);
+        for &row in &self.row.page()[first..first + shown] {
+            let y = row_top(row, first) + TYPE_DROP;
             let lit = row == self.row;
             if let Some(&(tex, w, h)) = faces.labels.get(row.index()) {
                 push(out, tex, QUICK_EDGE - pad, y, w, h);
@@ -355,9 +696,19 @@ impl QuickMenu<'_> {
     }
 }
 
-fn row_top(row: QuickRow) -> f32 {
-    let top = (OUT_H as f32 - QUICK_PITCH * row.page().len() as f32) / 2.0;
-    top + QUICK_PITCH * row.position() as f32
+/// The first row of the selected row's page on screen and how many show,
+/// scrolled just far enough that the selection is in view.
+pub fn window(row: QuickRow) -> (usize, usize) {
+    let len = row.page().len();
+    let shown = len.min(QUICK_VISIBLE);
+    let first = row.position().saturating_sub(shown - 1).min(len - shown);
+    (first, shown)
+}
+
+fn row_top(row: QuickRow, first: usize) -> f32 {
+    let shown = row.page().len().min(QUICK_VISIBLE);
+    let top = (OUT_H as f32 - QUICK_PITCH * shown as f32) / 2.0;
+    top + QUICK_PITCH * (row.position() - first) as f32
 }
 
 fn push(out: &mut Vec<Draw>, tex: TexId, x: f32, y: f32, w: u32, h: u32) {

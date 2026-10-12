@@ -5,6 +5,7 @@ vars:
   GPSP_HOST: vendor/gpsp_libretro.dylib
   MGBA_COMMIT: e31759b24e7a4e3899285ff720d7b573ac328ae7
   GPSP_COMMIT: 7b2dd37394e2822110cacef321e9bb291a305b77
+  SYNCTHING_VERSION: v1.30.0
 
 tasks:
   default:
@@ -70,6 +71,7 @@ tasks:
       - sh card/test-slotlink.sh
       - sh card/test-led.sh
       - sh card/test-coresave.sh
+      - sh card/test-net.sh
 
   core:
     desc: >-
@@ -299,6 +301,7 @@ tasks:
       - cp vendor/mgba_libretro.so {{.OUT}}/System/
       - cp vendor/gpsp_libretro.so {{.OUT}}/System/
       - cp -r licenses {{.OUT}}/System/licenses
+      - cp crates/slot-cheevos/rcheevos/LICENSE {{.OUT}}/System/licenses/rcheevos-LICENSE.txt
       - |
         set -euo pipefail
         sha="$(cat vendor/gpsp-src.sha)"
@@ -315,6 +318,45 @@ tasks:
           cp "$p" "{{.OUT}}/System/licenses/mgba-$(basename "$p")"
         done
       - 'echo "device tree ready at {{.OUT}}, copy its contents to SD2"'
+
+  syncthing:device:
+    desc: Fetch the pinned arm64 Syncthing release for the card
+    status:
+      - test -f vendor/syncthing
+      - test "$(cat vendor/syncthing.version 2>/dev/null)" = "{{.SYNCTHING_VERSION}}"
+    cmds:
+      - |
+        set -euo pipefail
+        mkdir -p vendor
+        name="syncthing-linux-arm64-{{.SYNCTHING_VERSION}}"
+        curl -fsSL -o vendor/syncthing.tar.gz \
+          "https://github.com/syncthing/syncthing/releases/download/{{.SYNCTHING_VERSION}}/${name}.tar.gz"
+        tar -xzf vendor/syncthing.tar.gz -C vendor "${name}/syncthing" "${name}/LICENSE.txt"
+        mv "vendor/${name}/syncthing" vendor/syncthing
+        mv "vendor/${name}/LICENSE.txt" vendor/syncthing.LICENSE.txt
+        rm -rf "vendor/${name}" vendor/syncthing.tar.gz
+        echo "{{.SYNCTHING_VERSION}}" > vendor/syncthing.version
+      - file vendor/syncthing | grep -q aarch64
+      - 'echo "fetched vendor/syncthing {{.SYNCTHING_VERSION}}"'
+
+  dist:trimui:
+    desc: >-
+      Build the card tree for a TrimUI Brick or Brick Pro, OUT defaults to ./dist-trimui. Copy
+      its contents, .tmp_update included, to the root of the TrimUI's SD card
+    deps: [syncthing:device]
+    vars:
+      OUT: '{{.OUT | default "dist-trimui"}}'
+    cmds:
+      - task: dist:device
+        vars:
+          OUT: '{{.OUT}}'
+      - cp vendor/syncthing {{.OUT}}/System/syncthing
+      - chmod +x {{.OUT}}/System/syncthing
+      - cp vendor/syncthing.LICENSE.txt {{.OUT}}/System/licenses/syncthing-LICENSE.txt
+      - mkdir -p {{.OUT}}/.tmp_update
+      - cp card/trimui/.tmp_update/updater {{.OUT}}/.tmp_update/updater
+      - chmod +x {{.OUT}}/.tmp_update/updater
+      - 'echo "trimui tree ready at {{.OUT}}, copy its contents (with the hidden .tmp_update) to the SD card root"'
 
   deploy:device:
     desc: Build and push onto a device over adb, then restart it. SD defaults to /mnt/sdcard

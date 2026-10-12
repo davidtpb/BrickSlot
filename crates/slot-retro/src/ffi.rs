@@ -17,6 +17,26 @@ pub const GET_LOG_INTERFACE: c_uint = 27;
 pub const GET_SAVE_DIRECTORY: c_uint = 31;
 pub const SET_AUDIO_BUFFER_STATUS_CALLBACK: c_uint = 62;
 pub const SET_NETPACKET_INTERFACE: c_uint = 78;
+pub const SET_MEMORY_MAPS: c_uint = 36;
+pub const EXPERIMENTAL: c_uint = 0x10000;
+
+#[repr(C)]
+pub struct MemoryDescriptor {
+    pub flags: u64,
+    pub ptr: *mut c_void,
+    pub offset: usize,
+    pub start: usize,
+    pub select: usize,
+    pub disconnect: usize,
+    pub len: usize,
+    pub addrspace: *const std::ffi::c_char,
+}
+
+#[repr(C)]
+pub struct MemoryMap {
+    pub descriptors: *const MemoryDescriptor,
+    pub num_descriptors: c_uint,
+}
 
 pub const RUMBLE_STRONG: c_uint = 0;
 pub const RUMBLE_WEAK: c_uint = 1;
@@ -145,6 +165,9 @@ pub struct Api {
     pub unserialize: unsafe extern "C" fn(*const c_void, usize) -> bool,
     pub get_memory_data: unsafe extern "C" fn(c_uint) -> *mut c_void,
     pub get_memory_size: unsafe extern "C" fn(c_uint) -> usize,
+    /// Not every core takes cheats.
+    pub cheat_reset: Option<unsafe extern "C" fn()>,
+    pub cheat_set: Option<unsafe extern "C" fn(c_uint, bool, *const std::ffi::c_char)>,
 }
 
 impl Api {
@@ -175,6 +198,8 @@ impl Api {
             unserialize: get!("retro_unserialize"),
             get_memory_data: get!("retro_get_memory_data"),
             get_memory_size: get!("retro_get_memory_size"),
+            cheat_reset: lib.get(b"retro_cheat_reset\0").ok().map(|f| *f),
+            cheat_set: lib.get(b"retro_cheat_set\0").ok().map(|f| *f),
         })
     }
 }

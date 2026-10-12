@@ -51,6 +51,13 @@ pub fn header(rom: &Path) -> Option<Header> {
     Header::parse(&buf)
 }
 
+pub fn title_from_bytes(bytes: &[u8]) -> Option<String> {
+    let buf = bytes.get(TITLE_OFF as usize..TITLE_OFF as usize + TITLE_LEN)?;
+    let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+    let text = std::str::from_utf8(&buf[..end]).ok()?.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
 pub fn title(rom: &Path) -> Option<String> {
     let mut buf = [0u8; TITLE_LEN];
     read_at(rom, TITLE_OFF, &mut buf)?;

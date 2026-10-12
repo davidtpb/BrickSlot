@@ -1,17 +1,26 @@
 mod atomic;
 pub mod cart_shell;
+pub mod cheats;
 mod config;
 mod core;
+pub mod emulator;
 pub mod gb;
 mod gb_palette;
 mod gba;
 pub mod ini;
+pub mod library;
+mod lights;
+pub mod patch;
 mod platform;
 mod ring;
+pub mod rom;
+pub mod rzip;
 mod scan;
+mod search;
 mod slot_state;
 mod stamp;
 mod theme;
+pub mod zip;
 
 pub use atomic::atomic_write;
 pub use cart_shell::{Outline, ShellChoice, ShellFinish, CART_SHELL_FILE, LABELS_SHELL_FILE};
@@ -20,13 +29,16 @@ pub use core::{
     core_for, core_for_platform, read_selected_cores, write_selected_core, Core, SELECTED_CORE_FILE,
 };
 pub use gb_palette::GbPalette;
-pub use gba::{header_clean, header_code, header_title, header_title_code};
+pub use gba::{header_clean, header_code, header_from_bytes, header_title, header_title_code};
+pub use lights::{LightColour, LightEffect, LightLevel, LightMode};
 pub use platform::Platform;
 pub use ring::{StateEntry, StateRing, RING_MAX};
 pub use scan::{initial, is_hidden, listing, scan, sort_key, Cart, StoreError};
+pub use search::{fold, rank};
 pub use slot_state::{
-    read_slot_state, write_slot_state, Shader, SlotState, BLUE_LIGHT_MAX, BRIGHTNESS_MAX,
-    FF_SPEEDS, FF_SPEED_DEFAULT, UTC_OFFSET_MAX, UTC_OFFSET_MIN, VOLUME_MAX,
+    read_slot_state, write_slot_state, CpuMode, Look, SaveFormat, Shader, SlotState, Tint,
+    BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, FF_SPEED_DEFAULT, UTC_OFFSET_MAX, UTC_OFFSET_MIN,
+    VOLUME_MAX,
 };
 pub use stamp::{
     civil_from_days, days_from_civil, days_in_month, format_stamp, parse_stamp, stamp_now,

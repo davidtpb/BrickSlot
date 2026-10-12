@@ -19,6 +19,7 @@ pub enum Btn {
     VolDown,
     Power,
     Lid,
+    Home,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

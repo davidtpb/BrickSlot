@@ -44,6 +44,7 @@ pub enum QuickRow {
     BtDevices,
     EmulatorSettings,
     DeviceSync,
+    Files,
     ClockFormat,
     JoinNetwork,
     StartFresh,
@@ -53,7 +54,7 @@ pub enum QuickRow {
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 44] = [
+    pub const ALL: [QuickRow; 45] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -98,6 +99,7 @@ impl QuickRow {
         QuickRow::WifiStatus,
         QuickRow::Tools,
         QuickRow::System,
+        QuickRow::Files,
     ];
 
     pub const MAIN: [QuickRow; 7] = [
@@ -150,7 +152,8 @@ impl QuickRow {
 
     /// What the frontend does besides play: emulator settings, moving
     /// files and progress about, achievements and labels.
-    pub const TOOLS: [QuickRow; 6] = [
+    pub const TOOLS: [QuickRow; 7] = [
+        QuickRow::Files,
         QuickRow::EmulatorSettings,
         QuickRow::DeviceSync,
         QuickRow::FileTransfer,
@@ -257,6 +260,7 @@ impl QuickRow {
             QuickRow::BtDevices => "Bluetooth Devices",
             QuickRow::EmulatorSettings => "Emulator Settings",
             QuickRow::DeviceSync => "Device Sync",
+            QuickRow::Files => "Files",
             QuickRow::FileTransfer => "File Transfer",
             QuickRow::Tools => "Tools",
             QuickRow::System => "System",
@@ -281,6 +285,7 @@ impl QuickRow {
                 | QuickRow::BtDevices
                 | QuickRow::EmulatorSettings
                 | QuickRow::DeviceSync
+                | QuickRow::Files
         )
     }
 

@@ -57,6 +57,8 @@ pub struct Frontend {
     quick_clock: QuickClock,
     search_texes: Vec<SearchLine>,
     home_texes: Vec<SearchLine>,
+    files_texes: Vec<SearchLine>,
+    files_light: Option<bool>,
     socket_texes: Vec<SearchLine>,
     settings_texes: Vec<SearchLine>,
     search_light: Option<bool>,
@@ -152,6 +154,8 @@ impl Frontend {
             quick_clock: QuickClock::default(),
             search_texes: Vec::new(),
             home_texes: Vec::new(),
+            files_texes: Vec::new(),
+            files_light: None,
             socket_texes: Vec::new(),
             settings_texes: Vec::new(),
             search_light: None,
@@ -369,6 +373,26 @@ impl Frontend {
         }
     }
 
+    /// The same for the file explorer.
+    fn sync_files(&mut self, compositor: &mut Compositor) {
+        let Some(lines) = self.session.app().files_lines() else {
+            return;
+        };
+        let light = self.session.app().socket_look();
+        let face = match light {
+            true => slot_ui::files_face_light,
+            false => slot_ui::files_face,
+        };
+        if self.files_light != Some(light) {
+            self.files_light = Some(light);
+            self.files_texes.iter_mut().for_each(|l| l.text = None);
+        }
+        if sync_lines(&mut self.files_texes, lines, face, compositor) {
+            let faces = self.files_texes.iter().map(|l| l.face).collect();
+            self.session.app_mut().set_files_faces(faces);
+        }
+    }
+
     /// The same for the Home panel.
     fn sync_home(&mut self, compositor: &mut Compositor) {
         if let Some(light) = self.session.app().wants_home_icons() {
@@ -475,6 +499,7 @@ impl Frontend {
         self.show_message(compositor);
         self.sync_search(compositor);
         self.sync_home(compositor);
+        self.sync_files(compositor);
         self.sync_socket(compositor);
         sync_clock(self.session.app_mut(), compositor, &mut self.clocks);
         sync_about(self.session.app_mut(), compositor, &mut self.about);

@@ -8,6 +8,7 @@ mod cart;
 mod clock;
 mod customize;
 mod draw;
+mod files_view;
 mod footer;
 mod home_icons;
 mod home_panel;
@@ -56,6 +57,10 @@ pub use customize::{
     CustomizeScreen, InspectScreen, Material, CUSTOM_CART_X, SWATCHES, SWATCH_COLS,
 };
 pub use draw::{Draw, TexId, OUT_H, OUT_W};
+pub use files_view::{
+    files_face, files_face_light, files_name_slot, files_size_slot, FilesScreen, FILES_LEGEND,
+    FILES_ROWS, FILES_SLOTS, FILES_STATUS, FILES_TITLE,
+};
 pub use footer::{draw_footer, Printed};
 pub use home_icons::{home_icon_face, home_ring_face, ICON_D, RING_D};
 pub use home_panel::{

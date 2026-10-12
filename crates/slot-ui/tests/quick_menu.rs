@@ -129,6 +129,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
     assert_eq!(
         QuickRow::TOOLS.map(QuickRow::label),
         [
+            "Files",
             "Emulator Settings",
             "Device Sync",
             "File Transfer",

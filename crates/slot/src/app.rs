@@ -1,5 +1,8 @@
+#[path = "app_files.rs"]
+mod files_ui;
 #[path = "app_options.rs"]
 mod options;
+pub use files_ui::{FilesPopup, Typing};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -320,6 +323,11 @@ pub enum Phase {
         at: usize,
         scanning: bool,
     },
+    /// Tools > Files: the file explorer.
+    Files {
+        ex: crate::files::Explorer,
+        popup: FilesPopup,
+    },
     /// Device Sync: swapping saves with another handheld.
     Sync {
         roms: bool,
@@ -401,6 +409,8 @@ pub struct App {
     net: crate::net::Net,
     bt: crate::bt::Bt,
     sync_job: Option<crate::sync::SyncJob>,
+    files_job: Option<files_ui::FilesBusy>,
+    files_faces: Vec<Option<(TexId, u32, u32)>>,
     /// The Bluetooth devices last listed.
     bt_devices: Vec<crate::bt::BtDevice>,
     /// The Home panel's round buttons, and whether they were drawn light.
@@ -566,6 +576,8 @@ impl App {
             net: crate::net::Net::idle(),
             bt: crate::bt::Bt::idle(),
             sync_job: None,
+            files_job: None,
+            files_faces: Vec::new(),
             bt_devices: Vec::new(),
             home_icons: Vec::new(),
             home_icons_light: false,
@@ -1793,6 +1805,7 @@ impl App {
             Phase::Networks { .. } => self.networks_input(action),
             Phase::Bluetooth { .. } => self.bt_input(action),
             Phase::Sync { .. } => self.sync_input(action),
+            Phase::Files { .. } => self.files_input(action),
             Phase::Password { .. } => self.password_input(action),
             Phase::Inserting { .. } if action == Action::Eject => self.eject(),
             Phase::Playing { .. } => match action {
@@ -1903,6 +1916,7 @@ impl App {
             || self.customize.is_some()
             || self.core_popup.is_some()
             || !self.menu.is_empty()
+            || self.files_popup_up()
             || self.inspect
             || self.recent_popup.is_some()
             || matches!(
@@ -2015,6 +2029,7 @@ impl App {
             || customizing.is_some()
             || core_popup.is_some()
             || menu
+            || self.files_popup_up()
             || networks;
         if !shown {
             return None;
@@ -2122,6 +2137,9 @@ impl App {
                     (format!("{name}   {}", p.platform.dir_name()), true);
             }
             lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+        }
+        if self.files_popup_up() && self.power_menu.is_none() {
+            self.files_popup_lines(&mut lines);
         }
         if menu && self.power_menu.is_none() {
             self.menu_lines(&mut lines);
@@ -2728,6 +2746,10 @@ impl App {
         self.home_icons_light = light;
     }
 
+    pub fn set_files_faces(&mut self, faces: Vec<Option<(TexId, u32, u32)>>) {
+        self.files_faces = faces;
+    }
+
     pub fn set_home_faces(&mut self, faces: Vec<Option<(TexId, u32, u32)>>) {
         self.home_faces = faces;
     }
@@ -3113,6 +3135,9 @@ impl App {
         if let Phase::Password { ssid, keys, .. } = &self.phase {
             return Some(password_lines(ssid, keys));
         }
+        if let Some(lines) = self.files_typing_lines() {
+            return Some(lines);
+        }
         if !matches!(self.phase, Phase::Search) {
             return None;
         }
@@ -3196,6 +3221,7 @@ impl App {
             QuickRow::Labels => self.download_labels(),
             QuickRow::JoinNetwork => self.open_networks(),
             QuickRow::BtDevices => self.open_bluetooth(),
+            QuickRow::Files => self.open_files(),
             QuickRow::DeviceSync => {
                 self.phase = Phase::Sync {
                     roms: false,
@@ -3381,6 +3407,7 @@ impl App {
             | QuickRow::BtDevices
             | QuickRow::EmulatorSettings
             | QuickRow::DeviceSync
+            | QuickRow::Files
             | QuickRow::Tools
             | QuickRow::System
             | QuickRow::WifiStatus => return,
@@ -3625,6 +3652,7 @@ impl App {
             self.bt_found(found);
         }
         self.sync_tick();
+        self.files_tick();
         if slot_ui::twelve_hour() != self.state.clock_12h {
             slot_ui::set_twelve_hour(self.state.clock_12h);
         }
@@ -3750,6 +3778,9 @@ impl App {
             }
             (Phase::Search, None) if self.socket_look() => Some(slot_ui::SEARCH_SPLIT),
             (Phase::Password { .. }, None) => Some(slot_ui::SEARCH_SPLIT),
+            (Phase::Files { .. }, None) if self.files_typing().is_some() || self.socket_look() => {
+                Some(slot_ui::SEARCH_SPLIT)
+            }
             (Phase::QuickMenu { .. }, None) if self.socket_look() => Some(slot_ui::SETTINGS_SPLIT),
             (Phase::QuickMenu { .. }, None) => Some(slot_ui::QUICK_SPLIT),
             (Phase::Shelf | Phase::Inserting { .. } | Phase::Ejecting { .. }, None)
@@ -4318,6 +4349,30 @@ impl App {
                 backdrop: self.socket_backdrop,
             }
             .draw(out),
+            Phase::Files { .. } => match self.files_typing() {
+                Some(keys) => slot_ui::SearchScreen {
+                    faces: &self.search_faces,
+                    row: keys.row,
+                    col: keys.col,
+                    pick: Some(1),
+                    picked_ms: 0,
+                    light: true,
+                    backdrop: self.socket_backdrop.filter(|_| self.socket_look()),
+                }
+                .draw(out),
+                None => {
+                    let (_, _, cursor) = self.files_window();
+                    slot_ui::FilesScreen {
+                        faces: &self.files_faces,
+                        cursor,
+                        ticked: self.files_ticked_rows(),
+                        progress: self.files_progress(),
+                        light: self.socket_look(),
+                        backdrop: self.socket_backdrop,
+                    }
+                    .draw(out)
+                }
+            },
             Phase::Password { keys, .. } => slot_ui::SearchScreen {
                 faces: &self.search_faces,
                 row: keys.row,
@@ -4381,6 +4436,18 @@ impl App {
                 faces: &self.settings_faces,
                 options: slot_ui::Material::ALL.len(),
                 focus: at,
+            }
+            .draw(out);
+        }
+        if let Some((shown, focus)) = self
+            .files_popup_window()
+            .filter(|_| self.power_menu.is_none())
+        {
+            slot_ui::SocketPopup {
+                chrome: &self.socket_chrome,
+                faces: &self.settings_faces,
+                options: shown.max(1),
+                focus: focus.unwrap_or(usize::MAX),
             }
             .draw(out);
         }
@@ -6011,9 +6078,20 @@ fn draw_menu_rows(
 
 /// The search screen's slots, filled for typing a network's password.
 fn password_lines(ssid: &str, keys: &crate::keyboard::Keyboard) -> Vec<(String, bool)> {
+    keyboard_lines(&format!("Join {ssid}"), "Password", "join", keys)
+}
+
+/// The on-screen keyboard's text: a title, what is being typed and what
+/// START does with it.
+fn keyboard_lines(
+    title: &str,
+    label: &str,
+    done: &str,
+    keys: &crate::keyboard::Keyboard,
+) -> Vec<(String, bool)> {
     let mut lines = vec![(String::new(), false); slot_ui::SEARCH_SLOTS];
-    lines[slot_ui::SEARCH_QUERY] = (format!("Join {ssid}"), true);
-    lines[slot_ui::search_hit_slot(0)] = ("Password".into(), false);
+    lines[slot_ui::SEARCH_QUERY] = (title.to_string(), true);
+    lines[slot_ui::search_hit_slot(0)] = (label.to_string(), false);
     lines[slot_ui::search_hit_slot(1)] = (format!("{}_", keys.text), true);
     let layers: Vec<String> = crate::keyboard::LAYER_NAMES
         .iter()
@@ -6031,7 +6109,7 @@ fn password_lines(ssid: &str, keys: &crate::keyboard::Keyboard) -> Vec<(String, 
         }
     }
     lines[slot_ui::SEARCH_LEGEND] = (
-        "A type   B delete   X space   Y shift   START join".into(),
+        format!("A type   B delete   X space   Y shift   START {done}"),
         false,
     );
     lines
@@ -6140,6 +6218,7 @@ fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue>
         | QuickRow::BtDevices
         | QuickRow::EmulatorSettings
         | QuickRow::DeviceSync
+        | QuickRow::Files
         | QuickRow::Tools
         | QuickRow::System
         | QuickRow::WifiStatus => None,

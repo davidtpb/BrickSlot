@@ -1,7 +1,9 @@
 mod atomic;
 pub mod cart_shell;
+pub mod cheats;
 mod config;
 mod core;
+pub mod emulator;
 pub mod gb;
 mod gb_palette;
 mod gba;

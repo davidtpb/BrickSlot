@@ -11,7 +11,15 @@ use std::time::Duration;
 pub const PORT: u16 = 8080;
 
 /// The folders the page shows. Nothing outside them can be read or written.
-pub const ROOTS: [&str; 6] = ["Games", "Saves", "States", "Labels", "Screenshots", "BIOS"];
+pub const ROOTS: [&str; 7] = [
+    "Games",
+    "Saves",
+    "States",
+    "Labels",
+    "Screenshots",
+    "BIOS",
+    "Cheats",
+];
 
 const UPLOAD_MAX: u64 = 128 << 20;
 

@@ -24,6 +24,20 @@ impl ButtonMask {
     pub const L: u16 = 1 << 10;
     pub const R: u16 = 1 << 11;
 
+    /// A and B the other way round.
+    pub fn swap_ab(self) -> ButtonMask {
+        let a = self.0 & Self::A != 0;
+        let b = self.0 & Self::B != 0;
+        let mut m = self.0 & !(Self::A | Self::B);
+        if a {
+            m |= Self::B;
+        }
+        if b {
+            m |= Self::A;
+        }
+        ButtonMask(m)
+    }
+
     pub fn without_turbo(self) -> ButtonMask {
         ButtonMask(self.0 & !(Self::X | Self::Y))
     }
@@ -111,6 +125,18 @@ pub trait RetroCore: Send {
         self.run_frame(p1);
     }
     fn set_option(&mut self, _key: &str, _value: &str) {}
+    /// Every option the core offers: key, name, values with the default
+    /// first.
+    fn option_list(&self) -> Vec<(String, String, Vec<String>)> {
+        Vec::new()
+    }
+    /// Turns the given cheats on, and every other off: each is its codes,
+    /// several joined by `+`.
+    fn set_cheats(&mut self, _codes: &[String]) {}
+    /// The value an option has now.
+    fn option_value(&self, _key: &str) -> Option<String> {
+        None
+    }
     fn set_frame_skip(&mut self, _skip: bool) {}
     fn video_xrgb8888(&self) -> &[u8];
     fn take_audio(&mut self) -> Vec<i16>;

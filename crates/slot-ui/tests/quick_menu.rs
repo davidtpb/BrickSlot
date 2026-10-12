@@ -115,6 +115,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Start Fresh",
             "Save Format",
             "Performance",
+            "Emulator Settings",
             "Menu Sounds"
         ]
     );
@@ -131,6 +132,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::Search,
             QuickRow::Labels,
             QuickRow::BtDevices,
+            QuickRow::EmulatorSettings,
             QuickRow::JoinNetwork,
             QuickRow::WifiStatus
         ]

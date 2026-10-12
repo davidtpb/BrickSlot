@@ -38,6 +38,8 @@ struct Host {
     options: std::collections::HashMap<String, std::ffi::CString>,
     options_dirty: bool,
     declared: std::collections::HashMap<String, Vec<String>>,
+    /// The same, in the order the core gave them, with what each is called.
+    declared_list: Vec<(String, String, Vec<String>)>,
     memory_maps: Vec<MemoryRegion>,
 }
 
@@ -145,9 +147,14 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
         }
         SET_VARIABLES => {
             if data.is_null() {
-                return with_host(|h| h.declared.clear()).is_some();
+                return with_host(|h| {
+                    h.declared.clear();
+                    h.declared_list.clear();
+                })
+                .is_some();
             }
             let mut list = std::collections::HashMap::new();
+            let mut ordered = Vec::new();
             let mut p = data as *const Variable;
             for _ in 0..4096 {
                 let var = &*p;
@@ -157,26 +164,34 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
                 let Ok(key) = std::ffi::CStr::from_ptr(var.key).to_str() else {
                     break;
                 };
-                let values = if var.value.is_null() {
-                    Vec::new()
+                let (desc, values) = if var.value.is_null() {
+                    (String::new(), Vec::new())
                 } else {
                     std::ffi::CStr::from_ptr(var.value)
                         .to_str()
                         .ok()
                         .and_then(|v| v.split_once(';'))
-                        .map(|(_, values)| {
-                            values
-                                .trim()
-                                .split('|')
-                                .map(|s| s.trim().to_string())
-                                .collect()
+                        .map(|(desc, values)| {
+                            (
+                                desc.trim().to_string(),
+                                values
+                                    .trim()
+                                    .split('|')
+                                    .map(|s| s.trim().to_string())
+                                    .collect(),
+                            )
                         })
                         .unwrap_or_default()
                 };
+                ordered.push((key.to_string(), desc, values.clone()));
                 list.insert(key.to_string(), values);
                 p = p.add(1);
             }
-            with_host(|h| h.declared = list).is_some()
+            with_host(|h| {
+                h.declared = list;
+                h.declared_list = ordered;
+            })
+            .is_some()
         }
         GET_RUMBLE_INTERFACE => {
             if data.is_null() {
@@ -471,6 +486,12 @@ impl LibretroCore {
             .collect()
     }
 
+    /// Every option the core offers, in its order: key, what it is called,
+    /// and its values with the default first.
+    pub fn option_list(&self) -> Vec<(String, String, Vec<String>)> {
+        self.host.declared_list.clone()
+    }
+
     pub fn declared_options(&self) -> &std::collections::HashMap<String, Vec<String>> {
         &self.host.declared
     }
@@ -506,6 +527,7 @@ impl LibretroCore {
             options: std::collections::HashMap::new(),
             options_dirty: false,
             declared: std::collections::HashMap::new(),
+            declared_list: Vec::new(),
             memory_maps: Vec::new(),
         });
         unsafe {
@@ -574,6 +596,28 @@ impl Drop for LibretroCore {
 impl RetroCore for LibretroCore {
     fn set_option(&mut self, key: &str, value: &str) {
         LibretroCore::set_option(self, key, value);
+    }
+
+    fn option_list(&self) -> Vec<(String, String, Vec<String>)> {
+        LibretroCore::option_list(self)
+    }
+
+    fn set_cheats(&mut self, codes: &[String]) {
+        let (Some(reset), Some(set)) = (self.api.cheat_reset, self.api.cheat_set) else {
+            eprintln!("slot-retro: this core takes no cheats");
+            return;
+        };
+        unsafe { reset() };
+        for (i, code) in codes.iter().enumerate() {
+            let Ok(code) = CString::new(code.as_str()) else {
+                continue;
+            };
+            unsafe { set(i as std::ffi::c_uint, true, code.as_ptr()) };
+        }
+    }
+
+    fn option_value(&self, key: &str) -> Option<String> {
+        LibretroCore::option(self, key)
     }
 
     fn memory_regions(&self) -> Vec<MemoryRegion> {
@@ -745,6 +789,7 @@ mod tests {
             options,
             options_dirty,
             declared: HashMap::new(),
+            declared_list: Vec::new(),
             memory_maps: Vec::new(),
         })
     }

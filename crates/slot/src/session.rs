@@ -169,7 +169,17 @@ impl Session {
             self.pad.apply(Action::GbaUp(*btn));
         }
         if let Some(emu) = &self.emu {
-            emu.set_input(self.pad.mask());
+            let mut mask = self.pad.mask();
+            if self.app.swap_ab() {
+                mask = mask.swap_ab();
+            }
+            emu.set_input(mask);
+            for (key, value) in self.app.take_option_changes() {
+                emu.set_option(&key, &value);
+            }
+            if let Some(codes) = self.app.take_cheats() {
+                emu.set_cheats(codes);
+            }
         }
     }
 
@@ -467,6 +477,8 @@ impl Session {
             player,
         );
         self.app.set_named_core(opened.named);
+        let mut opened = opened;
+        self.emulator_settings(&mut opened.core, core, platform, stem);
         launch("core opened");
         let sav = persist::read_sav(&self.root, platform, stem);
         launch("save read");
@@ -479,6 +491,44 @@ impl Session {
         emu.set_driven(self.driven);
         self.app.set_snapshot(Box::new(emu.snapshot()));
         self.emu = Some(emu);
+    }
+
+    /// Puts the game's saved emulator settings on the core, remembers what
+    /// the core offers, and tells the app both.
+    fn emulator_settings(
+        &mut self,
+        core: &mut Box<dyn slot_retro::RetroCore>,
+        which: slot_store::Core,
+        platform: Platform,
+        stem: &str,
+    ) {
+        use slot_store::emulator::{self, CoreOption};
+        let options: Vec<CoreOption> = core
+            .option_list()
+            .into_iter()
+            .map(|(key, desc, values)| CoreOption { key, desc, values })
+            .collect();
+        if let Err(e) = emulator::remember_options(&self.root, which, &options) {
+            eprintln!("slot: emulator settings: {e}");
+        }
+        let saved = emulator::for_game(&self.root, platform, stem);
+        for (key, value) in &saved {
+            let offered = options
+                .iter()
+                .any(|o| o.key == *key && o.values.iter().any(|v| v == value));
+            if offered {
+                core.set_option(key, value);
+            }
+        }
+        let values = options
+            .iter()
+            .map(|o| {
+                core.option_value(&o.key)
+                    .unwrap_or_else(|| o.default_value().to_string())
+            })
+            .collect();
+        let cheats = slot_store::cheats::read(&self.root, platform, stem);
+        self.app.core_opened(options, values, saved, cheats);
     }
 
     fn reload_for_link(&mut self, stem: &str, serial: &'static str) {

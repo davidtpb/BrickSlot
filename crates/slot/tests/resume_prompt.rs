@@ -67,9 +67,9 @@ fn menu_in_the_game_offers_where_it_was_left_and_loads_it() {
     );
     a.apply(Action::QuickMenu);
     assert!(a.resume_popup_open());
-    let lines = a.settings_lines().expect("popup text");
-    assert!(lines[slot_ui::option_slot(0)].0.starts_with("Load where"));
-    assert_eq!(lines[slot_ui::option_slot(1)].0, "Keep playing");
+    let lines = a.settings_lines().expect("menu text");
+    assert_eq!(lines[slot_ui::option_slot(0)].0, "Resume");
+    assert!(lines[slot_ui::option_slot(1)].0.starts_with("Load where"));
     press(&mut a, Btn::A);
     assert!(!a.resume_popup_open());
     assert_eq!(
@@ -80,22 +80,27 @@ fn menu_in_the_game_offers_where_it_was_left_and_loads_it() {
 }
 
 #[test]
-fn keep_playing_loads_nothing() {
+fn resume_loads_nothing() {
     let d = tmp_root_with_carts(&["Fusion", "Zero Mission"]);
     left_at(&d, "Fusion", b"left here");
     let (snapshot, loaded) = StubSnapshot::pair();
     let mut a = app_playing_with(d.path(), "Fusion", snapshot);
     a.apply(Action::QuickMenu);
-    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Up);
     press(&mut a, Btn::A);
     assert!(!a.resume_popup_open());
     assert!(loaded.lock().unwrap().is_none());
 }
 
 #[test]
-fn menu_in_a_game_with_nothing_to_load_does_nothing() {
+fn menu_in_a_game_with_nothing_to_load_starts_on_resume() {
     let d = tmp_root_with_carts(&["Fusion", "Zero Mission"]);
     let mut a = app_playing_with(d.path(), "Fusion", StubSnapshot::boxed());
     a.apply(Action::QuickMenu);
+    assert!(a.resume_popup_open());
+    let lines = a.settings_lines().expect("menu text");
+    assert_eq!(lines[slot_ui::option_slot(0)].0, "Resume");
+    assert_eq!(lines[slot_ui::option_slot(1)].0, "Save State");
+    press(&mut a, Btn::A);
     assert!(!a.resume_popup_open());
 }

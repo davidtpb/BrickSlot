@@ -1,3 +1,6 @@
+#[path = "app_options.rs"]
+mod options;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -379,7 +382,9 @@ pub struct App {
     painted_tint: slot_store::Tint,
     favorites: std::collections::HashSet<String>,
     core_popup: Option<usize>,
-    resume_popup: Option<usize>,
+    /// The in-game menu and emulator settings, a stack of lists.
+    menu: Vec<options::Menu>,
+    running: options::Running,
     left_off: Option<Vec<u8>>,
     dropped_faces: Vec<TexId>,
     shell_generation: u32,
@@ -542,7 +547,8 @@ impl App {
             painted_tint: slot_store::Tint::Default,
             favorites: std::collections::HashSet::new(),
             core_popup: None,
-            resume_popup: None,
+            menu: Vec::new(),
+            running: options::Running::default(),
             left_off: None,
             dropped_faces: Vec::new(),
             shell_generation: 0,
@@ -1269,7 +1275,7 @@ impl App {
     }
 
     pub fn turbo(&self) -> bool {
-        self.state.turbo
+        self.game_turbo().unwrap_or(self.state.turbo)
     }
 
     pub fn records_rewind(&self) -> bool {
@@ -1423,6 +1429,12 @@ impl App {
     }
 
     pub fn screen_shader(&self) -> Shader {
+        if let Some(s) = self
+            .game_shader()
+            .filter(|_| matches!(self.phase, Phase::Playing { .. } | Phase::Polaroids { .. }))
+        {
+            return s;
+        }
         match self.platform {
             Platform::Gba => self.state.shader_gba,
             Platform::Gb | Platform::Gbc => self.state.shader_gb,
@@ -1605,7 +1617,7 @@ impl App {
     fn menu_fingerprint(&self) -> String {
         if matches!(self.phase, Phase::Playing { .. })
             && self.home.is_none()
-            && self.resume_popup.is_none()
+            && self.menu.is_empty()
             && self.game_menu.is_none()
         {
             return String::new();
@@ -1615,7 +1627,7 @@ impl App {
             self.phase,
             self.power_menu,
             self.core_popup,
-            self.resume_popup,
+            self.menu,
             self.picker.as_ref().map(|p| p.2),
             self.recent_popup.as_ref().map(|p| p.1),
             self.inspect,
@@ -1705,11 +1717,11 @@ impl App {
             }
             return self.inspect_input(action);
         }
-        if self.resume_popup.is_some() {
+        if !self.menu.is_empty() {
             if self.adjust(action) {
                 return;
             }
-            return self.resume_popup_input(action);
+            return self.menu_input(action);
         }
         if let Phase::SetClock {
             picker, from_menu, ..
@@ -1789,7 +1801,7 @@ impl App {
                 Action::LoadState => self.load_newest(),
                 Action::Screenshot => self.screenshot(),
                 Action::GbaDown(Btn::Home) | Action::HomePanel => self.open_home(),
-                Action::QuickMenu if self.left_off.is_some() => self.resume_popup = Some(0),
+                Action::QuickMenu => self.open_pause(),
                 Action::RewindStart if !self.may_rewind() => self.refuse(),
                 Action::FfStart if !self.may_fast_forward() => self.refuse(),
                 _ => {}
@@ -1882,7 +1894,7 @@ impl App {
         (self.socket_look()
             || self.customize.is_some()
             || self.core_popup.is_some()
-            || self.resume_popup.is_some()
+            || !self.menu.is_empty()
             || self.inspect
             || self.recent_popup.is_some()
             || matches!(self.phase, Phase::Networks { .. } | Phase::Bluetooth { .. }))
@@ -1979,9 +1991,7 @@ impl App {
             .core_popup
             .filter(|_| matches!(self.phase, Phase::Shelf));
         let networks = matches!(self.phase, Phase::Networks { .. } | Phase::Bluetooth { .. });
-        let resume_popup = self
-            .resume_popup
-            .filter(|_| matches!(self.phase, Phase::Playing { .. }));
+        let menu = !self.menu.is_empty();
         let on_shelf = matches!(self.phase, Phase::Shelf);
         let inspecting = self.inspect && on_shelf;
         let recent = self.recent_popup.as_ref().filter(|_| on_shelf);
@@ -1990,7 +2000,7 @@ impl App {
             || recent.is_some()
             || customizing.is_some()
             || core_popup.is_some()
-            || resume_popup.is_some()
+            || menu
             || networks;
         if !shown {
             return None;
@@ -2099,17 +2109,8 @@ impl App {
             }
             lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
         }
-        if resume_popup.is_some() && self.power_menu.is_none() {
-            let name = self
-                .shelf()
-                .carts
-                .get(self.shelf().index)
-                .map(slot_ui::label_text)
-                .unwrap_or_default();
-            lines[slot_ui::POPUP_TITLE_SLOT] = (name, true);
-            lines[slot_ui::option_slot(0)] = ("Load where you left off".into(), true);
-            lines[slot_ui::option_slot(1)] = ("Keep playing".into(), true);
-            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+        if menu && self.power_menu.is_none() {
+            self.menu_lines(&mut lines);
         }
         if let Phase::Bluetooth { list, at, scanning } = &self.phase {
             let (first, shown, _) = popup_window(list.len(), *at);
@@ -3071,6 +3072,7 @@ impl App {
             QuickRow::Labels => self.download_labels(),
             QuickRow::JoinNetwork => self.open_networks(),
             QuickRow::BtDevices => self.open_bluetooth(),
+            QuickRow::EmulatorSettings => self.open_emulator_settings(Platform::Gba),
             QuickRow::WifiStatus => {
                 self.say("Checking Wi-Fi\u{2026}", "");
                 self.net.send(NetJob::Status);
@@ -3242,6 +3244,7 @@ impl App {
             | QuickRow::Labels
             | QuickRow::JoinNetwork
             | QuickRow::BtDevices
+            | QuickRow::EmulatorSettings
             | QuickRow::WifiStatus => return,
         }
         if QuickRow::LIGHTS.contains(&row) {
@@ -3464,6 +3467,9 @@ impl App {
         self.clock += dt as f64 * 1000.0;
         if !matches!(self.phase, Phase::QuickMenu { .. }) {
             self.picker = None;
+        }
+        if !matches!(self.phase, Phase::QuickMenu { .. } | Phase::Playing { .. }) {
+            self.menu.clear();
         }
         if self.name_pending && self.shelf_platform.face.is_some() {
             self.name_pending = false;
@@ -4238,15 +4244,13 @@ impl App {
             }
             .draw(out);
         }
-        if let Some(focus) = self
-            .resume_popup
-            .filter(|_| matches!(self.phase, Phase::Playing { .. }) && self.power_menu.is_none())
-        {
+        if !self.menu.is_empty() && self.power_menu.is_none() {
+            let (_, shown, focus) = self.menu_window();
             slot_ui::SocketPopup {
                 chrome: &self.socket_chrome,
                 faces: &self.settings_faces,
-                options: 2,
-                focus,
+                options: shown.max(1),
+                focus: focus.unwrap_or(usize::MAX),
             }
             .draw(out);
         }
@@ -4750,7 +4754,7 @@ impl App {
         self.end_link();
         self.close_game_menu();
         self.left_off = None;
-        self.resume_popup = None;
+        self.menu.clear();
         self.flush_eject(&cart);
         self.pending = None;
         self.refusal = None;
@@ -4991,37 +4995,9 @@ impl App {
         self.left_off.is_some()
     }
 
-    fn resume_popup_input(&mut self, action: Action) {
-        let Some(at) = self.resume_popup else {
-            return;
-        };
-        match action {
-            Action::GbaDown(Btn::Up) | Action::GbaDown(Btn::Down) => {
-                self.resume_popup = Some(1 - at)
-            }
-            Action::GbaDown(Btn::A) => {
-                self.resume_popup = None;
-                if at == 0 {
-                    if let Some(bytes) = self.left_off.clone() {
-                        self.load_bytes(bytes);
-                    }
-                }
-            }
-            Action::GbaDown(Btn::B) | Action::QuickMenu => self.resume_popup = None,
-            Action::Polaroids => {
-                self.resume_popup = None;
-                self.open_polaroids();
-            }
-            Action::Eject => {
-                self.resume_popup = None;
-                self.eject();
-            }
-            _ => {}
-        }
-    }
-
+    /// Whether the in-game menu (or the emulator settings) is up.
     pub fn resume_popup_open(&self) -> bool {
-        self.resume_popup.is_some()
+        !self.menu.is_empty()
     }
 
     pub fn core_popup_open(&self) -> bool {
@@ -6022,6 +5998,7 @@ fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue>
         | QuickRow::Labels
         | QuickRow::JoinNetwork
         | QuickRow::BtDevices
+        | QuickRow::EmulatorSettings
         | QuickRow::WifiStatus => None,
     }
 }

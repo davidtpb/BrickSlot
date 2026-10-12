@@ -910,6 +910,7 @@ impl App {
                 .collect::<Vec<_>>()
         };
         let list = match row {
+            QuickRow::SaveFormat => each(&mut |s, i| s.save_format = SaveFormat::ALL[i], 3),
             QuickRow::Tint => each(&mut |s, i| s.tint = slot_store::Tint::ALL[i], 3),
             QuickRow::FastForward => each(&mut |s, i| s.ff_speed = FF_SPEEDS[i], FF_SPEEDS.len()),
             QuickRow::GbaShader => {
@@ -3193,7 +3194,7 @@ impl App {
                     self.net.send(NetJob::WifiDown);
                 }
             }
-            QuickRow::SaveFormat => s.save_format = s.save_format.other(),
+            QuickRow::SaveFormat => s.save_format = s.save_format.step(right),
             QuickRow::Look => s.look = s.look.other(),
             QuickRow::Tint => s.tint = s.tint.step(right),
             QuickRow::MenuSounds => s.menu_sounds = !s.menu_sounds,
@@ -5974,6 +5975,7 @@ fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue>
         QuickRow::SaveFormat => Some(match s.save_format {
             SaveFormat::RetroArch => QuickValue::RetroArch,
             SaveFormat::Slot => QuickValue::Slot,
+            SaveFormat::RetroArchCompressed => QuickValue::RetroArchCompressed,
         }),
         QuickRow::LightMode => Some(match s.light_mode {
             LightMode::Battery => QuickValue::Battery,

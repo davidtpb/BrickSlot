@@ -79,7 +79,8 @@ fn an_unchanged_battery_save_is_not_rewritten() {
     let sav = d.path().join(format!(
         "Saves/GBA/Emerald.{}",
         match slot_store::SaveFormat::default() {
-            slot_store::SaveFormat::RetroArch => "srm",
+            slot_store::SaveFormat::RetroArch | slot_store::SaveFormat::RetroArchCompressed =>
+                "srm",
             slot_store::SaveFormat::Slot => "sav",
         }
     ));

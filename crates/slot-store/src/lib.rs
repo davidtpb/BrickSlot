@@ -10,6 +10,7 @@ pub mod library;
 mod lights;
 mod platform;
 mod ring;
+pub mod rzip;
 mod scan;
 mod search;
 mod slot_state;

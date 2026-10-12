@@ -65,6 +65,9 @@ pub enum SaveFormat {
     #[default]
     RetroArch,
     Slot,
+    /// RetroArch's files compressed as RZIP, as its "SaveRAM Compression"
+    /// writes them.
+    RetroArchCompressed,
 }
 
 impl SaveFormat {
@@ -72,20 +75,28 @@ impl SaveFormat {
         match self {
             SaveFormat::RetroArch => "retroarch",
             SaveFormat::Slot => "slot",
+            SaveFormat::RetroArchCompressed => "retroarch-rzip",
         }
     }
+
+    pub const ALL: [SaveFormat; 3] = [
+        SaveFormat::RetroArch,
+        SaveFormat::Slot,
+        SaveFormat::RetroArchCompressed,
+    ];
 
     pub fn parse(name: &str) -> Option<SaveFormat> {
-        [SaveFormat::RetroArch, SaveFormat::Slot]
-            .into_iter()
-            .find(|f| f.name() == name)
+        SaveFormat::ALL.into_iter().find(|f| f.name() == name)
     }
 
-    pub fn other(self) -> SaveFormat {
-        match self {
-            SaveFormat::RetroArch => SaveFormat::Slot,
-            SaveFormat::Slot => SaveFormat::RetroArch,
-        }
+    pub fn step(self, right: bool) -> SaveFormat {
+        let n = SaveFormat::ALL.len();
+        let at = SaveFormat::ALL.iter().position(|&f| f == self).unwrap_or(0);
+        SaveFormat::ALL[if right {
+            (at + 1) % n
+        } else {
+            (at + n - 1) % n
+        }]
     }
 }
 

@@ -289,3 +289,25 @@ fn the_theme_picker_repaints_the_socket_backdrop_and_keeps_the_choice() {
         slot_store::Tint::Sepia
     );
 }
+
+#[test]
+fn save_format_picks_the_compressed_retroarch_format_from_a_list() {
+    use slot_ui::{QuickRow, QuickValue};
+    let (d, mut a) = shelf_with(Look::Socket);
+    open_row(&mut a, QuickRow::SaveFormat);
+    press(&mut a, Btn::A);
+    assert!(a.picker_open());
+    let lines = a.settings_lines().unwrap();
+    assert_eq!(lines[slot_ui::option_slot(2)].0, "RetroArch, compressed");
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::A);
+    assert_eq!(
+        a.quick_value(QuickRow::SaveFormat),
+        Some(QuickValue::RetroArchCompressed)
+    );
+    assert_eq!(
+        slot_store::read_slot_state(d.path()).save_format,
+        slot_store::SaveFormat::RetroArchCompressed
+    );
+}

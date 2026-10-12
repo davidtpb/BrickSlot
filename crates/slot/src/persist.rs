@@ -168,27 +168,33 @@ fn write_sav_files(
 ) -> std::io::Result<bool> {
     let dir = crate::root::saves_dir(root).join(platform.dir_name());
     let file = |ext: &str| dir.join(format!("{stem}.{ext}"));
-    let current = file(main_ext(format)).is_file();
+    let compress = format == SaveFormat::RetroArchCompressed;
+    let current =
+        file(main_ext(format)).is_file() && is_compressed(&file(main_ext(format))) == compress;
     if current && read_sav(root, platform, stem).as_deref() == Some(sav) {
         return Ok(false);
     }
     std::fs::create_dir_all(&dir)?;
+    let packed = |data: &[u8]| match compress {
+        true => slot_store::rzip::compress(data),
+        false => data.to_vec(),
+    };
     match format {
-        SaveFormat::RetroArch => {
+        SaveFormat::RetroArch | SaveFormat::RetroArchCompressed => {
             let (ram, rtc) = split_rtc(sav);
-            atomic_write(&file(SRM), ram)?;
+            atomic_write(&file(SRM), &packed(ram))?;
             if rtc.is_empty() {
                 if file(RTC).exists() {
                     std::fs::remove_file(file(RTC))?;
                 }
             } else {
-                atomic_write(&file(RTC), rtc)?;
+                atomic_write(&file(RTC), &packed(rtc))?;
             }
         }
         SaveFormat::Slot => atomic_write(&file(SAV), sav)?,
     }
     let others: &[&str] = match format {
-        SaveFormat::RetroArch => &[SAV],
+        SaveFormat::RetroArch | SaveFormat::RetroArchCompressed => &[SAV],
         SaveFormat::Slot => &[SRM, RTC],
     };
     for ext in others {
@@ -201,8 +207,36 @@ fn write_sav_files(
 
 fn main_ext(format: SaveFormat) -> &'static str {
     match format {
-        SaveFormat::RetroArch => SRM,
+        SaveFormat::RetroArch | SaveFormat::RetroArchCompressed => SRM,
         SaveFormat::Slot => SAV,
+    }
+}
+
+/// Whether a save file is RetroArch's compressed RZIP.
+fn is_compressed(path: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 20];
+    std::fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .is_ok_and(|_| slot_store::rzip::is_rzip(&head))
+}
+
+/// Reads a RetroArch save file, inflating it if RetroArch compressed it.
+/// One that will not inflate is copied aside as `.broken` first, so the
+/// fresh save written over it later does not lose it.
+fn read_retroarch(path: &Path) -> Option<Vec<u8>> {
+    let data = std::fs::read(path).ok()?;
+    match slot_store::rzip::plain(data) {
+        Ok(plain) => Some(plain),
+        Err(e) => {
+            eprintln!("slot: save: {}: {e}", path.display());
+            let mut aside = path.as_os_str().to_owned();
+            aside.push(".broken");
+            if !Path::new(&aside).exists() {
+                let _ = std::fs::copy(path, &aside);
+            }
+            None
+        }
     }
 }
 
@@ -214,8 +248,8 @@ pub fn read_sav(root: &Path, platform: Platform, stem: &str) -> Option<Vec<u8>> 
     let file = |ext: &str| dir.join(format!("{stem}.{ext}"));
     let modified = |ext: &str| std::fs::metadata(file(ext)).and_then(|m| m.modified()).ok();
     let srm = || {
-        let mut ram = std::fs::read(file(SRM)).ok()?;
-        if let Ok(rtc) = std::fs::read(file(RTC)) {
+        let mut ram = read_retroarch(&file(SRM))?;
+        if let Some(rtc) = read_retroarch(&file(RTC)) {
             ram.extend_from_slice(&rtc);
         }
         Some(ram)

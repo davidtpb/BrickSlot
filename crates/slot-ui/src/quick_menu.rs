@@ -329,6 +329,7 @@ pub enum QuickValue {
     Level9,
     RetroArch,
     Slot,
+    RetroArchCompressed,
     RainbowWave,
     Fire,
     Ocean,
@@ -363,7 +364,7 @@ impl QuickValue {
         QuickValue::Level9,
     ];
 
-    pub const ALL: [QuickValue; 58] = [
+    pub const ALL: [QuickValue; 59] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -404,6 +405,7 @@ impl QuickValue {
         QuickValue::Level9,
         QuickValue::RetroArch,
         QuickValue::Slot,
+        QuickValue::RetroArchCompressed,
         QuickValue::RainbowWave,
         QuickValue::Fire,
         QuickValue::Ocean,
@@ -470,6 +472,7 @@ impl QuickValue {
             QuickValue::Level9 => "9",
             QuickValue::RetroArch => "RetroArch (.srm)",
             QuickValue::Slot => "slot (.sav)",
+            QuickValue::RetroArchCompressed => "RetroArch, compressed",
             QuickValue::RainbowWave => "Rainbow Wave",
             QuickValue::Fire => "Fire",
             QuickValue::Ocean => "Ocean",

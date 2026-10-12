@@ -3207,7 +3207,12 @@ impl App {
                 self.say("Checking Wi-Fi\u{2026}", "");
                 self.net.send(NetJob::Status);
             }
-            QuickRow::Screen | QuickRow::Game | QuickRow::Lights | QuickRow::Network => {
+            QuickRow::Screen
+            | QuickRow::Game
+            | QuickRow::Lights
+            | QuickRow::Network
+            | QuickRow::Tools
+            | QuickRow::System => {
                 if let Some(row) = row.child() {
                     self.phase = Phase::QuickMenu { row };
                 }
@@ -3376,6 +3381,8 @@ impl App {
             | QuickRow::BtDevices
             | QuickRow::EmulatorSettings
             | QuickRow::DeviceSync
+            | QuickRow::Tools
+            | QuickRow::System
             | QuickRow::WifiStatus => return,
         }
         if QuickRow::LIGHTS.contains(&row) {
@@ -6133,6 +6140,8 @@ fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue>
         | QuickRow::BtDevices
         | QuickRow::EmulatorSettings
         | QuickRow::DeviceSync
+        | QuickRow::Tools
+        | QuickRow::System
         | QuickRow::WifiStatus => None,
     }
 }

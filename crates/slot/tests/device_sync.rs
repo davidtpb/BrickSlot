@@ -121,7 +121,7 @@ fn the_device_sync_screen_lives_under_network_and_toggles_roms() {
     slot_store::write_slot_state(d.path(), &s).unwrap();
     let (mut a, _) = common::app_booting_at(d.path(), common::CLOCK_IS_SET);
     a.apply(Action::QuickMenu);
-    while a.quick_menu() != Some(slot_ui::QuickRow::Network) {
+    while a.quick_menu() != Some(slot_ui::QuickRow::Tools) {
         press(&mut a, Btn::Down);
     }
     press(&mut a, Btn::A);

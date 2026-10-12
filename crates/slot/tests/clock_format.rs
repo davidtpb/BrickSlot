@@ -19,7 +19,7 @@ fn the_clock_setting_switches_to_twelve_hour_time_and_keeps_it() {
     let (mut a, _) = app_booting_at(d.path(), CLOCK_IS_SET);
     assert!(matches!(a.phase(), Phase::Shelf));
     a.apply(Action::QuickMenu);
-    while a.quick_menu() != Some(QuickRow::Screen) {
+    while a.quick_menu() != Some(QuickRow::System) {
         press(&mut a, Btn::Down);
     }
     press(&mut a, Btn::A);

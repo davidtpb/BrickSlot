@@ -112,7 +112,7 @@ fn up_and_down_move_the_bar_and_wrap_at_the_ends() {
     press(&mut a, Btn::Up);
     assert_eq!(
         a.quick_menu(),
-        Some(QuickRow::About),
+        Some(QuickRow::System),
         "up from the top did not wrap to the bottom"
     );
     for want in [
@@ -121,8 +121,8 @@ fn up_and_down_move_the_bar_and_wrap_at_the_ends() {
         QuickRow::Game,
         QuickRow::Lights,
         QuickRow::Network,
-        QuickRow::DateTime,
-        QuickRow::About,
+        QuickRow::Tools,
+        QuickRow::System,
         QuickRow::Search,
     ] {
         press(&mut a, Btn::Down);
@@ -230,8 +230,9 @@ fn the_game_page_flips_eject_save_turbo_and_rewind_and_saves_each() {
     press(&mut a, Btn::Left);
     assert_eq!(card(&d), (true, false, false));
     assert!(!a.turbo());
-    press(&mut a, Btn::Down);
-    press(&mut a, Btn::Down);
+    while a.quick_menu() != Some(QuickRow::EjectSave) {
+        press(&mut a, Btn::Down);
+    }
     press(&mut a, Btn::Right);
     assert_eq!(card(&d), (false, false, false));
     press(&mut a, Btn::B);
@@ -248,7 +249,6 @@ fn screen_opens_a_page_of_its_own_and_b_comes_back_to_it() {
         QuickRow::Warmth,
         QuickRow::Look,
         QuickRow::Tint,
-        QuickRow::ClockFormat,
         QuickRow::GbaShader,
         QuickRow::GbShader,
         QuickRow::ColourCorrection,
@@ -327,7 +327,9 @@ fn the_arrows_change_nothing_on_a_row_that_opens() {
         press(&mut a, Btn::Left);
         press(&mut a, Btn::Right);
         assert_eq!(a.quick_menu(), Some(row), "an arrow left {row:?}");
-        a.apply(Action::QuickMenu);
+        while a.quick_menu().is_some() {
+            a.apply(Action::QuickMenu);
+        }
     }
     assert_eq!(
         std::fs::read(d.path().join("Config/slot.state")).expect("read slot.state"),
@@ -534,19 +536,19 @@ fn the_arrows_stand_only_around_the_selected_rows_value() {
         drawn(&out, value(QuickValue::On, false)),
         "rumble's ON is not grey"
     );
-    press(&mut a, Btn::B);
-    let out = frame(&a);
-    assert!(drawn(&out, 500), "the date and time is not grey");
-
-    for _ in QuickRow::Game.position()..QuickRow::DateTime.position() {
-        press(&mut a, Btn::Down);
+    while a.quick_menu().is_some() {
+        a.apply(Action::QuickMenu);
     }
+    open_at(&mut a, QuickRow::DateTime);
     let out = frame(&a);
     assert!(
         !drawn(&out, 300) && !drawn(&out, 301),
         "arrows on a row that opens"
     );
     assert!(drawn(&out, 501), "the date and time in hand is not lit");
+    press(&mut a, Btn::Down);
+    let out = frame(&a);
+    assert!(drawn(&out, 500), "the date and time is not grey");
 }
 
 #[test]
@@ -685,9 +687,9 @@ fn syncthing_brings_wifi_with_it_and_wifi_off_takes_syncthing_down() {
     press(&mut a, Btn::Right);
     assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::On));
     assert_eq!(a.quick_value(QuickRow::Syncthing), Some(QuickValue::On));
-    while a.quick_menu() != Some(QuickRow::Wifi) {
-        press(&mut a, Btn::Up);
-    }
+    press(&mut a, Btn::B);
+    press(&mut a, Btn::B);
+    open_at(&mut a, QuickRow::Wifi);
     press(&mut a, Btn::Right);
     assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::Off));
     assert_eq!(a.quick_value(QuickRow::Syncthing), Some(QuickValue::Off));
@@ -717,9 +719,9 @@ fn retroachievements_needs_wifi_and_goes_when_wifi_does() {
     assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::On));
     assert_eq!(a.net_jobs(), [NetJob::WifiUp]);
     assert!(read_slot_state(d.path()).achievements);
-    while a.quick_menu() != Some(QuickRow::Wifi) {
-        press(&mut a, Btn::Up);
-    }
+    press(&mut a, Btn::B);
+    press(&mut a, Btn::B);
+    open_at(&mut a, QuickRow::Wifi);
     press(&mut a, Btn::Right);
     assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::Off));
     assert_eq!(a.quick_value(QuickRow::Achievements), Some(QuickValue::Off));

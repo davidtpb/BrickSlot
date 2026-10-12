@@ -232,7 +232,7 @@ fn emulator_settings_edit_a_system_s_defaults_from_settings() {
     slot_store::write_slot_state(d.path(), &s).unwrap();
     let (mut a, _) = app_booting_at(d.path(), CLOCK_IS_SET);
     a.apply(Action::QuickMenu);
-    while a.quick_menu() != Some(slot_ui::QuickRow::Game) {
+    while a.quick_menu() != Some(slot_ui::QuickRow::Tools) {
         press(&mut a, Btn::Down);
     }
     press(&mut a, Btn::A);

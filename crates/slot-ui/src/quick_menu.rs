@@ -48,10 +48,12 @@ pub enum QuickRow {
     JoinNetwork,
     StartFresh,
     WifiStatus,
+    Tools,
+    System,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 42] = [
+    pub const ALL: [QuickRow; 44] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -94,6 +96,8 @@ impl QuickRow {
         QuickRow::JoinNetwork,
         QuickRow::StartFresh,
         QuickRow::WifiStatus,
+        QuickRow::Tools,
+        QuickRow::System,
     ];
 
     pub const MAIN: [QuickRow; 7] = [
@@ -102,34 +106,31 @@ impl QuickRow {
         QuickRow::Game,
         QuickRow::Lights,
         QuickRow::Network,
-        QuickRow::DateTime,
-        QuickRow::About,
+        QuickRow::Tools,
+        QuickRow::System,
     ];
 
-    pub const SCREEN: [QuickRow; 9] = [
+    pub const SCREEN: [QuickRow; 8] = [
         QuickRow::Brightness,
         QuickRow::Warmth,
         QuickRow::Look,
         QuickRow::Tint,
-        QuickRow::ClockFormat,
         QuickRow::GbaShader,
         QuickRow::GbShader,
         QuickRow::ColourCorrection,
         QuickRow::GbPalettes,
     ];
 
-    pub const GAME: [QuickRow; 11] = [
+    pub const GAME: [QuickRow; 9] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Rewind,
         QuickRow::Turbo,
         QuickRow::Rumble,
-        QuickRow::EjectSave,
         QuickRow::StartFresh,
+        QuickRow::EjectSave,
         QuickRow::SaveFormat,
         QuickRow::Performance,
-        QuickRow::EmulatorSettings,
-        QuickRow::MenuSounds,
     ];
 
     pub const LIGHTS: [QuickRow; 4] = [
@@ -139,18 +140,31 @@ impl QuickRow {
         QuickRow::LightLevel,
     ];
 
-    pub const NETWORK: [QuickRow; 11] = [
+    pub const NETWORK: [QuickRow; 5] = [
         QuickRow::Wifi,
         QuickRow::WifiStatus,
         QuickRow::JoinNetwork,
-        QuickRow::DeviceSync,
         QuickRow::Bluetooth,
         QuickRow::BtDevices,
-        QuickRow::AutoTime,
+    ];
+
+    /// What the frontend does besides play: emulator settings, moving
+    /// files and progress about, achievements and labels.
+    pub const TOOLS: [QuickRow; 6] = [
+        QuickRow::EmulatorSettings,
+        QuickRow::DeviceSync,
         QuickRow::FileTransfer,
         QuickRow::Syncthing,
         QuickRow::Achievements,
         QuickRow::Labels,
+    ];
+
+    pub const SYSTEM: [QuickRow; 5] = [
+        QuickRow::DateTime,
+        QuickRow::AutoTime,
+        QuickRow::ClockFormat,
+        QuickRow::MenuSounds,
+        QuickRow::About,
     ];
 
     pub fn index(self) -> usize {
@@ -158,64 +172,42 @@ impl QuickRow {
     }
 
     pub fn page(self) -> &'static [QuickRow] {
-        match self {
-            QuickRow::Brightness
-            | QuickRow::Warmth
-            | QuickRow::GbaShader
-            | QuickRow::GbShader
-            | QuickRow::ColourCorrection
-            | QuickRow::GbPalettes
-            | QuickRow::Look
-            | QuickRow::Tint
-            | QuickRow::ClockFormat => &QuickRow::SCREEN,
-            QuickRow::LightMode
-            | QuickRow::LightColour
-            | QuickRow::LightEffect
-            | QuickRow::LightLevel => &QuickRow::LIGHTS,
-            QuickRow::Wifi
-            | QuickRow::AutoTime
-            | QuickRow::Syncthing
-            | QuickRow::Achievements
-            | QuickRow::Labels
-            | QuickRow::FileTransfer
-            | QuickRow::JoinNetwork
-            | QuickRow::WifiStatus
-            | QuickRow::Bluetooth
-            | QuickRow::DeviceSync
-            | QuickRow::BtDevices => &QuickRow::NETWORK,
-            QuickRow::FastForward
-            | QuickRow::FastForwardSound
-            | QuickRow::Rewind
-            | QuickRow::Turbo
-            | QuickRow::Rumble
-            | QuickRow::EjectSave
-            | QuickRow::SaveFormat
-            | QuickRow::Performance
-            | QuickRow::MenuSounds
-            | QuickRow::EmulatorSettings
-            | QuickRow::StartFresh => &QuickRow::GAME,
-            _ => &QuickRow::MAIN,
-        }
+        [
+            &QuickRow::SCREEN[..],
+            &QuickRow::GAME,
+            &QuickRow::LIGHTS,
+            &QuickRow::NETWORK,
+            &QuickRow::TOOLS,
+            &QuickRow::SYSTEM,
+        ]
+        .into_iter()
+        .find(|page| page.contains(&self))
+        .unwrap_or(&QuickRow::MAIN)
     }
 
+    /// The categories on the first page, and the page each opens.
+    const CATEGORIES: [(QuickRow, &'static [QuickRow]); 6] = [
+        (QuickRow::Screen, &QuickRow::SCREEN),
+        (QuickRow::Game, &QuickRow::GAME),
+        (QuickRow::Lights, &QuickRow::LIGHTS),
+        (QuickRow::Network, &QuickRow::NETWORK),
+        (QuickRow::Tools, &QuickRow::TOOLS),
+        (QuickRow::System, &QuickRow::SYSTEM),
+    ];
+
     pub fn parent(self) -> Option<QuickRow> {
-        match self.page()[0] {
-            QuickRow::Brightness => Some(QuickRow::Screen),
-            QuickRow::FastForward => Some(QuickRow::Game),
-            QuickRow::LightMode => Some(QuickRow::Lights),
-            QuickRow::Wifi => Some(QuickRow::Network),
-            _ => None,
-        }
+        let page = self.page();
+        QuickRow::CATEGORIES
+            .iter()
+            .find(|(_, p)| p[0] == page[0])
+            .map(|(c, _)| *c)
     }
 
     pub fn child(self) -> Option<QuickRow> {
-        match self {
-            QuickRow::Screen => Some(QuickRow::SCREEN[0]),
-            QuickRow::Game => Some(QuickRow::GAME[0]),
-            QuickRow::Lights => Some(QuickRow::LIGHTS[0]),
-            QuickRow::Network => Some(QuickRow::NETWORK[0]),
-            _ => None,
-        }
+        QuickRow::CATEGORIES
+            .iter()
+            .find(|(c, _)| *c == self)
+            .map(|(_, p)| p[0])
     }
 
     pub fn position(self) -> usize {
@@ -266,6 +258,8 @@ impl QuickRow {
             QuickRow::EmulatorSettings => "Emulator Settings",
             QuickRow::DeviceSync => "Device Sync",
             QuickRow::FileTransfer => "File Transfer",
+            QuickRow::Tools => "Tools",
+            QuickRow::System => "System",
         }
     }
 
@@ -278,6 +272,8 @@ impl QuickRow {
                 | QuickRow::Game
                 | QuickRow::Lights
                 | QuickRow::Network
+                | QuickRow::Tools
+                | QuickRow::System
                 | QuickRow::Search
                 | QuickRow::Labels
                 | QuickRow::JoinNetwork

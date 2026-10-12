@@ -85,8 +85,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Gameplay",
             "Lights",
             "Network",
-            "Date & Time",
-            "About"
+            "Tools",
+            "System"
         ]
     );
     assert_eq!(
@@ -96,7 +96,6 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Warmth",
             "Style",
             "Theme",
-            "Clock",
             "GBA Shader",
             "GB / GBC Shader",
             "Color Correction",
@@ -111,47 +110,68 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Rewind",
             "Turbo Buttons",
             "Rumble",
-            "Auto Save on Eject",
             "Start Fresh",
+            "Auto Save on Eject",
             "Save Format",
-            "Performance",
-            "Emulator Settings",
-            "Menu Sounds"
+            "Performance"
         ]
     );
-    let opens: Vec<QuickRow> = QuickRow::ALL.into_iter().filter(|r| r.opens()).collect();
     assert_eq!(
-        opens,
+        QuickRow::NETWORK.map(QuickRow::label),
         [
-            QuickRow::Screen,
-            QuickRow::DateTime,
-            QuickRow::About,
-            QuickRow::Game,
-            QuickRow::Lights,
-            QuickRow::Network,
-            QuickRow::Search,
-            QuickRow::Labels,
-            QuickRow::BtDevices,
-            QuickRow::EmulatorSettings,
-            QuickRow::DeviceSync,
-            QuickRow::JoinNetwork,
-            QuickRow::WifiStatus
+            "Wi-Fi",
+            "Wi-Fi Status",
+            "Join Network",
+            "Bluetooth",
+            "Bluetooth Devices"
+        ]
+    );
+    assert_eq!(
+        QuickRow::TOOLS.map(QuickRow::label),
+        [
+            "Emulator Settings",
+            "Device Sync",
+            "File Transfer",
+            "Syncthing",
+            "RetroAchievements",
+            "Download Labels"
+        ]
+    );
+    assert_eq!(
+        QuickRow::SYSTEM.map(QuickRow::label),
+        [
+            "Date & Time",
+            "Set Time Automatically",
+            "Clock",
+            "Menu Sounds",
+            "About"
         ]
     );
     assert_eq!(
         QuickRow::LIGHTS.map(QuickRow::label),
         ["Lights", "Light Color", "Light Effect", "Light Brightness"]
     );
-    for page in [
+    let pages = [
         &QuickRow::MAIN[..],
         &QuickRow::SCREEN[..],
         &QuickRow::GAME[..],
         &QuickRow::LIGHTS[..],
         &QuickRow::NETWORK[..],
-    ] {
+        &QuickRow::TOOLS[..],
+        &QuickRow::SYSTEM[..],
+    ];
+    for page in pages {
         for &row in page {
             assert_eq!(row.page(), page, "{row:?}");
         }
+    }
+    for row in QuickRow::ALL {
+        let on = pages.iter().filter(|p| p.contains(&row)).count();
+        assert_eq!(on, 1, "{row:?} is on {on} pages");
+    }
+    for category in &QuickRow::MAIN[1..] {
+        let first = category.child().expect("a category opens a page");
+        assert_eq!(first.parent(), Some(*category));
     }
 }
 

@@ -88,6 +88,7 @@ extern "C" {
     fn slot_rc_idle();
     fn slot_rc_user_agent(buffer: *mut c_char, size: usize) -> usize;
     fn slot_rc_real_address(console: u32, address: u32, real: *mut u32) -> u32;
+    fn slot_rc_set_hardcore(on: c_int);
 }
 
 fn push(event: Event) {
@@ -163,6 +164,12 @@ pub fn reset() {
 pub fn do_frame() {
     if started() && MEMORY.read().is_ok_and(|m| m.is_some()) {
         unsafe { slot_rc_do_frame() };
+    }
+}
+
+pub fn set_hardcore(on: bool) {
+    if started() {
+        unsafe { slot_rc_set_hardcore(on as c_int) };
     }
 }
 

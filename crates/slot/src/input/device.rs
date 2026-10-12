@@ -7,8 +7,8 @@ use std::time::Instant;
 use slot_input::{Btn, InputSource, Millis, RawEvent};
 
 use super::evdev::{
-    decode, device_name, pick_devices, Ev, Hat, Keymap, Triggers, ABS_RZ, ABS_Z, EVENT_BYTES,
-    EV_ABS, EV_KEY, EV_SYN, KEYMAP_VAR,
+    decode, device_name, pick_devices, Ev, Hat, Keymap, Stick, Triggers, ABS_RZ, ABS_X, ABS_Y,
+    ABS_Z, EVENT_BYTES, EV_ABS, EV_KEY, EV_SYN, KEYMAP_VAR,
 };
 use super::trace;
 
@@ -96,7 +96,7 @@ extern "C" {
     fn ioctl(fd: i32, request: std::ffi::c_ulong, ...) -> i32;
 }
 
-fn trigger_threshold(file: &File, axis: u16) -> i32 {
+fn absinfo(file: &File, axis: u16) -> Option<(i32, i32, i32)> {
     use std::os::unix::io::AsRawFd;
     let mut info = [0i32; 6];
     let rc = unsafe {
@@ -106,11 +106,12 @@ fn trigger_threshold(file: &File, axis: u16) -> i32 {
             info.as_mut_ptr(),
         )
     };
-    let (min, max) = (info[1], info[2]);
-    if rc < 0 || max <= min {
-        return 1;
-    }
-    min + (max - min) / 2
+    let (min, max, flat) = (info[1], info[2], info[4]);
+    (rc >= 0 && max > min).then_some((min, max, flat))
+}
+
+fn trigger_threshold(file: &File, axis: u16) -> i32 {
+    absinfo(file, axis).map_or(1, |(min, max, _)| min + (max - min) / 2)
 }
 
 fn read_node(node: &Path, keymap: Keymap, queue: &Mutex<Vec<RawEvent>>, trace: Option<&Trace>) {
@@ -133,6 +134,9 @@ fn read_node(node: &Path, keymap: Keymap, queue: &Mutex<Vec<RawEvent>>, trace: O
         ),
         Keymap::Anbernic => Triggers::new(1),
     };
+    let stick_x = absinfo(&file, ABS_X).unwrap_or((0, 0, 0));
+    let stick_y = absinfo(&file, ABS_Y).unwrap_or((0, 0, 0));
+    let mut stick = Stick::new(stick_x.0, stick_x.1, stick_x.2, stick_y.0, stick_y.1, stick_y.2);
     let mut buf = [0u8; EVENT_BYTES * 16];
     loop {
         let read = match file.read(&mut buf) {
@@ -155,9 +159,13 @@ fn read_node(node: &Path, keymap: Keymap, queue: &Mutex<Vec<RawEvent>>, trace: O
             match ev.kind {
                 EV_ABS if keymap == Keymap::TrimUi => {
                     events.extend(hat.feed(ev));
+                    events.extend(stick.feed(ev));
                     events.extend(triggers.feed(ev));
                 }
-                EV_ABS => events.extend(hat.feed(ev)),
+                EV_ABS => {
+                    events.extend(hat.feed(ev));
+                    events.extend(stick.feed(ev));
+                }
                 _ => events.extend(keymap.to_raw(ev)),
             }
         }

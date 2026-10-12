@@ -336,6 +336,18 @@ fn headphones_follow_the_detection_pin() {
     assert!(!platform(&d).headphones());
 }
 
+#[test]
+fn headphones_follow_the_h2w_switch_on_trimui() {
+    let d = sysfs("255", "87");
+    assert!(!platform(&d).headphones());
+    let path = d.path().join("class/switch/h2w");
+    fs::create_dir_all(&path).unwrap();
+    fs::write(path.join("state"), "2\n").unwrap();
+    assert!(platform(&d).headphones());
+    fs::write(path.join("state"), "0\n").unwrap();
+    assert!(!platform(&d).headphones());
+}
+
 const MOUNTS: &str = "\
 /dev/mmcblk0p5 / ext4 rw,noatime 0 0
 /dev/mmcblk0p7 /mnt/sdcard vfat ro,noatime,fmask=0022,errors=remount-ro 0 0

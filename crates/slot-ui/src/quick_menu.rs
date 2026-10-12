@@ -51,10 +51,14 @@ pub enum QuickRow {
     WifiStatus,
     Tools,
     System,
+    IdleDim,
+    Hardcore,
+    Screenshots,
+    Update,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 45] = [
+    pub const ALL: [QuickRow; 49] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -100,6 +104,10 @@ impl QuickRow {
         QuickRow::Tools,
         QuickRow::System,
         QuickRow::Files,
+        QuickRow::IdleDim,
+        QuickRow::Hardcore,
+        QuickRow::Screenshots,
+        QuickRow::Update,
     ];
 
     pub const MAIN: [QuickRow; 7] = [
@@ -112,7 +120,7 @@ impl QuickRow {
         QuickRow::System,
     ];
 
-    pub const SCREEN: [QuickRow; 8] = [
+    pub const SCREEN: [QuickRow; 9] = [
         QuickRow::Brightness,
         QuickRow::Warmth,
         QuickRow::Look,
@@ -121,9 +129,10 @@ impl QuickRow {
         QuickRow::GbShader,
         QuickRow::ColourCorrection,
         QuickRow::GbPalettes,
+        QuickRow::IdleDim,
     ];
 
-    pub const GAME: [QuickRow; 9] = [
+    pub const GAME: [QuickRow; 10] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Rewind,
@@ -133,6 +142,7 @@ impl QuickRow {
         QuickRow::EjectSave,
         QuickRow::SaveFormat,
         QuickRow::Performance,
+        QuickRow::Hardcore,
     ];
 
     pub const LIGHTS: [QuickRow; 4] = [
@@ -152,7 +162,7 @@ impl QuickRow {
 
     /// What the frontend does besides play: emulator settings, moving
     /// files and progress about, achievements and labels.
-    pub const TOOLS: [QuickRow; 7] = [
+    pub const TOOLS: [QuickRow; 9] = [
         QuickRow::Files,
         QuickRow::EmulatorSettings,
         QuickRow::DeviceSync,
@@ -160,6 +170,8 @@ impl QuickRow {
         QuickRow::Syncthing,
         QuickRow::Achievements,
         QuickRow::Labels,
+        QuickRow::Screenshots,
+        QuickRow::Update,
     ];
 
     pub const SYSTEM: [QuickRow; 5] = [
@@ -264,6 +276,10 @@ impl QuickRow {
             QuickRow::FileTransfer => "File Transfer",
             QuickRow::Tools => "Tools",
             QuickRow::System => "System",
+            QuickRow::IdleDim => "Idle Dim",
+            QuickRow::Hardcore => "Hardcore",
+            QuickRow::Screenshots => "Screenshots",
+            QuickRow::Update => "Update",
         }
     }
 
@@ -286,6 +302,8 @@ impl QuickRow {
                 | QuickRow::EmulatorSettings
                 | QuickRow::DeviceSync
                 | QuickRow::Files
+                | QuickRow::Screenshots
+                | QuickRow::Update
         )
     }
 

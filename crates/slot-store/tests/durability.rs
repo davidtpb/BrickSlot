@@ -217,6 +217,8 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             bluetooth: false,
             clock_12h: false,
             start_fresh: true,
+            idle_dim: true,
+            hardcore: false,
         }
     );
 }

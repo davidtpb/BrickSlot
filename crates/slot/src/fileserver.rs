@@ -64,6 +64,12 @@ pub struct FileServer {
 impl FileServer {
     /// Listens on `port` (0 for any free port) until dropped.
     pub fn start(root: &Path, port: u16) -> std::io::Result<FileServer> {
+        Self::start_pin(root, port, None)
+    }
+
+    /// Same as [`start`], but every page needs `pin` (the four digits shown
+    /// on the handheld).
+    pub fn start_pin(root: &Path, port: u16, pin: Option<u16>) -> std::io::Result<FileServer> {
         let listener = TcpListener::bind(("0.0.0.0", port))?;
         let port = listener.local_addr()?.port();
         listener.set_nonblocking(true)?;
@@ -88,7 +94,7 @@ impl FileServer {
                             let _ = std::thread::Builder::new()
                                 .name("slot-files-req".into())
                                 .spawn(move || {
-                                    serve(&root, stream);
+                                    serve(&root, stream, pin);
                                     drop(slot);
                                 });
                         }
@@ -117,6 +123,7 @@ struct Request {
     path: String,
     query: Vec<(String, String)>,
     length: u64,
+    cookie: String,
 }
 
 impl Request {
@@ -152,6 +159,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> Option<Request> {
     let method = parts.next()?.to_string();
     let target = parts.next()?.to_string();
     let mut length = 0;
+    let mut cookie = String::new();
     let mut headers = 0;
     loop {
         let header = read_line(reader, by)?;
@@ -170,6 +178,9 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> Option<Request> {
             if k.trim().eq_ignore_ascii_case("content-length") {
                 length = v.trim().parse().unwrap_or(0);
             }
+            if k.trim().eq_ignore_ascii_case("cookie") {
+                cookie = v.trim().to_string();
+            }
         }
     }
     let (path, query) = target.split_once('?').unwrap_or((&target, ""));
@@ -186,6 +197,7 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> Option<Request> {
         path: decode(path),
         query,
         length,
+        cookie,
     })
 }
 
@@ -279,7 +291,33 @@ fn reachable(root: &Path, rel: &str) -> Option<PathBuf> {
     allowed(rel).filter(|p| no_links(root, p))
 }
 
-fn serve(root: &Path, stream: TcpStream) {
+fn cookie_pin(cookie: &str) -> Option<u16> {
+    cookie.split(';').find_map(|part| {
+        let (k, v) = part.trim().split_once('=')?;
+        (k == "slotpin").then(|| v.parse().ok())?
+    })
+}
+
+fn pin_ok(req: &Request, pin: Option<u16>) -> bool {
+    let Some(want) = pin else {
+        return true;
+    };
+    req.param("pin")
+        .and_then(|p| p.parse().ok())
+        .or_else(|| cookie_pin(&req.cookie))
+        == Some(want)
+}
+
+fn pin_page() -> String {
+    page(
+        "PIN",
+        "<h1>File transfer</h1><p>Enter the four-digit PIN shown on the handheld.</p>\
+         <form method=get><input name=pin inputmode=numeric pattern=[0-9]{4} maxlength=4 autofocus>\
+         <button>Open</button></form>",
+    )
+}
+
+fn serve(root: &Path, stream: TcpStream, pin: Option<u16>) {
     let _ = stream.set_read_timeout(Some(HEAD_WITHIN));
     let Ok(write_half) = stream.try_clone() else {
         return;
@@ -289,6 +327,11 @@ fn serve(root: &Path, stream: TcpStream) {
     let Some(req) = read_request(&mut reader) else {
         return;
     };
+    if !pin_ok(&req, pin) {
+        let _ = Reply::html(pin_page()).write(&mut out);
+        return;
+    }
+    let set_pin = pin.filter(|_| req.param("pin").is_some());
     let reply = match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/") => Reply::html(index_page(root)),
         ("GET", "/browse") => match req.param("dir").and_then(|d| reachable(root, d)) {
@@ -322,6 +365,10 @@ fn serve(root: &Path, stream: TcpStream) {
         },
         _ => Reply::status(404, "Not found"),
     };
+    let reply = match set_pin {
+        Some(n) => reply.cookie(&format!("slotpin={n}; Path=/; SameSite=Strict")),
+        None => reply,
+    };
     let _ = reply.write(&mut out);
 }
 
@@ -329,6 +376,7 @@ struct Reply {
     code: u16,
     kind: &'static str,
     body: Vec<u8>,
+    extra: String,
 }
 
 impl Reply {
@@ -337,6 +385,7 @@ impl Reply {
             code: 200,
             kind: "text/html; charset=utf-8",
             body: body.into_bytes(),
+            extra: String::new(),
         }
     }
 
@@ -345,7 +394,13 @@ impl Reply {
             code,
             kind: "text/plain; charset=utf-8",
             body: text.as_bytes().to_vec(),
+            extra: String::new(),
         }
+    }
+
+    fn cookie(mut self, cookie: &str) -> Reply {
+        self.extra = format!("Set-Cookie: {cookie}\r\n");
+        self
     }
 
     fn write(&self, out: &mut TcpStream) -> std::io::Result<()> {
@@ -360,10 +415,11 @@ impl Reply {
         };
         write!(
             out,
-            "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n",
             self.code,
             self.kind,
-            self.body.len()
+            self.body.len(),
+            self.extra
         )?;
         out.write_all(&self.body)
     }

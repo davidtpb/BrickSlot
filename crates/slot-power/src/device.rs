@@ -951,15 +951,32 @@ fn charge_at(dir: &Path) -> Charge {
 }
 
 fn headphones_in(gpio: &str) -> bool {
-    gpio.lines()
-        .find(|l| l.contains("|Headphone detection"))
-        .and_then(|l| l.rsplit_once(')'))
-        .is_some_and(|(_, state)| state.split_whitespace().nth(1) == Some("hi"))
+    gpio.lines().any(|l| {
+        let name = l.to_ascii_lowercase();
+        let jack = ["headphone", "hpdet", "hp-det", "hp_det", "hp jack"]
+            .iter()
+            .any(|k| name.contains(k));
+        jack && l.rsplit_once(')').is_some_and(|(_, state)| {
+            matches!(state.split_whitespace().nth(1), Some("hi") | Some("1"))
+        })
+    })
+}
+
+fn switch_in(sysfs: &Path) -> bool {
+    ["class/switch/h2w/state", "class/switch/headphone/state"]
+        .iter()
+        .any(|rel| {
+            fs::read_to_string(sysfs.join(rel))
+                .ok()
+                .and_then(|s| s.trim().parse::<i32>().ok())
+                .is_some_and(|n| n != 0)
+        })
 }
 
 impl Platform for DevicePlatform {
     fn headphones(&self) -> bool {
-        fs::read_to_string(self.sysfs.join("kernel/debug/gpio")).is_ok_and(|g| headphones_in(&g))
+        switch_in(&self.sysfs)
+            || fs::read_to_string(self.sysfs.join("kernel/debug/gpio")).is_ok_and(|g| headphones_in(&g))
     }
 
     fn card_read_only(&self) -> bool {

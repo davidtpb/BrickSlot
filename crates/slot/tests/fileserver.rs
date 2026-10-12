@@ -223,3 +223,17 @@ fn idle_connections_cannot_take_every_worker() {
     let (code, _) = http(srv.port, "GET", "/", b"");
     assert_eq!(code, 200, "the workers were not given back");
 }
+
+#[test]
+fn a_pin_hides_the_page_until_it_is_given() {
+    let d = card();
+    let srv = slot::fileserver::FileServer::start_pin(d.path(), 0, Some(4821)).unwrap();
+    let (_, body) = http(srv.port, "GET", "/", b"");
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("PIN"), "{body}");
+    assert!(!body.contains("/browse?dir=Games"), "{body}");
+    let (code, body) = http(srv.port, "GET", "/?pin=4821", b"");
+    let body = String::from_utf8_lossy(&body);
+    assert_eq!(code, 200);
+    assert!(body.contains("/browse?dir=Games"), "{body}");
+}

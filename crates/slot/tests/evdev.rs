@@ -284,6 +284,21 @@ fn the_d_pad_arrives_as_a_hat_rather_than_as_keys() {
 }
 
 #[test]
+fn the_left_stick_is_a_d_pad_past_its_deadzone() {
+    use slot::input::evdev::{Ev, Stick, ABS_X, ABS_Y, EV_ABS};
+    let mut stick = Stick::new(0, 255, 16, 0, 255, 16);
+    let ev = |code, value| Ev {
+        kind: EV_ABS,
+        code,
+        value,
+    };
+    assert_eq!(stick.feed(ev(ABS_X, 128)), vec![]);
+    assert_eq!(stick.feed(ev(ABS_X, 220)), vec![RawEvent::Down(Btn::Right)]);
+    assert_eq!(stick.feed(ev(ABS_X, 128)), vec![RawEvent::Up(Btn::Right)]);
+    assert_eq!(stick.feed(ev(ABS_Y, 20)), vec![RawEvent::Down(Btn::Up)]);
+}
+
+#[test]
 fn a_hat_swung_end_to_end_releases_before_it_presses() {
     let mut hat = slot::input::evdev::Hat::default();
     let ev = |code, value| slot::input::evdev::Ev {

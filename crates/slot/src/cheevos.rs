@@ -20,6 +20,10 @@ pub fn enable(on: bool) {
     ON.store(on, Ordering::Relaxed);
 }
 
+pub fn set_hardcore(on: bool) {
+    slot_cheevos::set_hardcore(on);
+}
+
 pub fn enabled() -> bool {
     ON.load(Ordering::Relaxed)
 }
@@ -60,6 +64,26 @@ pub fn console_of(rom: &Path) -> Option<Console> {
         "gba" => Console::Gba,
         "gbc" => Console::Gbc,
         "gb" => Console::Gb,
+        "zip" => {
+            let data = std::fs::read(rom).ok()?;
+            let name = slot_store::zip::names(&data)
+                .into_iter()
+                .find(|n| {
+                    slot_store::Platform::ALL
+                        .iter()
+                        .any(|p| p.accepts(Path::new(n)))
+                })?;
+            let inner = Path::new(&name)
+                .extension()?
+                .to_str()?
+                .to_ascii_lowercase();
+            match inner.as_str() {
+                "gba" => Console::Gba,
+                "gbc" => Console::Gbc,
+                "gb" => Console::Gb,
+                _ => return None,
+            }
+        }
         _ => return None,
     })
 }
@@ -83,7 +107,7 @@ pub fn begin(rom: &Path, regions: Vec<MemoryRegion>) -> Option<Session> {
         eprintln!("slot: cheevos: the core shares no memory map");
         return None;
     }
-    let bytes = match std::fs::read(rom) {
+    let bytes = match slot_store::rom::open(rom) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("slot: cheevos: {}: {e}", rom.display());

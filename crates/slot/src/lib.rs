@@ -32,6 +32,7 @@ pub mod link_start;
 pub mod link_state;
 pub mod net;
 pub mod persist;
+pub mod update;
 pub mod playtime;
 pub mod prefetch;
 pub mod resample;

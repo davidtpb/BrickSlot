@@ -56,6 +56,10 @@ pub struct SlotState {
     pub bluetooth: bool,
     pub clock_12h: bool,
     pub start_fresh: bool,
+    /// Dim the backlight after half a minute without a press.
+    pub idle_dim: bool,
+    /// RetroAchievements hardcore: no rewind, states, cheats or fast-forward.
+    pub hardcore: bool,
 }
 
 /// How battery saves are written: RetroArch's `.srm` with the clock in a
@@ -290,6 +294,8 @@ impl Default for SlotState {
             bluetooth: false,
             clock_12h: false,
             start_fresh: true,
+            idle_dim: true,
+            hardcore: false,
         }
     }
 }
@@ -308,7 +314,7 @@ pub fn read_slot_state(root: &Path) -> SlotState {
 
 pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     let text = format!(
-        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\nsave_format={}\nauto_time={}\ncpu={}\nlook={}\nclock_12h={}\nstart_fresh={}\ntint={}\nmenu_sounds={}\nbluetooth={}\n",
+        "cart={}\ncart_platform={}\nbrightness={}\nblue_light={}\nvolume={}\nvolume_hp={}\nmuted={}\nmuted_hp={}\nclock_set={}\nutc_offset_min={}\nrumble={}\nff_speed={}\nff_sound={}\ncolour_correction={}\nshader_gba={}\nshader_gb={}\neject_save={}\nturbo={}\nrewind={}\ngb_palettes={}\ngb_palette={}\nlight_mode={}\nlight_colour={}\nlight_effect={}\nlight_level={}\nwifi={}\nsyncthing={}\nachievements={}\nsave_format={}\nauto_time={}\ncpu={}\nlook={}\nclock_12h={}\nstart_fresh={}\ntint={}\nmenu_sounds={}\nbluetooth={}\nidle_dim={}\nhardcore={}\n",
         s.cart.as_deref().unwrap_or(""),
         s.cart_platform.map_or(String::new(), platform_key),
         s.brightness,
@@ -345,7 +351,9 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         s.start_fresh,
         s.tint.name(),
         s.menu_sounds,
-        s.bluetooth
+        s.bluetooth,
+        s.idle_dim,
+        s.hardcore
     );
     atomic_write(&state_path(root), text.as_bytes())
 }
@@ -388,6 +396,8 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut bluetooth = None;
     let mut clock_12h = None;
     let mut start_fresh = None;
+    let mut idle_dim = None;
+    let mut hardcore = None;
     for line in text.lines().filter(|l| !l.is_empty()) {
         let Some((key, value)) = line.split_once('=') else {
             continue;
@@ -429,6 +439,8 @@ fn parse(text: &str) -> Option<SlotState> {
             "bluetooth" => bluetooth = value.parse().ok(),
             "clock_12h" => clock_12h = value.parse().ok(),
             "start_fresh" => start_fresh = value.parse().ok(),
+            "idle_dim" => idle_dim = value.parse().ok(),
+            "hardcore" => hardcore = value.parse().ok(),
             "shader_gb" => shader_gb = Shader::parse(value).filter(|s| Shader::GB.contains(s)),
             _ => {}
         }
@@ -473,6 +485,8 @@ fn parse(text: &str) -> Option<SlotState> {
         bluetooth: bluetooth.unwrap_or(fallback.bluetooth),
         clock_12h: clock_12h.unwrap_or(fallback.clock_12h),
         start_fresh: start_fresh.unwrap_or(fallback.start_fresh),
+        idle_dim: idle_dim.unwrap_or(fallback.idle_dim),
+        hardcore: hardcore.unwrap_or(fallback.hardcore),
     })
 }
 

@@ -15,6 +15,7 @@ jobs:
     container: rust:1-bullseye
     outputs:
       zip: ${{ steps.package.outputs.zip }}
+      trimui: ${{ steps.package.outputs.trimui }}
     steps:
       - uses: actions/checkout@v7
 
@@ -57,11 +58,21 @@ jobs:
           zip="$out-h700.zip"
           zip -qry "$zip" "$out"
           echo "zip=$zip" >> "$GITHUB_OUTPUT"
+          task dist:trimui OUT="brickslot-${GITHUB_REF_NAME}-trimui"
+          trimui="brickslot-${GITHUB_REF_NAME}-trimui.zip"
+          zip -qry "$trimui" "brickslot-${GITHUB_REF_NAME}-trimui"
+          echo "trimui=$trimui" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.package.outputs.zip }}
           path: ${{ steps.package.outputs.zip }}
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.trimui }}
+          path: ${{ steps.package.outputs.trimui }}
           if-no-files-found: error
 
   publish:
@@ -76,16 +87,23 @@ jobs:
         with:
           name: ${{ needs.build.outputs.zip }}
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.trimui }}
+
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
           ZIP: ${{ needs.build.outputs.zip }}
+          TRIMUI: ${{ needs.build.outputs.trimui }}
         run: |
           set -eu
           cat > notes.md <<NOTES
-          Unzip and copy the contents of \`slot-${GITHUB_REF_NAME}/\` onto SD2.
+          Anbernic H700: unzip \`slot-${GITHUB_REF_NAME}-h700.zip\` and copy the contents of \`slot-${GITHUB_REF_NAME}/\` onto SD2.
+
+          TrimUI Brick / Brick Pro: unzip \`brickslot-${GITHUB_REF_NAME}-trimui.zip\` and copy everything, including the hidden \`.tmp_update\` folder, onto the SD card root.
 
           Emulation by mGBA (MPL-2.0) and gpSP (GPL-2.0). Their licences, patches and gpSP's source are in \`System/licenses/\`.
           NOTES
-          gh release create "$GITHUB_REF_NAME" "$ZIP" --repo "$GITHUB_REPOSITORY" \
+          gh release create "$GITHUB_REF_NAME" "$ZIP" "$TRIMUI" --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" --notes-file notes.md

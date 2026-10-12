@@ -77,6 +77,11 @@ int slot_rc_create(void) {
   return 1;
 }
 
+void slot_rc_set_hardcore(int on) {
+  if (client)
+    rc_client_set_hardcore_enabled(client, on ? 1 : 0);
+}
+
 void slot_rc_respond(void* callback, void* callback_data, const char* body, size_t body_length, int status) {
   rc_api_server_response_t response;
   response.body = body;

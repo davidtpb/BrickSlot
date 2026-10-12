@@ -63,6 +63,7 @@ const BATTERY_POLL_MS: Millis = 10_000;
 
 const CHARGE_POLL_MS: Millis = 1_000;
 const HEADPHONES_POLL_MS: Millis = 500;
+const IDLE_DIM_MS: Millis = 30_000;
 
 const BATTERY_LOW: u8 = 20;
 
@@ -419,6 +420,10 @@ pub struct App {
     cheevos_login: CheevosLogin,
     clock_asked: bool,
     file_server: Option<crate::fileserver::FileServer>,
+    file_pin: Option<u16>,
+    dimmed: bool,
+    idle_at: Millis,
+    shots_popup: Option<(Vec<String>, usize)>,
     power_quiet_until: Millis,
     play_key: Option<String>,
     play_ms: Millis,
@@ -584,6 +589,10 @@ impl App {
             cheevos_login: CheevosLogin::Waiting,
             clock_asked: false,
             file_server: None,
+            file_pin: None,
+            dimmed: false,
+            idle_at: 0,
+            shots_popup: None,
             power_quiet_until: 0,
             play_key: None,
             play_ms: 0,
@@ -666,6 +675,8 @@ impl App {
             app.net.send(NetJob::WifiUp);
         }
         crate::cheevos::enable(app.state.achievements);
+        crate::cheevos::set_hardcore(app.state.hardcore);
+        crate::cheevos::set_hardcore(app.state.hardcore);
         if app.state.clock_set {
             app.start();
         } else {
@@ -1290,15 +1301,15 @@ impl App {
     }
 
     pub fn may_rewind(&self) -> bool {
-        self.state.rewind && !self.link_active()
+        self.state.rewind && !self.state.hardcore && !self.link_active()
     }
 
     pub fn turbo(&self) -> bool {
-        self.game_turbo().unwrap_or(self.state.turbo)
+        !self.state.hardcore && self.game_turbo().unwrap_or(self.state.turbo)
     }
 
     pub fn records_rewind(&self) -> bool {
-        self.state.rewind
+        self.state.rewind && !self.state.hardcore
     }
 
     pub fn picture_rect(&self) -> [f32; 4] {
@@ -1309,11 +1320,11 @@ impl App {
     }
 
     pub fn may_load_state(&self) -> bool {
-        !self.link_active()
+        !self.link_active() && !self.state.hardcore
     }
 
     pub fn may_fast_forward(&self) -> bool {
-        !self.link_active()
+        !self.link_active() && !self.state.hardcore
     }
 
     pub fn end_link(&mut self) {
@@ -1658,6 +1669,7 @@ impl App {
     }
 
     fn apply_action(&mut self, action: Action) {
+        self.note_input();
         let power_key = matches!(
             action,
             Action::PowerPress | Action::PowerTap | Action::PowerHold | Action::PowerOff
@@ -1729,6 +1741,12 @@ impl App {
                 return;
             }
             return self.recent_input(action);
+        }
+        if self.shots_popup.is_some() {
+            if self.adjust(action) {
+                return;
+            }
+            return self.shots_input(action);
         }
         if self.inspect {
             if self.adjust(action) {
@@ -1848,6 +1866,7 @@ impl App {
 
     fn toggle_file_transfer(&mut self) {
         if self.file_server.take().is_some() {
+            self.file_pin = None;
             return self.say("File transfer off", "");
         }
         if !self.net.online() {
@@ -1856,10 +1875,16 @@ impl App {
         let Some(root) = self.root.clone() else {
             return;
         };
-        match crate::fileserver::FileServer::start(&root, crate::fileserver::PORT) {
+        let pin = (1000 + (self.wall_secs().unsigned_abs() % 9000) as u16).max(1000);
+        match crate::fileserver::FileServer::start_pin(
+            &root,
+            crate::fileserver::PORT,
+            Some(pin),
+        ) {
             Ok(server) => {
+                self.file_pin = Some(pin);
                 self.net.send(NetJob::Announce {
-                    title: "File transfer on".into(),
+                    title: format!("File transfer on · PIN {pin}"),
                     port: server.port,
                 });
                 self.file_server = Some(server);
@@ -2023,9 +2048,11 @@ impl App {
         let on_shelf = matches!(self.phase, Phase::Shelf);
         let inspecting = self.inspect && on_shelf;
         let recent = self.recent_popup.as_ref().filter(|_| on_shelf);
+        let shots = self.shots_popup.as_ref();
         let shown = (self.socket_look() && (row.is_some() || self.power_menu.is_some()))
             || inspecting
             || recent.is_some()
+            || shots.is_some()
             || customizing.is_some()
             || core_popup.is_some()
             || menu
@@ -2137,6 +2164,17 @@ impl App {
                     (format!("{name}   {}", p.platform.dir_name()), true);
             }
             lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close"), true);
+        }
+        if let Some((list, at)) = shots.filter(|_| self.power_menu.is_none()) {
+            let (first, shown, _) = popup_window(list.len(), *at);
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Screenshots".into(), true);
+            if list.is_empty() {
+                lines[slot_ui::option_slot(0)] = ("None yet. MENU+A in a game".into(), true);
+            }
+            for (i, name) in list.iter().skip(first).take(shown).enumerate() {
+                lines[slot_ui::option_slot(i)] = (name.clone(), true);
+            }
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (key("B", "Close    Y  Delete"), true);
         }
         if self.files_popup_up() && self.power_menu.is_none() {
             self.files_popup_lines(&mut lines);
@@ -2448,7 +2486,13 @@ impl App {
             .map_or(0, |l| l.len());
         vec![
             ("System", cart.platform.name().to_string()),
-            ("Core", core.text().to_string()),
+            (
+                "Core",
+                match slot_store::rom::patch_label(&cart.rom) {
+                    Some(p) => format!("{} · {p}", core.text()),
+                    None => core.text().to_string(),
+                },
+            ),
             ("Play time", played),
             ("Last played", last),
             ("Battery save", save),
@@ -2502,6 +2546,93 @@ impl App {
                 self.recent_popup = None
             }
             _ => {}
+        }
+    }
+
+    fn open_shots(&mut self) {
+        let Some(root) = &self.root else {
+            return;
+        };
+        let dir = root.join(SCREENSHOTS);
+        let mut list: Vec<String> = std::fs::read_dir(&dir)
+            .map(|d| {
+                d.flatten()
+                    .filter_map(|e| {
+                        let name = e.file_name().to_string_lossy().into_owned();
+                        name.to_ascii_lowercase()
+                            .ends_with(".png")
+                            .then_some(name)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        list.sort();
+        list.reverse();
+        self.shelf_mut().release_hold();
+        self.shots_popup = Some((list, 0));
+    }
+
+    fn shots_input(&mut self, action: Action) {
+        let Some((list, at)) = &mut self.shots_popup else {
+            return;
+        };
+        let n = list.len();
+        match action {
+            Action::GbaDown(Btn::Up) if n > 0 => *at = (*at + n - 1) % n,
+            Action::GbaDown(Btn::Down) if n > 0 => *at = (*at + 1) % n,
+            Action::GbaDown(Btn::Y) if n > 0 => {
+                if let Some(root) = &self.root {
+                    let name = list[*at].clone();
+                    let _ = std::fs::remove_file(root.join(SCREENSHOTS).join(&name));
+                }
+                list.remove(*at);
+                if list.is_empty() {
+                    self.shots_popup = None;
+                } else {
+                    *at = (*at).min(list.len() - 1);
+                }
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => self.shots_popup = None,
+            _ => {}
+        }
+    }
+
+    fn start_update(&mut self) {
+        if !self.net.online() {
+            return self.say("Turn on Wi-Fi first", "Network > Wi-Fi");
+        }
+        if self.root.is_none() {
+            return;
+        }
+        self.net.send(NetJob::Update);
+        self.say("Looking for an update\u{2026}", "From GitHub releases");
+    }
+
+    fn note_input(&mut self) {
+        self.idle_at = self.now();
+        if !self.dimmed {
+            return;
+        }
+        self.dimmed = false;
+        if let Some(power) = &mut self.power {
+            power.set_backlight(self.state.brightness);
+        }
+    }
+
+    fn idle_tick(&mut self) {
+        if !self.state.idle_dim || matches!(self.phase, Phase::Doze { .. }) {
+            return;
+        }
+        if self.idle_at == 0 {
+            self.idle_at = self.now();
+            return;
+        }
+        if self.dimmed || self.now().saturating_sub(self.idle_at) < IDLE_DIM_MS {
+            return;
+        }
+        self.dimmed = true;
+        if let Some(power) = &mut self.power {
+            power.set_backlight(self.state.brightness.min(1));
         }
     }
 
@@ -3229,6 +3360,8 @@ impl App {
                 }
             }
             QuickRow::EmulatorSettings => self.open_emulator_settings(Platform::Gba),
+            QuickRow::Screenshots => self.open_shots(),
+            QuickRow::Update => self.start_update(),
             QuickRow::WifiStatus => {
                 self.say("Checking Wi-Fi\u{2026}", "");
                 self.net.send(NetJob::Status);
@@ -3271,6 +3404,8 @@ impl App {
             | QuickRow::AutoTime
             | QuickRow::Performance
             | QuickRow::FileTransfer
+            | QuickRow::IdleDim
+            | QuickRow::Hardcore
             | QuickRow::Rumble => {}
         }
     }
@@ -3352,6 +3487,7 @@ impl App {
                     s.syncthing = false;
                     s.achievements = false;
                     self.file_server = None;
+                    self.file_pin = None;
                     crate::cheevos::enable(false);
                     self.cheevos_login = CheevosLogin::Waiting;
                     self.net.send(NetJob::WifiDown);
@@ -3380,10 +3516,26 @@ impl App {
             QuickRow::Achievements => {
                 s.achievements = !s.achievements;
                 crate::cheevos::enable(s.achievements);
+                crate::cheevos::set_hardcore(s.hardcore);
                 self.cheevos_login = CheevosLogin::Waiting;
                 if s.achievements && !s.wifi {
                     s.wifi = true;
                     self.net.send(NetJob::WifiUp);
+                }
+            }
+            QuickRow::IdleDim => s.idle_dim = !s.idle_dim,
+            QuickRow::Hardcore => {
+                s.hardcore = !s.hardcore;
+                crate::cheevos::set_hardcore(s.hardcore);
+                if s.hardcore {
+                    s.achievements = true;
+                    crate::cheevos::enable(true);
+                    if matches!(self.phase, Phase::Playing { .. }) {
+                        self.say(
+                            "Hardcore on after eject",
+                            "Rewind, states and cheats stay off",
+                        );
+                    }
                 }
             }
             QuickRow::Syncthing => {
@@ -3410,7 +3562,9 @@ impl App {
             | QuickRow::Files
             | QuickRow::Tools
             | QuickRow::System
-            | QuickRow::WifiStatus => return,
+            | QuickRow::WifiStatus
+            | QuickRow::Screenshots
+            | QuickRow::Update => return,
         }
         if QuickRow::LIGHTS.contains(&row) {
             let lights = self.lights();
@@ -3978,6 +4132,7 @@ impl App {
         }
         self.cheevos_tick();
         self.clock_tick();
+        self.idle_tick();
         let offer = self.undo_label();
         if let Some(p) = &mut self.polaroids {
             p.set_undo(offer);
@@ -5674,7 +5829,7 @@ impl App {
     }
 
     fn open_polaroids(&mut self) {
-        if self.link_active() {
+        if self.link_active() || self.state.hardcore {
             return self.refuse();
         }
         let entries = self.entries();
@@ -5813,6 +5968,9 @@ impl App {
     }
 
     fn save_state(&mut self) {
+        if self.state.hardcore {
+            return self.refuse();
+        }
         let (Some(ring), Some(snapshot)) = (self.ring(), &self.snapshot) else {
             return;
         };
@@ -6144,6 +6302,8 @@ fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue>
         QuickRow::Wifi => Some(QuickValue::flag(s.wifi)),
         QuickRow::Syncthing => Some(QuickValue::flag(s.syncthing)),
         QuickRow::Achievements => Some(QuickValue::flag(s.achievements)),
+        QuickRow::IdleDim => Some(QuickValue::flag(s.idle_dim)),
+        QuickRow::Hardcore => Some(QuickValue::flag(s.hardcore)),
         QuickRow::AutoTime => Some(QuickValue::flag(s.auto_time)),
         QuickRow::FileTransfer => None,
         QuickRow::Performance => Some(match s.cpu {
@@ -6221,6 +6381,8 @@ fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue>
         | QuickRow::Files
         | QuickRow::Tools
         | QuickRow::System
-        | QuickRow::WifiStatus => None,
+        | QuickRow::WifiStatus
+        | QuickRow::Screenshots
+        | QuickRow::Update => None,
     }
 }

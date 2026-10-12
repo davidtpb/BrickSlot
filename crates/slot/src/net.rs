@@ -26,6 +26,8 @@ pub enum NetJob {
         ssid: String,
         psk: String,
     },
+    /// Fetch the latest GitHub release onto the card.
+    Update,
 }
 
 /// A network in range.
@@ -375,6 +377,10 @@ fn work(
                 }
                 None => eprintln!("slot: net: no time server answered"),
             },
+            NetJob::Update => {
+                let (title, detail) = crate::update::run(root);
+                say(&title, detail);
+            }
         }
     }
 }

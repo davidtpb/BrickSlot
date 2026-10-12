@@ -253,6 +253,7 @@ fn screen_opens_a_page_of_its_own_and_b_comes_back_to_it() {
         QuickRow::GbShader,
         QuickRow::ColourCorrection,
         QuickRow::GbPalettes,
+        QuickRow::IdleDim,
         QuickRow::Brightness,
     ] {
         press(&mut a, Btn::Down);
@@ -768,6 +769,19 @@ fn file_transfer_needs_wifi_and_is_never_left_on_from_the_menu_alone() {
         a.take_message().map(|m| m.0),
         Some("Turn on Wi-Fi first".to_string())
     );
+}
+
+#[test]
+fn hardcore_turns_off_rewind_and_states() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Hardcore);
+    assert_eq!(a.quick_value(QuickRow::Hardcore), Some(QuickValue::Off));
+    press(&mut a, Btn::Right);
+    assert_eq!(a.quick_value(QuickRow::Hardcore), Some(QuickValue::On));
+    assert!(read_slot_state(d.path()).hardcore);
+    assert!(!a.may_rewind());
+    assert!(!a.may_load_state());
+    assert!(!a.may_fast_forward());
 }
 
 #[test]

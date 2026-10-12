@@ -10,10 +10,13 @@ mod gba;
 pub mod ini;
 pub mod library;
 mod lights;
+pub mod patch;
 mod platform;
 mod ring;
+pub mod rom;
 pub mod rzip;
 mod scan;
+pub mod zip;
 mod search;
 mod slot_state;
 mod stamp;
@@ -26,7 +29,7 @@ pub use core::{
     core_for, core_for_platform, read_selected_cores, write_selected_core, Core, SELECTED_CORE_FILE,
 };
 pub use gb_palette::GbPalette;
-pub use gba::{header_clean, header_code, header_title, header_title_code};
+pub use gba::{header_clean, header_code, header_from_bytes, header_title, header_title_code};
 pub use lights::{LightColour, LightEffect, LightLevel, LightMode};
 pub use platform::Platform;
 pub use ring::{StateEntry, StateRing, RING_MAX};

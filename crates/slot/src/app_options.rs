@@ -116,15 +116,13 @@ impl App {
 
     fn pause_rows(&self) -> Vec<PauseRow> {
         let mut rows = vec![PauseRow::Resume];
-        if self.left_off.is_some() {
+        if self.left_off.is_some() && !self.state.hardcore {
             rows.push(PauseRow::LeftOff);
         }
-        rows.extend([
-            PauseRow::SaveState,
-            PauseRow::LoadState,
-            PauseRow::Options,
-            PauseRow::Quit,
-        ]);
+        if !self.state.hardcore {
+            rows.extend([PauseRow::SaveState, PauseRow::LoadState]);
+        }
+        rows.extend([PauseRow::Options, PauseRow::Quit]);
         rows
     }
 
@@ -201,6 +199,10 @@ impl App {
 
     /// The cheats to turn on, when they have changed.
     pub fn take_cheats(&mut self) -> Option<Vec<String>> {
+        if self.state.hardcore {
+            return std::mem::take(&mut self.running.cheats_dirty)
+                .then_some(Vec::new());
+        }
         if !std::mem::take(&mut self.running.cheats_dirty) {
             return None;
         }

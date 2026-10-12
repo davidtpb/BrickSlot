@@ -495,7 +495,11 @@ impl Worker {
             rom.display(),
             crate::boot_time::ms()
         );
-        if let Err(e) = core.load(&rom) {
+        let loaded = match slot_store::rom::open(&rom) {
+            Ok(bytes) => core.load_bytes(&rom, bytes),
+            Err(_) => core.load(&rom),
+        };
+        if let Err(e) = loaded {
             eprintln!("slot: {e}");
             self.shared
                 .state

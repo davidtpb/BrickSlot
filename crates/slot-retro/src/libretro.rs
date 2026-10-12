@@ -628,8 +628,13 @@ impl RetroCore for LibretroCore {
     }
 
     fn load(&mut self, rom: &Path) -> Result<(), CoreError> {
+        let bytes = std::fs::read(rom)?;
+        self.load_bytes(rom, bytes)
+    }
+
+    fn load_bytes(&mut self, rom: &Path, bytes: Vec<u8>) -> Result<(), CoreError> {
         self.unload();
-        self.rom = std::fs::read(rom)?;
+        self.rom = bytes;
         self.rom_path = Some(
             CString::new(rom.as_os_str().as_encoded_bytes())
                 .map_err(|_| CoreError::Load("rom path contains a nul".into()))?,

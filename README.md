@@ -20,7 +20,8 @@ run on the TrimUI Brick Pro as well. Everything that works on the Anbernics stil
 Has support for GBA, GBC, and GB titles only.
 
 > [!IMPORTANT]
-> ROMs must be unzipped. brickslot does not read `.zip` or `.7z` files.
+> Put `.gb`, `.gbc`, `.gba` or `.zip` ROMs in `Games/GBA`, `Games/GB` and `Games/GBC`.
+> A `.ips` or `.bps` beside the ROM (or zip) is applied at load. `.7z` is not read.
 
 slot's user guide at [slot-cfw.fyi](https://slot-cfw.fyi) applies to brickslot, apart from
 TrimUI setup, which is covered below.

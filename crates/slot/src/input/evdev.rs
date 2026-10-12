@@ -10,6 +10,8 @@ pub const EV_SW: u16 = 0x05;
 pub const SW_LID: u16 = 0x00;
 
 pub const EV_ABS: u16 = 0x03;
+pub const ABS_X: u16 = 0x00;
+pub const ABS_Y: u16 = 0x01;
 pub const ABS_HAT0X: u16 = 0x10;
 pub const ABS_HAT0Y: u16 = 0x11;
 pub const ABS_Z: u16 = 0x02;
@@ -129,6 +131,83 @@ impl Hat {
             _ => return Vec::new(),
         };
         let (was, now) = (*held, ev.value.signum());
+        if now == was {
+            return Vec::new();
+        }
+        *held = now;
+        let btn = |v: i32| ends[usize::from(v > 0)];
+        let mut out = Vec::new();
+        if was != 0 {
+            out.push(RawEvent::Up(btn(was)));
+        }
+        if now != 0 {
+            out.push(RawEvent::Down(btn(now)));
+        }
+        out
+    }
+}
+
+/// Left stick as a D-pad, using each axis's reported centre and deadzone.
+pub struct Stick {
+    x: i32,
+    y: i32,
+    x_mid: i32,
+    y_mid: i32,
+    x_dead: i32,
+    y_dead: i32,
+    live: bool,
+}
+
+impl Default for Stick {
+    fn default() -> Self {
+        Stick::new(0, 0, 0, 0, 0, 0)
+    }
+}
+
+impl Stick {
+    pub fn new(xmin: i32, xmax: i32, xflat: i32, ymin: i32, ymax: i32, yflat: i32) -> Self {
+        let live = xmax > xmin && ymax > ymin;
+        let span = |min: i32, max: i32, flat: i32| {
+            let mid = min / 2 + max / 2;
+            let dead = flat.abs().max((max - min).abs() / 6).max(1);
+            (mid, dead)
+        };
+        let (x_mid, x_dead) = span(xmin, xmax, xflat);
+        let (y_mid, y_dead) = span(ymin, ymax, yflat);
+        Stick {
+            x: 0,
+            y: 0,
+            x_mid,
+            y_mid,
+            x_dead,
+            y_dead,
+            live,
+        }
+    }
+
+    pub fn feed(&mut self, ev: Ev) -> Vec<RawEvent> {
+        if !self.live {
+            return Vec::new();
+        }
+        let (held, mid, dead, ends) = match ev.code {
+            ABS_X => (
+                &mut self.x,
+                self.x_mid,
+                self.x_dead,
+                [Btn::Left, Btn::Right],
+            ),
+            ABS_Y => (&mut self.y, self.y_mid, self.y_dead, [Btn::Up, Btn::Down]),
+            _ => return Vec::new(),
+        };
+        let delta = ev.value - mid;
+        let now = if delta <= -dead {
+            -1
+        } else if delta >= dead {
+            1
+        } else {
+            0
+        };
+        let was = *held;
         if now == was {
             return Vec::new();
         }

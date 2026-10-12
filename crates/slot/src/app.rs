@@ -676,7 +676,6 @@ impl App {
         }
         crate::cheevos::enable(app.state.achievements);
         crate::cheevos::set_hardcore(app.state.hardcore);
-        crate::cheevos::set_hardcore(app.state.hardcore);
         if app.state.clock_set {
             app.start();
         } else {
@@ -3523,10 +3522,14 @@ impl App {
             QuickRow::IdleDim => s.idle_dim = !s.idle_dim,
             QuickRow::Hardcore => {
                 s.hardcore = !s.hardcore;
-                crate::cheevos::set_hardcore(s.hardcore);
                 if s.hardcore {
                     s.achievements = true;
                     crate::cheevos::enable(true);
+                    self.cheevos_login = CheevosLogin::Waiting;
+                    if !s.wifi {
+                        s.wifi = true;
+                        self.net.send(NetJob::WifiUp);
+                    }
                     if matches!(self.phase, Phase::Playing { .. }) {
                         self.say(
                             "Hardcore on after eject",
@@ -3534,6 +3537,7 @@ impl App {
                         );
                     }
                 }
+                crate::cheevos::set_hardcore(s.hardcore);
             }
             QuickRow::Syncthing => {
                 s.syncthing = !s.syncthing;

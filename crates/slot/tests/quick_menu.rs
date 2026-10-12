@@ -773,12 +773,18 @@ fn file_transfer_needs_wifi_and_is_never_left_on_from_the_menu_alone() {
 
 #[test]
 fn hardcore_turns_off_rewind_and_states() {
+    use slot::net::NetJob;
     let (d, mut a, _) = on_carousel();
     open_at(&mut a, QuickRow::Hardcore);
     assert_eq!(a.quick_value(QuickRow::Hardcore), Some(QuickValue::Off));
     press(&mut a, Btn::Right);
     assert_eq!(a.quick_value(QuickRow::Hardcore), Some(QuickValue::On));
-    assert!(read_slot_state(d.path()).hardcore);
+    assert_eq!(a.quick_value(QuickRow::Achievements), Some(QuickValue::On));
+    assert_eq!(a.quick_value(QuickRow::Wifi), Some(QuickValue::On));
+    assert_eq!(a.net_jobs(), [NetJob::WifiUp]);
+    let saved = read_slot_state(d.path());
+    assert!(saved.hardcore);
+    assert!(saved.achievements);
     assert!(!a.may_rewind());
     assert!(!a.may_load_state());
     assert!(!a.may_fast_forward());

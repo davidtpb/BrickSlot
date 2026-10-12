@@ -6,6 +6,7 @@
 
 use std::collections::VecDeque;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
 
 pub const RC_OK: c_int = 0;
@@ -59,6 +60,8 @@ type Read = Box<dyn Fn(u32, &mut [u8]) -> usize + Send + Sync>;
 static EVENTS: Mutex<VecDeque<Event>> = Mutex::new(VecDeque::new());
 static MEMORY: RwLock<Option<(Console, Read)>> = RwLock::new(None);
 static CREATED: OnceLock<bool> = OnceLock::new();
+/// Kept even before the client exists, then applied as soon as it does.
+static HARDCORE: AtomicBool = AtomicBool::new(false);
 static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
 static APP: Mutex<String> = Mutex::new(String::new());
 
@@ -113,7 +116,11 @@ fn cstring(s: &str) -> CString {
 /// RetroAchievements asks of every emulator, e.g. "brickslot/1.0".
 pub fn start(app: &str) -> bool {
     *APP.lock().unwrap_or_else(|e| e.into_inner()) = app.to_string();
-    *CREATED.get_or_init(|| unsafe { slot_rc_create() } != 0)
+    let created = *CREATED.get_or_init(|| unsafe { slot_rc_create() } != 0);
+    if created {
+        apply_hardcore();
+    }
+    created
 }
 
 fn started() -> bool {
@@ -168,9 +175,14 @@ pub fn do_frame() {
 }
 
 pub fn set_hardcore(on: bool) {
+    HARDCORE.store(on, Ordering::Relaxed);
     if started() {
-        unsafe { slot_rc_set_hardcore(on as c_int) };
+        apply_hardcore();
     }
+}
+
+fn apply_hardcore() {
+    unsafe { slot_rc_set_hardcore(c_int::from(HARDCORE.load(Ordering::Relaxed))) };
 }
 
 pub fn idle() {

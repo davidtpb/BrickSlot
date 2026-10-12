@@ -39,6 +39,7 @@ pub mod root;
 pub mod search;
 pub mod session;
 pub mod state_writer;
+pub mod sync;
 pub mod sysinfo;
 pub mod thumb;
 pub mod video_mode;

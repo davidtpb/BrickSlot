@@ -133,6 +133,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::Labels,
             QuickRow::BtDevices,
             QuickRow::EmulatorSettings,
+            QuickRow::DeviceSync,
             QuickRow::JoinNetwork,
             QuickRow::WifiStatus
         ]

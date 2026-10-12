@@ -320,6 +320,11 @@ pub enum Phase {
         at: usize,
         scanning: bool,
     },
+    /// Device Sync: swapping saves with another handheld.
+    Sync {
+        roms: bool,
+        news: Option<crate::sync::SyncNews>,
+    },
     /// Typing the password for a network.
     Password {
         ssid: String,
@@ -395,6 +400,7 @@ pub struct App {
     home_stats_at: Millis,
     net: crate::net::Net,
     bt: crate::bt::Bt,
+    sync_job: Option<crate::sync::SyncJob>,
     /// The Bluetooth devices last listed.
     bt_devices: Vec<crate::bt::BtDevice>,
     /// The Home panel's round buttons, and whether they were drawn light.
@@ -559,6 +565,7 @@ impl App {
             home_stats_at: 0,
             net: crate::net::Net::idle(),
             bt: crate::bt::Bt::idle(),
+            sync_job: None,
             bt_devices: Vec::new(),
             home_icons: Vec::new(),
             home_icons_light: false,
@@ -1785,6 +1792,7 @@ impl App {
             Phase::Search => self.search_input(action),
             Phase::Networks { .. } => self.networks_input(action),
             Phase::Bluetooth { .. } => self.bt_input(action),
+            Phase::Sync { .. } => self.sync_input(action),
             Phase::Password { .. } => self.password_input(action),
             Phase::Inserting { .. } if action == Action::Eject => self.eject(),
             Phase::Playing { .. } => match action {
@@ -1897,7 +1905,10 @@ impl App {
             || !self.menu.is_empty()
             || self.inspect
             || self.recent_popup.is_some()
-            || matches!(self.phase, Phase::Networks { .. } | Phase::Bluetooth { .. }))
+            || matches!(
+                self.phase,
+                Phase::Networks { .. } | Phase::Bluetooth { .. } | Phase::Sync { .. }
+            ))
             && self.socket_chrome.is_empty()
     }
 
@@ -1990,7 +2001,10 @@ impl App {
         let core_popup = self
             .core_popup
             .filter(|_| matches!(self.phase, Phase::Shelf));
-        let networks = matches!(self.phase, Phase::Networks { .. } | Phase::Bluetooth { .. });
+        let networks = matches!(
+            self.phase,
+            Phase::Networks { .. } | Phase::Bluetooth { .. } | Phase::Sync { .. }
+        );
         let menu = !self.menu.is_empty();
         let on_shelf = matches!(self.phase, Phase::Shelf);
         let inspecting = self.inspect && on_shelf;
@@ -2111,6 +2125,17 @@ impl App {
         }
         if menu && self.power_menu.is_none() {
             self.menu_lines(&mut lines);
+        }
+        if let Phase::Sync { .. } = &self.phase {
+            lines[slot_ui::POPUP_TITLE_SLOT] = ("Device Sync".into(), true);
+            for (i, row) in self.sync_rows().into_iter().enumerate() {
+                lines[slot_ui::option_slot(i)] = (row, true);
+            }
+            let hint = match self.sync_job.is_some() {
+                true => key("B", "Stop"),
+                false => key("B", "Close    X  ROMs    A  Start"),
+            };
+            lines[slot_ui::POPUP_CLOSE_SLOT] = (hint, true);
         }
         if let Phase::Bluetooth { list, at, scanning } = &self.phase {
             let (first, shown, _) = popup_window(list.len(), *at);
@@ -2826,6 +2851,105 @@ impl App {
         }
     }
 
+    fn sync_rows(&self) -> Vec<String> {
+        use crate::sync::SyncNews;
+        let Phase::Sync { roms, news } = &self.phase else {
+            return Vec::new();
+        };
+        let status = match news {
+            None => "Start Device Sync on both handhelds".to_string(),
+            Some(SyncNews::Looking) => "Looking for the other handheld\u{2026}".into(),
+            Some(SyncNews::Found(name)) => format!("Syncing with {name}\u{2026}"),
+            Some(SyncNews::Moving { got, .. }) => format!("Received {got} files\u{2026}"),
+            Some(SyncNews::Done { sent, got }) => format!("Done: sent {sent}, received {got}"),
+            Some(SyncNews::Failed(why)) => why.clone(),
+        };
+        vec![
+            status,
+            "Saves, states, cheats and settings".into(),
+            format!("ROMs   {}", if *roms { "On" } else { "Off" }),
+        ]
+    }
+
+    fn device_name() -> String {
+        match slot_power::Board::detect() {
+            slot_power::Board::TrimUiBrick => "Brick",
+            slot_power::Board::TrimUiBrickPro => "Brick Pro",
+            slot_power::Board::TrimUiSmartPro => "Smart Pro",
+            slot_power::Board::Anbernic => "Anbernic",
+        }
+        .to_string()
+    }
+
+    fn sync_input(&mut self, action: Action) {
+        let Phase::Sync { roms, news } = &mut self.phase else {
+            return;
+        };
+        let running = self.sync_job.is_some();
+        match action {
+            Action::GbaDown(Btn::X) if !running => *roms = !*roms,
+            Action::GbaDown(Btn::A) if !running => {
+                let roms = *roms;
+                *news = Some(crate::sync::SyncNews::Looking);
+                let Some(root) = self.root.clone() else {
+                    return;
+                };
+                if !self.state.wifi {
+                    self.state.wifi = true;
+                    self.net.send(NetJob::WifiUp);
+                    self.persist();
+                }
+                let opts = crate::sync::SyncOptions::lan(roms, Self::device_name());
+                self.sync_job = Some(crate::sync::SyncJob::start(&root, opts));
+            }
+            Action::GbaDown(Btn::B) | Action::QuickMenu => {
+                self.sync_job = None;
+                self.phase = Phase::QuickMenu {
+                    row: QuickRow::DeviceSync,
+                };
+            }
+            _ => {}
+        }
+    }
+
+    /// Takes in what the sync has to say, and lets it go once it is over.
+    fn sync_tick(&mut self) {
+        use crate::sync::SyncNews;
+        let Some(job) = &self.sync_job else {
+            return;
+        };
+        let heard: Vec<SyncNews> = job.news.try_iter().collect();
+        let mut over = false;
+        for n in heard {
+            over |= matches!(n, SyncNews::Done { .. } | SyncNews::Failed(_));
+            if let SyncNews::Done { got, .. } = n {
+                if got > 0 {
+                    self.reload_after_sync();
+                }
+            }
+            if let Phase::Sync { news, .. } = &mut self.phase {
+                *news = Some(n);
+            }
+        }
+        if over {
+            self.sync_job = None;
+        }
+    }
+
+    /// Favourites and cart colours may have come from the other device.
+    fn reload_after_sync(&mut self) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        self.favorites = slot_store::library::read_favorites(&root);
+        self.rebuild_favorites();
+        self.say("Device Sync done", "New games show after a restart");
+    }
+
+    pub fn sync_running(&self) -> bool {
+        self.sync_job.is_some()
+    }
+
     fn back_to_join(&mut self) {
         self.phase = Phase::QuickMenu {
             row: QuickRow::JoinNetwork,
@@ -3072,6 +3196,12 @@ impl App {
             QuickRow::Labels => self.download_labels(),
             QuickRow::JoinNetwork => self.open_networks(),
             QuickRow::BtDevices => self.open_bluetooth(),
+            QuickRow::DeviceSync => {
+                self.phase = Phase::Sync {
+                    roms: false,
+                    news: None,
+                }
+            }
             QuickRow::EmulatorSettings => self.open_emulator_settings(Platform::Gba),
             QuickRow::WifiStatus => {
                 self.say("Checking Wi-Fi\u{2026}", "");
@@ -3245,6 +3375,7 @@ impl App {
             | QuickRow::JoinNetwork
             | QuickRow::BtDevices
             | QuickRow::EmulatorSettings
+            | QuickRow::DeviceSync
             | QuickRow::WifiStatus => return,
         }
         if QuickRow::LIGHTS.contains(&row) {
@@ -3486,6 +3617,7 @@ impl App {
         while let Some(found) = self.bt.devices() {
             self.bt_found(found);
         }
+        self.sync_tick();
         if slot_ui::twelve_hour() != self.state.clock_12h {
             slot_ui::set_twelve_hour(self.state.clock_12h);
         }
@@ -4189,7 +4321,7 @@ impl App {
                 backdrop: self.socket_backdrop.filter(|_| self.socket_look()),
             }
             .draw(out),
-            Phase::Networks { .. } | Phase::Bluetooth { .. } => {
+            Phase::Networks { .. } | Phase::Bluetooth { .. } | Phase::Sync { .. } => {
                 match self.socket_backdrop.filter(|_| self.socket_look()) {
                     Some(tex) => out.push(Draw::Tex {
                         x: 0.0,
@@ -4214,6 +4346,7 @@ impl App {
                         scanning: false,
                     } => popup_window(list.len(), *at),
                     Phase::Bluetooth { .. } => (0, 0, None),
+                    Phase::Sync { .. } => (0, self.sync_rows().len(), None),
                     _ => self.networks_window(),
                 };
                 slot_ui::SocketPopup {
@@ -5999,6 +6132,7 @@ fn setting_value(s: &slot_store::SlotState, row: QuickRow) -> Option<QuickValue>
         | QuickRow::JoinNetwork
         | QuickRow::BtDevices
         | QuickRow::EmulatorSettings
+        | QuickRow::DeviceSync
         | QuickRow::WifiStatus => None,
     }
 }

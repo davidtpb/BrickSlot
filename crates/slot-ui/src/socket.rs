@@ -250,7 +250,14 @@ pub(crate) fn status_pill(st: &Status, h: u32) -> UndoFace {
     let (bw, bh) = (hf * 0.82, hf * 0.42);
     let gap = hf * 0.36;
     let wifi_w = if st.wifi { hf * 0.62 } else { 0.0 };
-    let w = (pad * 2.0 + bw + 2.5 + if st.wifi { gap + wifi_w } else { 0.0 }).ceil() as u32;
+    // The charge as a number, ahead of the battery.
+    let label = st.percent.map(|p| format!("{}%", p.min(100)));
+    let text_px = hf * 0.5;
+    let text_w = label
+        .as_deref()
+        .map_or(0.0, |t| run_width(t, text_px) + gap * 0.6);
+    let w =
+        (pad * 2.0 + text_w + bw + 2.5 + if st.wifi { gap + wifi_w } else { 0.0 }).ceil() as u32;
     let mut rgba = vec![0u8; (w * h * 4) as usize];
     rounded_rect(
         &mut rgba,
@@ -264,7 +271,10 @@ pub(crate) fn status_pill(st: &Status, h: u32) -> UndoFace {
         [44, 44, 44],
         1.0,
     );
-    let (x, y) = (pad, (hf - bh) / 2.0);
+    if let Some(t) = &label {
+        draw_run(&mut rgba, w, h, pad, text_px, t, INK_LIGHT);
+    }
+    let (x, y) = (pad + text_w, (hf - bh) / 2.0);
     rounded_rect(&mut rgba, w, h, x, y, x + bw, y + bh, 2.5, INK_LIGHT, 1.0);
     let inset = 1.6;
     rounded_rect(
@@ -912,6 +922,26 @@ mod tests {
         let full = ink(&socket_pill_face(SOCKET_STATUS, "100", true));
         let low = ink(&socket_pill_face(SOCKET_STATUS, "20", true));
         assert!(full > low, "the battery does not fill with its charge");
+        let numbered = socket_pill_face(SOCKET_STATUS, "72", true);
+        let unknown = socket_pill_face(SOCKET_STATUS, "-", true);
+        assert!(numbered.w > unknown.w, "the charge is not written out");
+    }
+
+    #[test]
+    fn a_full_charging_status_with_wifi_stays_clear_of_the_tabs() {
+        let w = |slot, t: &str| socket_pill_face(slot, t, false).w as f32;
+        let tabs = [
+            w(SOCKET_L, "L"),
+            w(socket_tab_slot(0), "GBA"),
+            w(socket_tab_slot(1), "GB"),
+            w(socket_tab_slot(2), "GBC"),
+            w(socket_tab_slot(3), "\u{2605} FAV"),
+            w(SOCKET_R, "R"),
+        ];
+        let total = tabs.iter().sum::<f32>() + GAP * (tabs.len() - 1) as f32;
+        let tabs_end = (OUT_W as f32 + total) / 2.0;
+        let status_x = OUT_W as f32 - EDGE - w(SOCKET_STATUS, "100+w");
+        assert!(status_x > tabs_end + GAP, "{status_x} vs {tabs_end}");
     }
 
     #[test]
